@@ -60,11 +60,17 @@ sources:
     rate_limit_rps: 8          # margen bajo el límite del orden de 10 req/s de la SEC
     cache_dir: .cache/sec      # caché agresiva: los datos solo cambian con un filing nuevo
 
-  stooq:
-    base_url: https://stooq.com/q/d/l/
-    symbol_suffix: ".us"       # SPY -> spy.us
-    # Solo cierre CRUDO. Nunca guardar el cierre ajustado como serie (§9.1).
-    series_suffix: ":close_raw"
+  # Stooq quedó descartado: robots.txt = `Disallow: /` y reto JS anti-bot (§4.2, §4.3).
+  yfinance:
+    history_start: "2015-01-01"   # ventana completa en cada ejecución, ver nota abajo
+    currency: USD
+    # Yahoo devuelve OHLC, volumen y dividendos AJUSTADOS por split, retroactivamente.
+    # El ingester reconstruye el crudo antes de guardar (§9.1). `auto_adjust=False` no
+    # basta: solo desactiva el ajuste por dividendos.
+    #
+    # La ventana se refetchea entera cada vez, no de forma incremental: un split nuevo
+    # reescala todas las barras pasadas que sirve Yahoo, y solo una ventana que abarque
+    # el split permite recuperar el crudo.
 
   ibkr_flex:
     base_url: https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService

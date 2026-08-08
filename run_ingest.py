@@ -18,21 +18,32 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Callable
+from typing import Any, Callable
 
 from core.config import Settings, load_settings
 from core.logging_setup import configure_logging, get_logger
 from db import loader
 from ingest.base import Ingester
 from ingest.fred import FredIngester
+from ingest.prices import PricesIngester
 
 log = get_logger(__name__)
 
 # Registry: name -> (availability predicate, constructor). The predicate keeps the
 # "skip, don't crash" decision next to the ingester that owns its prerequisites.
-# Grows with each phase (phase 1: fred, prices, ibkr_flex).
+# Grows with each phase (phase 1 still to come: ibkr_flex).
 INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Ingester]]] = {
     "fred": (FredIngester.is_available, FredIngester),
+    "prices": (PricesIngester.is_available, PricesIngester),
+}
+
+# Where non-observation rows go. An ingester returning a table name absent from this
+# map is a programming error and fails loudly rather than dropping the rows.
+TABLE_LOADERS: dict[str, Callable[[Any, list[dict]], int]] = {
+    "corporate_actions": loader.upsert_corporate_actions,
+    "companies": loader.upsert_companies,
+    "filings": loader.upsert_filings,
+    "events": loader.upsert_events,
 }
 
 
@@ -130,6 +141,13 @@ def run(args: argparse.Namespace) -> int:
                 df = ingester.fetch()
                 rows = loader.upsert_observations(conn, df)
                 log.info("Ingester '%s' upserted %d rows.", name, rows, extra={"source": name})
+                for table, table_rows in ingester.fetch_tables().items():
+                    if table not in TABLE_LOADERS:
+                        raise KeyError(
+                            f"Ingester '{name}' returned rows for unknown table '{table}'. "
+                            f"Known: {sorted(TABLE_LOADERS)}."
+                        )
+                    TABLE_LOADERS[table](conn, table_rows)
             except Exception:
                 # One broken source must not abort the rest of the run, but the failure
                 # is logged with a traceback and turns the exit code non-zero, so the

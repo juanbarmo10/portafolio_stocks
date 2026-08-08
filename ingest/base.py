@@ -87,6 +87,18 @@ class Ingester(ABC):
         """Fetch data and return a DataFrame with :data:`OBSERVATION_COLUMNS`."""
         raise NotImplementedError
 
+    def fetch_tables(self) -> dict[str, list[dict]]:
+        """Rows destined for tables other than ``observations``, keyed by table name.
+
+        Not every fact is a time series. Corporate actions, filings and trades have their
+        own tables (section 6), and they usually arrive in the *same* upstream response as
+        the observations — so they are returned by the same ingester rather than fetched
+        twice.
+
+        Called by the runner right after :meth:`fetch`. Default: nothing.
+        """
+        return {}
+
     @classmethod
     def validate(cls, df: pd.DataFrame) -> pd.DataFrame:
         """Assert the DataFrame honors the observation contract; fail loudly otherwise.

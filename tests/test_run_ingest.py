@@ -7,6 +7,7 @@ import pytest
 
 import run_ingest
 from core import config
+from ingest.base import Ingester
 
 
 @pytest.fixture()
@@ -56,13 +57,23 @@ def test_fred_is_registered():
     assert set(run_ingest.select_ingesters(["fred"])) == {"fred"}
 
 
-def _stub(df=None, error: Exception | None = None):
-    """A registry entry: always available, fetch() returns df or raises."""
-    class _Stub:
+def _stub(df=None, error: Exception | None = None, tables: dict | None = None):
+    """A registry entry: always available, fetch() returns df or raises.
+
+    Subclasses Ingester so the stub inherits the real fetch_tables() default; a bare
+    duck-typed object would have hidden a missing hook rather than exercising it.
+    """
+    class _Stub(Ingester):
+        source = "stub"
+
         def fetch(self):
             if error is not None:
                 raise error
             return df
+
+        def fetch_tables(self):
+            return tables or {}
+
     return (lambda _s: True, lambda _s: _Stub())
 
 
@@ -90,6 +101,40 @@ def test_ingester_without_prerequisites_is_skipped_not_failed(isolated_db, monke
         assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_side_tables_are_routed_to_their_loader(isolated_db, monkeypatch):
+    """An ingester's non-observation rows reach their own table (e.g. corporate actions)."""
+    df = pd.DataFrame([{
+        "source": "yfinance", "series_id": "AAPL:close_raw", "ts": "2026-01-02",
+        "ts_release": "2026-01-02", "value": 499.23,
+    }])
+    actions = [{
+        "action_id": "AAPL:split:2020-08-31", "cik": None, "ticker": "AAPL",
+        "kind": "split", "ex_date": "2020-08-31T00:00:00+00:00", "ratio": 4.0,
+        "amount": None, "currency": None, "source": "yfinance",
+    }]
+    monkeypatch.setattr(
+        run_ingest, "INGESTERS", {"prices": _stub(df, tables={"corporate_actions": actions})}
+    )
+    assert run_ingest.main([]) == 0
+
+    from db import loader
+    conn = loader.connect(isolated_db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM corporate_actions").fetchone()[0] == 1
+        assert conn.execute("SELECT ratio FROM corporate_actions").fetchone()[0] == 4.0
+    finally:
+        conn.close()
+
+
+def test_rows_for_an_unknown_table_fail_loudly(isolated_db, monkeypatch):
+    """Routing rows to a table with no loader must raise, never drop them silently."""
+    df = pd.DataFrame(columns=["source", "series_id", "ts", "ts_release", "value"])
+    monkeypatch.setattr(
+        run_ingest, "INGESTERS", {"x": _stub(df, tables={"not_a_table": [{"a": 1}]})}
+    )
+    assert run_ingest.main([]) == 1
 
 
 def test_a_failing_source_does_not_abort_the_run_but_sets_exit_code(isolated_db, monkeypatch):

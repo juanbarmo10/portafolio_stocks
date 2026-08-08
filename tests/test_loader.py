@@ -179,9 +179,9 @@ def test_reference_tables_are_idempotent(conn):
         "period_end": "2025-09-27", "filed_date": "2026-02-15", "is_amended": 1, "url": None,
     }])
     loader.upsert_corporate_actions(conn, [{
-        "action_id": "AAPL-SPLIT-2020", "cik": "0000320193", "kind": "split",
-        "ex_date": "2020-08-31", "ratio": 4.0, "amount": None, "currency": "USD",
-        "source": "stooq",
+        "action_id": "AAPL-SPLIT-2020", "cik": "0000320193", "ticker": "AAPL",
+        "kind": "split", "ex_date": "2020-08-31", "ratio": 4.0, "amount": None,
+        "currency": "USD", "source": "yfinance",
     }])
     loader.upsert_events(conn, [{
         "event_id": "AAPL-EARNINGS-2026Q1", "category": "earnings", "cik": "0000320193",

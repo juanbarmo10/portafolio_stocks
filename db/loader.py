@@ -47,7 +47,7 @@ OBSERVATION_COLUMNS = ["source", "series_id", "ts", "ts_release", "value"]
 COMPANY_COLUMNS = ["cik", "ticker", "name", "sector", "thesis_category", "first_seen", "status"]
 FILING_COLUMNS = ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url"]
 CORPORATE_ACTION_COLUMNS = [
-    "action_id", "cik", "kind", "ex_date", "ratio", "amount", "currency", "source",
+    "action_id", "cik", "ticker", "kind", "ex_date", "ratio", "amount", "currency", "source",
 ]
 EVENT_COLUMNS = ["event_id", "category", "cik", "ts", "is_estimated", "label", "payload"]
 TRADE_COLUMNS = [

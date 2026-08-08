@@ -164,7 +164,7 @@ Requiere Python 3.11+.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"          # añade extras según la fase: ibkr, app, postgres
+pip install -e ".[dev,prices]"   # añade extras según la fase: ibkr, app, postgres
 
 cp config/.env.example config/.env
 cp config/settings.local.yaml.example config/settings.local.yaml
@@ -248,7 +248,7 @@ o a medias.
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 | Andamiaje: esquema, adaptador de BD, loader idempotente, config, logging, CI | ✅ |
-| 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | macro ✅, resto pendiente |
+| 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | macro ✅, precios ✅, resto pendiente |
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor | pendiente |
 | 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | pendiente |
 | 4 | Alertas Telegram y validación estadística | pendiente |

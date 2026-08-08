@@ -59,9 +59,15 @@ CREATE INDEX IF NOT EXISTS idx_filings_cik_filed ON filings(cik, filed_date DESC
 -- Corporate actions stored SEPARATELY from raw prices (section 9.1). The adjusted series
 -- is rebuilt on demand for a given as-of date, applying only ex_date <= that date; storing
 -- a pre-adjusted close would bake future information into every past point.
+--
+-- WHY cik IS NULLABLE HERE, unlike section 6's DDL: the level-1/2 market references are
+-- ETFs (SPY, RSP, the sector SPDRs), which have no company CIK to resolve to, and section
+-- 9.3 forbids guessing one. `trades` and `cash_transactions` already pair a nullable cik
+-- with a NOT NULL ticker for the same reason; this table now matches its siblings.
 CREATE TABLE IF NOT EXISTS corporate_actions (
     action_id   TEXT PRIMARY KEY,
-    cik         TEXT NOT NULL,
+    cik         TEXT,                       -- NULL for ETFs and unresolved tickers (9.3)
+    ticker      TEXT NOT NULL,
     kind        TEXT NOT NULL,              -- 'split'|'dividend'|'spinoff'|'merger'|'delisting'
     ex_date     TEXT NOT NULL,
     ratio       REAL,                       -- splits
@@ -69,7 +75,7 @@ CREATE TABLE IF NOT EXISTS corporate_actions (
     currency    TEXT,
     source      TEXT NOT NULL               -- which provider said so (section 9.8)
 );
-CREATE INDEX IF NOT EXISTS idx_corpact_cik_ex ON corporate_actions(cik, ex_date);
+CREATE INDEX IF NOT EXISTS idx_corpact_ticker_ex ON corporate_actions(ticker, ex_date);
 
 -- Dated-event calendar: macro releases, earnings dates, FOMC, catalysts.
 CREATE TABLE IF NOT EXISTS events (

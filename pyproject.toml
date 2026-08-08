@@ -24,6 +24,14 @@ dependencies = [
 ibkr = [
     "ibflex>=0.15,<1",
 ]
+# Phase 1: daily prices and corporate actions. An optional extra, not a core dependency,
+# because it is an unofficial library over endpoints with no contract (section 4.3) —
+# the parsers are pure and tested against frozen fixtures, so the suite runs without it.
+# Storing RAW prices is what keeps this replaceable: the stored history outlives the
+# library (RESEARCH.md §2.2).
+prices = [
+    "yfinance>=0.2,<2",
+]
 # Phase 1 UI. Multipage from the start via st.navigation (section 7).
 app = [
     "streamlit>=1.30,<2",
