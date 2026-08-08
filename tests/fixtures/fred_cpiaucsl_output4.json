@@ -1,0 +1,53 @@
+{
+  "_fixture_note": "HAND-BUILT to the documented shape of FRED series/observations with output_type=4 (initial release only). It is NOT a captured response: FRED requires an API key, which is not configured yet. REPLACE with a real captured response once FRED_API_KEY exists (CLAUDE.md section 10: frozen fixtures). Values are realistic CPIAUCSL index levels but must not be used as data. Deliberately includes: (a) a reference date published weeks later, which is the look-ahead trap of section 9.4; (b) FRED's '.' missing sentinel; (c) the same reference date twice with different realtime_start, to pin the earliest-release-wins rule.",
+  "realtime_start": "2021-01-01",
+  "realtime_end": "2021-12-31",
+  "observation_start": "2021-01-01",
+  "observation_end": "2021-12-31",
+  "units": "lin",
+  "output_type": 4,
+  "file_type": "json",
+  "order_by": "observation_date",
+  "sort_order": "asc",
+  "count": 6,
+  "offset": 0,
+  "limit": 100000,
+  "observations": [
+    {
+      "realtime_start": "2021-02-10",
+      "realtime_end": "9999-12-31",
+      "date": "2021-01-01",
+      "value": "262.231"
+    },
+    {
+      "realtime_start": "2021-03-10",
+      "realtime_end": "9999-12-31",
+      "date": "2021-02-01",
+      "value": "263.014"
+    },
+    {
+      "realtime_start": "2021-04-13",
+      "realtime_end": "9999-12-31",
+      "date": "2021-03-01",
+      "value": "264.877"
+    },
+    {
+      "realtime_start": "2021-05-12",
+      "realtime_end": "9999-12-31",
+      "date": "2021-04-01",
+      "value": "267.054"
+    },
+    {
+      "realtime_start": "2021-06-10",
+      "realtime_end": "9999-12-31",
+      "date": "2021-05-01",
+      "value": "."
+    },
+    {
+      "realtime_start": "2021-07-13",
+      "realtime_end": "9999-12-31",
+      "date": "2021-04-01",
+      "value": "267.999"
+    }
+  ]
+}

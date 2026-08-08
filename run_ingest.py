@@ -9,8 +9,9 @@ Usage:
     python run_ingest.py                    # run the registered ingesters
     python run_ingest.py --only fred sec    # run a subset
 
-Phase 0 registers no ingesters yet: the scaffold has to stand on its own before the
-first data source lands (section 8, "no advancing without the previous phase working").
+An ingester whose prerequisites are missing (typically a secret) is **skipped with a
+warning**, not treated as a failure: a pipeline that refuses to run because one optional
+key is unset would block the sources that do work.
 """
 
 from __future__ import annotations
@@ -19,17 +20,20 @@ import argparse
 import sys
 from typing import Callable
 
-import pandas as pd
-
-from core.config import load_settings
+from core.config import Settings, load_settings
 from core.logging_setup import configure_logging, get_logger
 from db import loader
+from ingest.base import Ingester
+from ingest.fred import FredIngester
 
 log = get_logger(__name__)
 
-# Registry of ingesters: name -> zero-argument callable returning an observations
-# DataFrame. Populated as each phase lands (phase 1: fred, prices, ibkr_flex).
-INGESTERS: dict[str, Callable[[], pd.DataFrame]] = {}
+# Registry: name -> (availability predicate, constructor). The predicate keeps the
+# "skip, don't crash" decision next to the ingester that owns its prerequisites.
+# Grows with each phase (phase 1: fred, prices, ibkr_flex).
+INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Ingester]]] = {
+    "fred": (FredIngester.is_available, FredIngester),
+}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -49,8 +53,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def select_ingesters(only: list[str] | None) -> dict[str, Callable[[], pd.DataFrame]]:
-    """Return the ingesters to run, failing loudly on an unknown name.
+def select_ingesters(only: list[str] | None) -> dict[str, tuple]:
+    """Return the registry entries to run, failing loudly on an unknown name.
 
     Raises:
         SystemExit: If a requested ingester is not registered — a typo must not
@@ -63,6 +67,24 @@ def select_ingesters(only: list[str] | None) -> dict[str, Callable[[], pd.DataFr
         available = sorted(INGESTERS) or ["<none registered yet>"]
         raise SystemExit(f"Unknown ingester(s): {unknown}. Available: {available}")
     return {name: INGESTERS[name] for name in only}
+
+
+def available_ingesters(selected: dict[str, tuple], settings: Settings) -> dict[str, Ingester]:
+    """Build the selected ingesters whose prerequisites are satisfied.
+
+    A missing secret is a skip with a warning, not an error: the sources that can run
+    should still run. What must never happen is a silent skip, so every one is logged.
+    """
+    built: dict[str, Ingester] = {}
+    for name, (is_available, construct) in selected.items():
+        if not is_available(settings):
+            log.warning(
+                "Skipping '%s': prerequisites not configured (see config/.env.example).",
+                name, extra={"source": name},
+            )
+            continue
+        built[name] = construct(settings)
+    return built
 
 
 def run(args: argparse.Namespace) -> int:
@@ -80,19 +102,32 @@ def run(args: argparse.Namespace) -> int:
     try:
         if not selected:
             log.info(
-                "No ingesters registered yet (phase 0 scaffold). Schema is applied and "
-                "the database is ready at %s.", settings.db_path
+                "No ingesters registered. Schema is applied and the database is ready at %s.",
+                settings.db_path,
             )
             return 0
 
+        ingesters = available_ingesters(selected, settings)
+
         if args.dry_run:
-            log.info("Dry run: would execute %s. No network calls made.", sorted(selected))
+            log.info(
+                "Dry run: would execute %s (skipped for missing prerequisites: %s). "
+                "No network calls made.",
+                sorted(ingesters), sorted(set(selected) - set(ingesters)),
+            )
             return 0
 
+        if not ingesters:
+            log.error(
+                "None of the selected ingesters (%s) has its prerequisites configured.",
+                sorted(selected),
+            )
+            return 1
+
         failures: list[str] = []
-        for name, fetch in selected.items():
+        for name, ingester in ingesters.items():
             try:
-                df = fetch()
+                df = ingester.fetch()
                 rows = loader.upsert_observations(conn, df)
                 log.info("Ingester '%s' upserted %d rows.", name, rows, extra={"source": name})
             except Exception:

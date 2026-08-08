@@ -90,6 +90,18 @@ separado, y la serie ajustada se construye para una fecha de corte concreta apli
 acciones con `ex_date <=` esa fecha. Un test bloqueante de CI verifica que la serie ajustada a
 una fecha pasada no cambia al ingerir un dividendo posterior.
 
+Esto obliga a un paso extra en la ingesta, porque los proveedores gratuitos no entregan el cierre
+crudo. En yfinance, `auto_adjust=False` solo desactiva el ajuste por dividendos: la serie sigue
+ajustada por splits. El ingester reconstruye el crudo multiplicando por los splits con fecha ex
+posterior a cada barra, y un test lo verifica contra el cierre histórico real de AAPL alrededor de
+su split 4:1 de 2020.
+
+Almacenar el crudo tiene una segunda ventaja, esta de arquitectura: **mantiene la fuente
+reemplazable**. Un cierre crudo es un hecho que no caduca; una serie ajustada solo tiene sentido
+junto al proveedor que la calculó y a la fecha en que la calculó. El día que yfinance deje de
+funcionar —es una librería no oficial sobre endpoints sin contrato— se cambia el ingester y el
+histórico ya almacenado sigue siendo válido.
+
 ### El ticker no es una clave
 
 Los tickers se reasignan (`FB` → `META`) y los de empresas quebradas se reutilizan. La clave
@@ -130,7 +142,7 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 | Fundamentales auditados | SEC EDGAR XBRL | `data.sec.gov`, sin clave |
 | Fechas de presentación y enmiendas | SEC submissions | `data.sec.gov`, sin clave |
 | Mapa ticker↔CIK | SEC `company_tickers.json` | sin clave |
-| Precios diarios OHLC | Stooq | CSV directo |
+| Precios diarios OHLC y acciones corporativas | yfinance | sin clave |
 | Short interest | FINRA | ficheros públicos (quincenal, con rezago) |
 | Put/call ratio, VIX/VIX3M | CBOE | CSV públicos |
 | Cuenta real | IBKR Flex Web Service | token de solo lectura |
@@ -236,7 +248,7 @@ o a medias.
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 | Andamiaje: esquema, adaptador de BD, loader idempotente, config, logging, CI | ✅ |
-| 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | pendiente |
+| 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | macro ✅, resto pendiente |
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor | pendiente |
 | 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | pendiente |
 | 4 | Alertas Telegram y validación estadística | pendiente |
