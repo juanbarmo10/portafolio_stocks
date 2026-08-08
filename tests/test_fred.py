@@ -40,6 +40,22 @@ def test_release_date_is_after_reference_date(observations):
     assert (df["ts_release"] > df["ts"]).all()
 
 
+def test_publication_lag_is_weeks_not_days(observations):
+    """The real lag is what makes the whole point-in-time apparatus necessary.
+
+    Measured on this captured response: CPI lands 37-44 days after the month it
+    describes. Assigning it to its reference month would use, for six weeks, a figure
+    nobody could see. A near-zero lag here would mean the release dates were lost
+    somewhere in the pipeline.
+    """
+    df = parse_initial_releases(observations, "CPIAUCSL")
+    lag = (
+        pd.to_datetime(df["ts_release"], utc=True) - pd.to_datetime(df["ts"], utc=True)
+    ).dt.days
+    assert lag.min() >= 30
+    assert lag.max() <= 60
+
+
 def test_reference_date_is_not_used_as_release_date(observations):
     """Regression guard: stamping ts_release = ts would silently reintroduce look-ahead."""
     df = parse_initial_releases(observations, "CPIAUCSL")
@@ -47,25 +63,35 @@ def test_reference_date_is_not_used_as_release_date(observations):
     assert row["ts_release"].startswith("2021-02-10")
 
 
-def test_earliest_release_wins_for_a_repeated_reference_date(observations):
+# The two cases below are synthetic on purpose: a captured output_type=4 window contains
+# neither a repeated reference date (those only arise when bisected windows are
+# concatenated) nor, for CPI, a missing value. Both are real FRED behaviours the parser
+# must handle, so they are constructed inline rather than faked inside the frozen fixture.
+
+def test_earliest_release_wins_for_a_repeated_reference_date():
     """A revision must not overwrite the initial print.
 
-    The fixture reports 2021-04-01 twice: first at 267.054 (published 2021-05-12), then
-    revised to 267.999 (published 2021-07-13). Only the initial print was knowable in
-    May, so that is the value stored.
+    Only the value published in May was knowable in May, so that is what is stored.
     """
-    df = parse_initial_releases(observations, "CPIAUCSL")
-    april = df[df["ts"].str.startswith("2021-04-01")]
-    assert len(april) == 1
-    assert april.iloc[0]["value"] == pytest.approx(267.054)
-    assert april.iloc[0]["ts_release"].startswith("2021-05-12")
+    synthetic = [
+        {"date": "2021-04-01", "realtime_start": "2021-05-12", "value": "267.054"},
+        {"date": "2021-04-01", "realtime_start": "2021-07-13", "value": "267.999"},
+    ]
+    df = parse_initial_releases(synthetic, "CPIAUCSL")
+    assert len(df) == 1
+    assert df.iloc[0]["value"] == pytest.approx(267.054)
+    assert df.iloc[0]["ts_release"].startswith("2021-05-12")
 
 
-def test_missing_sentinel_is_dropped_not_zeroed(observations):
+def test_missing_sentinel_is_dropped_not_zeroed():
     """FRED's '.' means "not reported". Storing it as 0.0 would invent a data point."""
-    df = parse_initial_releases(observations, "CPIAUCSL")
+    synthetic = [
+        {"date": "2021-04-01", "realtime_start": "2021-05-12", "value": "267.054"},
+        {"date": "2021-05-01", "realtime_start": "2021-06-10", "value": "."},
+    ]
+    df = parse_initial_releases(synthetic, "CPIAUCSL")
+    assert len(df) == 1
     assert not df["ts"].str.startswith("2021-05-01").any()
-    assert (df["value"] > 0).all()
 
 
 def test_timestamps_are_iso8601_utc(observations):
@@ -90,17 +116,17 @@ def test_all_values_missing_returns_the_empty_contract():
     assert list(df.columns) == OBSERVATION_COLUMNS
 
 
-def test_availability_requires_a_key(monkeypatch):
-    """Without FRED_API_KEY the runner skips rather than crashing the pipeline."""
+def test_availability_requires_a_key():
+    """Without FRED_API_KEY the runner skips rather than crashing the pipeline.
+
+    The isolate_config fixture guarantees no key is present, on any machine.
+    """
     from core import config
 
-    monkeypatch.delenv("FRED_API_KEY", raising=False)
-    config.load_settings.cache_clear()
     settings = config.load_settings()
     assert FredIngester.is_available(settings) is False
     with pytest.raises(RuntimeError, match="FRED_API_KEY not set"):
         FredIngester(settings)
-    config.load_settings.cache_clear()
 
 
 def test_availability_with_a_key(monkeypatch):
@@ -113,7 +139,6 @@ def test_availability_with_a_key(monkeypatch):
     # Every configured series is a plain FRED code, which is also its series_id.
     ingester = FredIngester(settings)
     assert "BAMLH0A0HYM2" in ingester._series
-    config.load_settings.cache_clear()
 
 
 class _Resp:

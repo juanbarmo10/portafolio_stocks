@@ -1,53 +1,223 @@
 {
-  "_fixture_note": "HAND-BUILT to the documented shape of FRED series/observations with output_type=4 (initial release only). It is NOT a captured response: FRED requires an API key, which is not configured yet. REPLACE with a real captured response once FRED_API_KEY exists (CLAUDE.md section 10: frozen fixtures). Values are realistic CPIAUCSL index levels but must not be used as data. Deliberately includes: (a) a reference date published weeks later, which is the look-ahead trap of section 9.4; (b) FRED's '.' missing sentinel; (c) the same reference date twice with different realtime_start, to pin the earliest-release-wins rule.",
-  "realtime_start": "2021-01-01",
-  "realtime_end": "2021-12-31",
-  "observation_start": "2021-01-01",
-  "observation_end": "2021-12-31",
-  "units": "lin",
+  "_fixture_note": "CAPTURED from FRED series/observations, series_id=CPIAUCSL, output_type=4 (initial release only), observation_start=2019-01-01, realtime window 2019-01-01..2021-12-31. Captured 2026-08-08. Real response, api_key stripped. Frozen so the point-in-time guarantee is testable in CI with no key and no network.",
   "output_type": 4,
-  "file_type": "json",
-  "order_by": "observation_date",
-  "sort_order": "asc",
-  "count": 6,
-  "offset": 0,
-  "limit": 100000,
+  "count": 36,
   "observations": [
     {
+      "realtime_start": "2019-01-11",
+      "realtime_end": "2019-02-10",
+      "date": "2018-12-01",
+      "value": "252.733"
+    },
+    {
+      "realtime_start": "2019-02-13",
+      "realtime_end": "2020-02-10",
+      "date": "2019-01-01",
+      "value": "252.673"
+    },
+    {
+      "realtime_start": "2019-03-12",
+      "realtime_end": "2020-02-10",
+      "date": "2019-02-01",
+      "value": "253.113"
+    },
+    {
+      "realtime_start": "2019-04-10",
+      "realtime_end": "2020-02-10",
+      "date": "2019-03-01",
+      "value": "254.148"
+    },
+    {
+      "realtime_start": "2019-05-10",
+      "realtime_end": "2020-02-10",
+      "date": "2019-04-01",
+      "value": "254.958"
+    },
+    {
+      "realtime_start": "2019-06-12",
+      "realtime_end": "2020-02-10",
+      "date": "2019-05-01",
+      "value": "255.155"
+    },
+    {
+      "realtime_start": "2019-07-11",
+      "realtime_end": "2020-02-10",
+      "date": "2019-06-01",
+      "value": "255.305"
+    },
+    {
+      "realtime_start": "2019-08-13",
+      "realtime_end": "2020-02-10",
+      "date": "2019-07-01",
+      "value": "256.161"
+    },
+    {
+      "realtime_start": "2019-09-12",
+      "realtime_end": "2020-02-10",
+      "date": "2019-08-01",
+      "value": "256.300"
+    },
+    {
+      "realtime_start": "2019-10-10",
+      "realtime_end": "2020-02-10",
+      "date": "2019-09-01",
+      "value": "256.358"
+    },
+    {
+      "realtime_start": "2019-11-13",
+      "realtime_end": "2020-02-10",
+      "date": "2019-10-01",
+      "value": "257.271"
+    },
+    {
+      "realtime_start": "2019-12-11",
+      "realtime_end": "2020-02-10",
+      "date": "2019-11-01",
+      "value": "257.936"
+    },
+    {
+      "realtime_start": "2020-01-14",
+      "realtime_end": "2020-02-10",
+      "date": "2019-12-01",
+      "value": "258.501"
+    },
+    {
+      "realtime_start": "2020-02-13",
+      "realtime_end": "2021-02-07",
+      "date": "2020-01-01",
+      "value": "258.820"
+    },
+    {
+      "realtime_start": "2020-03-11",
+      "realtime_end": "2021-02-07",
+      "date": "2020-02-01",
+      "value": "259.050"
+    },
+    {
+      "realtime_start": "2020-04-10",
+      "realtime_end": "2021-02-07",
+      "date": "2020-03-01",
+      "value": "257.953"
+    },
+    {
+      "realtime_start": "2020-05-12",
+      "realtime_end": "2021-02-07",
+      "date": "2020-04-01",
+      "value": "255.902"
+    },
+    {
+      "realtime_start": "2020-06-10",
+      "realtime_end": "2021-02-07",
+      "date": "2020-05-01",
+      "value": "255.768"
+    },
+    {
+      "realtime_start": "2020-07-14",
+      "realtime_end": "2021-02-07",
+      "date": "2020-06-01",
+      "value": "257.214"
+    },
+    {
+      "realtime_start": "2020-08-12",
+      "realtime_end": "2021-02-07",
+      "date": "2020-07-01",
+      "value": "258.723"
+    },
+    {
+      "realtime_start": "2020-09-11",
+      "realtime_end": "2021-02-07",
+      "date": "2020-08-01",
+      "value": "259.681"
+    },
+    {
+      "realtime_start": "2020-10-13",
+      "realtime_end": "2021-02-07",
+      "date": "2020-09-01",
+      "value": "260.209"
+    },
+    {
+      "realtime_start": "2020-11-12",
+      "realtime_end": "2021-02-07",
+      "date": "2020-10-01",
+      "value": "260.325"
+    },
+    {
+      "realtime_start": "2020-12-10",
+      "realtime_end": "2021-02-07",
+      "date": "2020-11-01",
+      "value": "260.817"
+    },
+    {
+      "realtime_start": "2021-01-13",
+      "realtime_end": "2021-02-07",
+      "date": "2020-12-01",
+      "value": "261.775"
+    },
+    {
       "realtime_start": "2021-02-10",
-      "realtime_end": "9999-12-31",
+      "realtime_end": "2021-12-31",
       "date": "2021-01-01",
       "value": "262.231"
     },
     {
       "realtime_start": "2021-03-10",
-      "realtime_end": "9999-12-31",
+      "realtime_end": "2021-12-31",
       "date": "2021-02-01",
-      "value": "263.014"
+      "value": "263.161"
     },
     {
       "realtime_start": "2021-04-13",
-      "realtime_end": "9999-12-31",
+      "realtime_end": "2021-12-31",
       "date": "2021-03-01",
-      "value": "264.877"
+      "value": "264.793"
     },
     {
       "realtime_start": "2021-05-12",
-      "realtime_end": "9999-12-31",
+      "realtime_end": "2021-12-31",
       "date": "2021-04-01",
-      "value": "267.054"
+      "value": "266.832"
     },
     {
       "realtime_start": "2021-06-10",
-      "realtime_end": "9999-12-31",
+      "realtime_end": "2021-12-31",
       "date": "2021-05-01",
-      "value": "."
+      "value": "268.551"
     },
     {
       "realtime_start": "2021-07-13",
-      "realtime_end": "9999-12-31",
-      "date": "2021-04-01",
-      "value": "267.999"
+      "realtime_end": "2021-12-31",
+      "date": "2021-06-01",
+      "value": "270.981"
+    },
+    {
+      "realtime_start": "2021-08-11",
+      "realtime_end": "2021-12-31",
+      "date": "2021-07-01",
+      "value": "272.265"
+    },
+    {
+      "realtime_start": "2021-09-14",
+      "realtime_end": "2021-12-31",
+      "date": "2021-08-01",
+      "value": "273.012"
+    },
+    {
+      "realtime_start": "2021-10-13",
+      "realtime_end": "2021-12-31",
+      "date": "2021-09-01",
+      "value": "274.138"
+    },
+    {
+      "realtime_start": "2021-11-10",
+      "realtime_end": "2021-12-31",
+      "date": "2021-10-01",
+      "value": "276.724"
+    },
+    {
+      "realtime_start": "2021-12-10",
+      "realtime_end": "2021-12-31",
+      "date": "2021-11-01",
+      "value": "278.880"
     }
   ]
 }
