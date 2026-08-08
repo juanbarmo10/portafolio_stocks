@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (runtime + ibkr + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ibkr]"
+      - name: Lint (ruff)
+        run: |
+          ruff --version
+          ruff check .
+      - name: Tests (pytest)
+        # No secrets and no network: parsers run against frozen fixtures, the DB is a
+        # temp SQLite file, and key-dependent ingesters skip when their keys are absent.
+        # The point-in-time (section 9.4) and price-adjustment (section 9.1) tests are
+        # blocking by design — a green CI is what certifies there is no look-ahead.
+        run: pytest -q

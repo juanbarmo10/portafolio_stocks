@@ -1,0 +1,83 @@
+# equitydash — configuración no secreta y versionada (CLAUDE.md §10).
+#
+# Aquí NO va nada personal. Las tesis, los pesos objetivo y los parámetros fiscales
+# viven en config/settings.local.yaml, que está gitignored y se fusiona encima de este
+# archivo (deep merge). Los secretos van en config/.env.
+
+database:
+  path: equitydash.db          # relativo a la raíz del repo; DATABASE_URL lo sustituye (fase 5)
+
+logging:
+  level: INFO
+
+app:
+  public_mode: false           # true oculta cuenta real (nivel 4) y capa fiscal (§11)
+
+# ---------------------------------------------------------------------------
+# Universo — tres círculos concéntricos (§5.1)
+# ---------------------------------------------------------------------------
+universe:
+  # 1) Referencias de mercado. NO son posiciones: alimentan los niveles 1 y 2.
+  market_references:
+    broad:    [SPY, RSP, QQQ, IWM]           # RSP/SPY = estrechez del rally (§2 nivel 2)
+    sectors:  [XLK, XLU, XLP, XLF, XLE, XLV, XLY, XLI]
+    assets:   [TLT, GLD]
+    # DXY no se toma de un feed de precios: entra por FRED como DTWEXBGS (ver sources.fred).
+
+  # 2) Universo de seguimiento: empresas con ficha de tesis completa (§5.2).
+  #    Vive en settings.local.yaml — una empresa sin criterio de invalidación se rechaza
+  #    al cargar la config (core.config.validate_theses) y en el esquema (thesis_log).
+  tracked: []
+
+# ---------------------------------------------------------------------------
+# Fuentes de datos — todas gratuitas (§4). Ninguna URL hardcodeada en el código.
+# ---------------------------------------------------------------------------
+sources:
+  fred:
+    base_url: https://api.stlouisfed.org/fred
+    # output_type=4 devuelve solo la publicación inicial de cada dato: es lo que permite
+    # guardar ts_release honesto y evitar look-ahead (§9.4).
+    output_type: 4
+    series:
+      - CPIAUCSL      # IPC general
+      - PCEPILFE      # PCE subyacente (la métrica que mira la Fed)
+      - PAYEMS        # nóminas no agrícolas
+      - DFF           # fed funds efectiva
+      - DTWEXBGS      # índice dólar amplio (el "DXY" del panel)
+      - T10Y2Y        # pendiente 10a-2a
+      - BAMLH0A0HYM2  # spread high yield (mejor detector temprano de risk-off, §2)
+      - NFCI          # condiciones financieras Chicago Fed
+      - VIXCLS        # VIX
+      - DGS10         # tesoro 10 años
+      - T10YIE        # inflación implícita 10 años
+
+  sec:
+    base_url: https://data.sec.gov
+    ticker_map_url: https://www.sec.gov/files/company_tickers.json
+    # La SEC bloquea sin User-Agent identificable con nombre y correo reales (§4.4).
+    # Se lee de la variable de entorno SEC_USER_AGENT; sin ella, el ingester falla ruidoso.
+    user_agent_env: SEC_USER_AGENT
+    rate_limit_rps: 8          # margen bajo el límite del orden de 10 req/s de la SEC
+    cache_dir: .cache/sec      # caché agresiva: los datos solo cambian con un filing nuevo
+
+  stooq:
+    base_url: https://stooq.com/q/d/l/
+    symbol_suffix: ".us"       # SPY -> spy.us
+    # Solo cierre CRUDO. Nunca guardar el cierre ajustado como serie (§9.1).
+    series_suffix: ":close_raw"
+
+  ibkr_flex:
+    base_url: https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService
+    version: 3
+    # Handshake asíncrono: el primer GetStatement puede no estar listo (§4.1).
+    poll_attempts: 6
+    poll_base_delay_s: 3
+
+# ---------------------------------------------------------------------------
+# Ingesta — política común de reintentos (ingest/base.py)
+# ---------------------------------------------------------------------------
+ingest:
+  retry:
+    attempts: 4
+    base_delay_s: 1.0
+    max_delay_s: 30.0

@@ -1,0 +1,145 @@
+-- equitydash schema (CLAUDE.md section 6).
+-- Long format: adding a new series never requires a schema migration.
+-- Portable SQLite (phases 0-4) <-> PostgreSQL (phase 5): timestamps are ISO8601 UTC TEXT,
+-- no SQLite-only types are used, and every statement is IF NOT EXISTS (idempotent apply).
+
+PRAGMA foreign_keys = ON;
+
+-- One row per (source, series_id, reference date, publication date) observation.
+--
+-- The primary key includes ts_release ON PURPOSE (section 6): one fiscal quarter can be
+-- reported several times (original 10-Q, then a 10-K/A restatement). All versions are kept;
+-- overwriting would destroy honest point-in-time backtests (sections 9.4, 9.6).
+--
+-- WHY ts_release IS `NOT NULL DEFAULT ''` AND NOT NULLABLE:
+--   A NULL inside a composite PRIMARY KEY silently breaks idempotency. SQLite treats every
+--   NULL as distinct in a unique index, so `ON CONFLICT DO UPDATE` never matches and three
+--   identical re-ingests write three rows; PostgreSQL rejects a NULL PK column outright.
+--   Both failures contradict the mandatory idempotency rule (section 6), so "publication
+--   date unknown / not applicable" is encoded as the empty string (db.loader.TS_RELEASE_UNKNOWN).
+--   Read it back with NULLIF(ts_release, '') when SQL-level NULL semantics are wanted.
+CREATE TABLE IF NOT EXISTS observations (
+    source      TEXT NOT NULL,              -- 'fred' | 'sec' | 'stooq' | 'finra' | 'cboe' | 'ibkr'
+    series_id   TEXT NOT NULL,              -- 'CPIAUCSL' | '0000320193:Revenues' | 'SPY:close_raw'
+    ts          TEXT NOT NULL,              -- ISO8601 UTC — REFERENCE date of the datum
+    ts_release  TEXT NOT NULL DEFAULT '',   -- ISO8601 UTC — PUBLICATION date ('' = unknown)
+    value       REAL,                       -- NULL is a legitimate "not reported" (section 12)
+    ingested_at TEXT NOT NULL,
+    PRIMARY KEY (source, series_id, ts, ts_release)
+);
+CREATE INDEX IF NOT EXISTS idx_obs_series_ts ON observations(series_id, ts DESC);
+-- Point-in-time reads filter by ts_release <= simulated date (section 9.4), never by ts.
+CREATE INDEX IF NOT EXISTS idx_obs_series_release ON observations(series_id, ts_release);
+
+-- Company registry. The CIK is the stable key; the ticker is a mutable attribute
+-- that gets reassigned across companies (section 9.3: FB -> META, recycled tickers).
+CREATE TABLE IF NOT EXISTS companies (
+    cik             TEXT PRIMARY KEY,
+    ticker          TEXT NOT NULL,          -- current ticker, mutable
+    name            TEXT,
+    sector          TEXT,                   -- GICS or equivalent
+    thesis_category TEXT,                   -- the axis that actually matters (section 5.3)
+    first_seen      TEXT,
+    status          TEXT                    -- 'active'|'delisted'|'acquired'|'merged'
+);
+CREATE INDEX IF NOT EXISTS idx_companies_ticker ON companies(ticker);
+
+-- SEC filing history: source of ts_release and of the amendment flag (sections 4.4, 9.6).
+CREATE TABLE IF NOT EXISTS filings (
+    accession   TEXT PRIMARY KEY,
+    cik         TEXT NOT NULL,
+    form        TEXT NOT NULL,              -- '10-K' | '10-Q' | '8-K' | 'S-1' ...
+    period_end  TEXT,
+    filed_date  TEXT NOT NULL,
+    is_amended  INTEGER DEFAULT 0,          -- 10-K/A, 10-Q/A -> possible restatement (9.6)
+    url         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_filings_cik_filed ON filings(cik, filed_date DESC);
+
+-- Corporate actions stored SEPARATELY from raw prices (section 9.1). The adjusted series
+-- is rebuilt on demand for a given as-of date, applying only ex_date <= that date; storing
+-- a pre-adjusted close would bake future information into every past point.
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    action_id   TEXT PRIMARY KEY,
+    cik         TEXT NOT NULL,
+    kind        TEXT NOT NULL,              -- 'split'|'dividend'|'spinoff'|'merger'|'delisting'
+    ex_date     TEXT NOT NULL,
+    ratio       REAL,                       -- splits
+    amount      REAL,                       -- dividends, per share
+    currency    TEXT,
+    source      TEXT NOT NULL               -- which provider said so (section 9.8)
+);
+CREATE INDEX IF NOT EXISTS idx_corpact_cik_ex ON corporate_actions(cik, ex_date);
+
+-- Dated-event calendar: macro releases, earnings dates, FOMC, catalysts.
+CREATE TABLE IF NOT EXISTS events (
+    event_id     TEXT PRIMARY KEY,
+    category     TEXT,                      -- 'macro'|'earnings'|'fomc'|'lockup'|'catalyst'
+    cik          TEXT,                      -- NULL for macro events
+    ts           TEXT NOT NULL,
+    is_estimated INTEGER DEFAULT 0,         -- earnings date confirmed vs. estimated
+    label        TEXT,
+    payload      TEXT                       -- JSON
+);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+
+-- Executed trades, read from the IBKR Activity Flex Query — never written by hand.
+-- cik stays NULL with a warning when the ticker does not resolve; never guessed (9.3).
+CREATE TABLE IF NOT EXISTS trades (
+    trade_id    TEXT PRIMARY KEY,           -- IBKR tradeID (idempotency key)
+    cik         TEXT,
+    ticker      TEXT NOT NULL,
+    ts          TEXT NOT NULL,              -- ISO8601 UTC execution time
+    side        TEXT NOT NULL,              -- 'buy' | 'sell'
+    quantity    REAL NOT NULL,
+    price       REAL NOT NULL,
+    currency    TEXT NOT NULL,
+    commission  REAL,
+    fx_rate     REAL,                       -- to USD when applicable (section 9.9)
+    ingested_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trades_ticker_ts ON trades(ticker, ts);
+
+-- Dividends, withholding, interest and fees, from the Flex Query CashTransactions section.
+-- Withholding is the OBSERVED figure; never a assumed treaty rate (section 11).
+CREATE TABLE IF NOT EXISTS cash_transactions (
+    tx_id       TEXT PRIMARY KEY,
+    cik         TEXT,
+    ticker      TEXT,
+    ts          TEXT NOT NULL,
+    kind        TEXT NOT NULL,              -- 'dividend'|'withholding_tax'|'interest'|'fee'
+    amount      REAL NOT NULL,
+    currency    TEXT NOT NULL,
+    ingested_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cashtx_ticker_ts ON cash_transactions(ticker, ts);
+
+-- Written thesis per company. invalidation is NOT NULL by design (sections 5.2, 6):
+-- a thesis with no way to be proven wrong is not stored.
+CREATE TABLE IF NOT EXISTS thesis_log (
+    cik           TEXT PRIMARY KEY,
+    thesis        TEXT NOT NULL,
+    value_accrual TEXT NOT NULL,
+    invalidation  TEXT NOT NULL,            -- *** required at schema level ***
+    review_date   TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+-- Exit rules written BEFORE buying (section 2, level 4).
+-- "trigger" is quoted throughout: it is a keyword in both engines.
+CREATE TABLE IF NOT EXISTS exit_ladder (
+    rule_id     TEXT PRIMARY KEY,
+    cik         TEXT NOT NULL,
+    kind        TEXT NOT NULL,              -- 'take_profit'|'thesis_invalidation'|'rebalance'
+    "trigger"   TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+-- Fired-alert ledger; used to suppress duplicate alerts for the same event (section 8, phase 4).
+CREATE TABLE IF NOT EXISTS alerts_log (
+    alert_id    TEXT PRIMARY KEY,
+    rule_id     TEXT NOT NULL,
+    fired_at    TEXT NOT NULL,
+    payload     TEXT
+);

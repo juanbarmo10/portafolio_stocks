@@ -1,0 +1,50 @@
+# Secretos y datos locales — nunca se commitean (CLAUDE.md §10)
+.env
+config/.env
+config/settings.local.yaml
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Caché en disco de fuentes externas (SEC companyfacts, etc. — §4.4)
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Artefactos de ejecución
+logs/
+*.log
+
+# Herramientas locales / estado de agentes
+.claude/
+.agents/
+
+# SO / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Documentos internos de diseño (contexto personal) — no van al repo público.
+# El documento público es README.md; estos dos llevan instrucciones para Claude
+# y la referencia técnica/fiscal detallada (CLAUDE.md §14).
+CLAUDE.md
+RESEARCH.md

@@ -1,0 +1,70 @@
+[project]
+name = "equitydash"
+version = "0.1.0"
+description = "Personal US-equity analysis dashboard (free data sources only, IBKR read-only)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# Dependencies are grouped by roadmap phase (see CLAUDE.md section 8). Only phase 0/1
+# runtime deps are required so the scaffold installs before later ingesters exist.
+# Ask before adding new deps (section 3: the stack is deliberately small).
+# Upper bounds cap the next major to avoid silent breakage on a fresh install.
+dependencies = [
+    "pyyaml>=6.0,<7",        # config/settings.yaml
+    "python-dotenv>=1.0,<2", # config/.env
+    "requests>=2.31,<3",     # FRED / SEC EDGAR / Stooq REST (phase 1+)
+    "pandas>=2.1,<4",        # transforms + the fetch() DataFrame contract
+    "numpy>=1.26,<3",        # indicators
+]
+
+[project.optional-dependencies]
+# Phase 1: real account. `ibflex` only downloads/parses the Activity Flex XML; it is
+# NOT a trading API and cannot place orders (CLAUDE.md section 4.1).
+ibkr = [
+    "ibflex>=0.15,<1",
+]
+# Phase 1 UI. Multipage from the start via st.navigation (section 7).
+app = [
+    "streamlit>=1.30,<2",
+    "altair>=5,<7",
+]
+# Phase 5: PostgreSQL backend via DATABASE_URL (section 3).
+postgres = [
+    "psycopg[binary]>=3.1,<4",
+]
+# Development tooling.
+dev = [
+    "pytest>=8.0,<9",
+    "ruff>=0.3,<1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Local package modules live at the repo root (ingest/, db/, transform/, ...),
+# mirroring the layout in CLAUDE.md section 7.
+packages = [
+    "core",
+    "db",
+    "ingest",
+    "transform",
+    "validation",
+    "alerts",
+    "fiscal",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Pin the rule set explicitly. Ruff's *default* selection expands between releases,
+# which fails CI when the runner installs a newer ruff than the developer used.
+select = ["E4", "E7", "E9", "F"]

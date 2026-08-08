@@ -1,0 +1,54 @@
+# Plantilla de config/settings.local.yaml — GITIGNORED (CLAUDE.md §10, §14).
+#
+# Cópiala a `settings.local.yaml` y rellénala. Se fusiona ENCIMA de settings.yaml, así
+# que solo hace falta escribir lo que se quiera sobrescribir o añadir.
+#
+# Aquí van los datos personales: tesis, pesos objetivo y parámetros fiscales. Nunca se
+# commitea y no se despliega.
+
+universe:
+  # Ficha de tesis obligatoria por empresa (§5.2). Objetivo: 15-30 empresas.
+  # Es lista de ANÁLISIS, no de tenencia simultánea.
+  #
+  # Una ficha sin `invalidation` se rechaza al cargar la configuración. No es una
+  # validación cosmética: sin criterio de falsación no hay forma de saber cuándo
+  # vender, y la posición se sostiene sola por inercia.
+  tracked: []
+  #  - ticker: AAPL
+  #    cik: "0000320193"          # clave primaria real; el ticker es mutable (§9.3)
+  #    sector: "Information Technology"
+  #    thesis_category: "..."     # el eje que de verdad diversifica (§5.3)
+  #    thesis: "Una frase: por qué esta empresa gana."
+  #    value_accrual: "Cómo llega ese resultado al accionista."
+  #    key_metric: "Concepto XBRL o derivado que hay que vigilar."
+  #    invalidation: "Qué observación mata la tesis. Verificable, con umbral."
+  #    review_date: 2027-01-15
+
+# Cartera objetivo: pesos por posición y por thesis_category, para que el drift
+# signifique algo (§13, entrada de usuario nº4). La cartera REAL nunca se escribe
+# aquí: se lee del Flex Query de IBKR.
+portfolio:
+  target_weights: {}           # ej. { AAPL: 0.08, MSFT: 0.08 }
+  target_by_thesis_category: {}
+
+# Plan de aportes (§13, entrada de usuario nº1). Determina cuántas posiciones son
+# razonables y si la comisión es material por ticket.
+contributions:
+  initial_amount_usd: null
+  monthly_amount_usd: null
+  currency: USD
+
+# Comisiones IBKR (§13, entrada de usuario nº2). VERIFICAR en la cuenta, no asumir:
+# la entidad contratante y el esquema (tiered/fixed) cambian el coste por operación.
+broker:
+  entity: null                 # ej. "IBKR Ireland" / "IBKR LLC" — verificar en la cuenta
+  commission_scheme: null      # "tiered" | "fixed"
+  fractional_shares: null      # true | false — verificar, no asumir
+
+# Capa fiscal — LOCAL, todo ESTIMADO (§11).
+# Claude no rellena tasas, umbrales ni tratamientos: son preguntas para el contador,
+# listadas en RESEARCH.md. Mientras estén en null el panel muestra "no calculable".
+fiscal:
+  w8ben_on_file: null          # estado del W-8BEN en la cuenta (§13, entrada nº5)
+  # Las retenciones sobre dividendos NO se configuran: se usa la retención OBSERVADA
+  # que reporta el Flex Query en cash_transactions. Nunca una tasa supuesta.
