@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import requests
 
 from db.loader import OBSERVATION_COLUMNS
 from ingest.fred import FredIngester, parse_initial_releases
@@ -210,3 +211,115 @@ def test_unrecoverable_http_error_fails_loudly(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="HTTP 500"):
         ingester.fetch_observations("DFF", "2021-01-01", "2021-01-02")
+
+
+# --- Real-time window clamping (the T10Y2Y failure of 2026-08-28) ------------------
+#
+# A series' observation history and its vintage history start on different dates.
+# Requesting initial releases from before ALFRED archives the series returns a 400
+# whose message names the *series*, so it reads like "this series does not exist".
+# Verified against the live API: T10Y2Y has observations from 1976 and vintages from
+# 2014-01-27; asking from 2000-01-01 killed the whole FRED ingester.
+
+
+def test_window_is_clamped_to_the_first_archived_vintage(monkeypatch):
+    """fetch() asks from the first vintage, not from the configured observation_start."""
+    ingester = _ingester(monkeypatch)
+    monkeypatch.setattr(ingester, "_series", ["T10Y2Y"])
+    monkeypatch.setattr(ingester, "_observation_start", "2000-01-01")
+    monkeypatch.setattr(ingester, "_first_vintage", lambda code: "2014-01-27")
+
+    asked: list[str] = []
+
+    def fake_get(code, start, end):
+        asked.append(start)
+        return _Resp(200, {"observations": [
+            {"date": "2014-01-27", "realtime_start": "2014-01-28", "value": "2.4"}
+        ]})
+
+    monkeypatch.setattr(ingester, "_get", fake_get)
+    df = ingester.fetch()
+    assert asked == ["2014-01-27"], "the request must start at the first vintage"
+    assert len(df) == 1
+
+
+def test_observation_start_wins_when_it_is_later_than_the_archive(monkeypatch):
+    """Clamping only ever moves the window forward; it never widens what was asked for."""
+    ingester = _ingester(monkeypatch)
+    monkeypatch.setattr(ingester, "_series", ["CPIAUCSL"])
+    monkeypatch.setattr(ingester, "_observation_start", "2020-01-01")
+    monkeypatch.setattr(ingester, "_first_vintage", lambda code: "1972-07-21")
+
+    asked: list[str] = []
+    monkeypatch.setattr(
+        ingester, "_get",
+        lambda code, start, end: (asked.append(start), _Resp(200, {"observations": []}))[1],
+    )
+    ingester.fetch()
+    assert asked == ["2020-01-01"]
+
+
+def test_window_before_the_archive_is_empty_not_an_error(monkeypatch):
+    """Inside a bisection, a half that predates the archive is empty, not a failure."""
+    ingester = _ingester(monkeypatch)
+    monkeypatch.setattr(ingester, "_get", lambda *a: _Resp(400, {
+        "error_message": "Bad Request. The series does not exist in ALFRED but may exist "
+                         "in FRED. Try setting realtime_start and realtime_end to today's "
+                         "date or removing the realtime_start and realtime_end parameters."
+    }))
+    assert ingester.fetch_observations("T10Y2Y", "2000-01-01", "2001-01-01") == []
+
+
+def test_unknown_series_code_fails_loudly(monkeypatch):
+    """A typo in settings.yaml must raise, never quietly produce an empty series."""
+    ingester = _ingester(monkeypatch)
+
+    class _Session:
+        RequestException = requests.RequestException
+
+        @staticmethod
+        def get(url, params=None, timeout=None):
+            return _Resp(400, {"error_message": "Bad Request. The series does not exist."})
+
+    monkeypatch.setattr("ingest.fred.requests", _Session)
+    with pytest.raises(RuntimeError, match="settings.yaml"):
+        ingester._first_vintage("CPIAUSCL")  # transposed letters
+
+
+def test_first_vintage_is_the_earliest_of_every_vintage_span(monkeypatch):
+    """FRED returns one metadata record per vintage span; the archive starts at the min."""
+    ingester = _ingester(monkeypatch)
+
+    class _Session:
+        RequestException = requests.RequestException
+
+        @staticmethod
+        def get(url, params=None, timeout=None):
+            return _Resp(200, {"seriess": [
+                {"realtime_start": "2019-05-02"},
+                {"realtime_start": "2014-01-27"},
+                {"realtime_start": "2021-11-30"},
+            ]})
+
+    monkeypatch.setattr("ingest.fred.requests", _Session)
+    assert ingester._first_vintage("T10Y2Y") == "2014-01-27"
+
+
+def test_one_broken_series_does_not_cost_the_others(monkeypatch):
+    """Eleven healthy series must survive a twelfth that fails (RESEARCH.md 1.6)."""
+    ingester = _ingester(monkeypatch)
+    monkeypatch.setattr(ingester, "_series", ["CPIAUCSL", "BROKEN", "DFF"])
+    monkeypatch.setattr(ingester, "_first_vintage", lambda code: "2000-01-01")
+
+    def fake_get(code, start, end):
+        if code == "BROKEN":
+            return _Resp(500, {"error_message": "internal error"})
+        return _Resp(200, {"observations": [
+            {"date": "2026-01-01", "realtime_start": "2026-02-11", "value": "1.0"}
+        ]})
+
+    monkeypatch.setattr(ingester, "_get", fake_get)
+    df = ingester.fetch()
+
+    assert set(df["series_id"]) == {"CPIAUCSL", "DFF"}, "healthy series were lost"
+    assert ingester.partial_failures() == ["BROKEN"], "the failure must be reported"

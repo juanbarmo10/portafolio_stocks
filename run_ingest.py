@@ -148,6 +148,16 @@ def run(args: argparse.Namespace) -> int:
                             f"Known: {sorted(TABLE_LOADERS)}."
                         )
                     TABLE_LOADERS[table](conn, table_rows)
+                # Whatever the ingester managed to fetch is now loaded. A unit that failed
+                # inside it (a series, a ticker) still has to reach the exit code, or a
+                # partial run would look identical to a clean one.
+                partial = ingester.partial_failures()
+                if partial:
+                    log.error(
+                        "Ingester '%s' loaded its data but %d unit(s) failed: %s",
+                        name, len(partial), partial, extra={"source": name},
+                    )
+                    failures.append(f"{name} ({', '.join(partial)})")
             except Exception:
                 # One broken source must not abort the rest of the run, but the failure
                 # is logged with a traceback and turns the exit code non-zero, so the

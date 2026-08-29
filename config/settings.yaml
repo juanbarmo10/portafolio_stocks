@@ -46,6 +46,13 @@ sources:
       - DTWEXBGS      # índice dólar amplio (el "DXY" del panel)
       - T10Y2Y        # pendiente 10a-2a
       - BAMLH0A0HYM2  # spread high yield (mejor detector temprano de risk-off, §2)
+      # ⚠️ FRED sirve las series de índices ICE BofA (BAMLH0A0HYM2, BAMLC0A0CM) en una
+      # ventana rodante de ~3 años: verificado el 2026-08-28, el histórico completo empieza
+      # el 2023-08-29, y NO es un límite de point-in-time — output_type=1 devuelve lo mismo.
+      # Sirve para leer el nivel 1 en vivo; no alcanza para validar el semáforo de régimen
+      # contra 2008 o 2020 (fases 3-4). BAA10Y es el sustituto con histórico largo:
+      # misma idea (prima de crédito), grado de inversión en vez de HY, desde 1986.
+      - BAA10Y        # Moody's Baa − tesoro 10a: prima de crédito con histórico largo
       - NFCI          # condiciones financieras Chicago Fed
       - VIXCLS        # VIX
       - DGS10         # tesoro 10 años
@@ -78,6 +85,79 @@ sources:
     # Handshake asíncrono: el primer GetStatement puede no estar listo (§4.1).
     poll_attempts: 6
     poll_base_delay_s: 3
+
+# ---------------------------------------------------------------------------
+# Panel — qué se muestra en cada nivel del checklist (§2). Nada de esto se
+# hardcodea en el código: etiquetas, unidades y ventanas viven aquí (§10).
+#
+# OJO: aquí NO hay umbrales de semáforo. Clasificar el régimen es la fase 3, con
+# pesos iguales y fijos y voto visible por componente. Poner umbrales ahora sería
+# elegirlos mirando el gráfico, que es §9.7 literal.
+# ---------------------------------------------------------------------------
+panel:
+  level1:
+    lookback_days: 30          # ventana de la columna "cambio" de la tabla macro
+    readings:
+      - series_id: BAMLH0A0HYM2
+        label: Spread HY (OAS)
+        unit: pp
+        note: histórico solo desde 2023-08 — ventana rodante de FRED por licencia ICE
+      - series_id: BAA10Y
+        label: Prima crédito Baa − 10a
+        unit: pp
+        note: sustituto con histórico largo del spread HY (desde 1986)
+      - series_id: T10Y2Y
+        label: Curva 10a − 2a
+        unit: pp
+        note: negativo = curva invertida
+      - series_id: NFCI
+        label: Condiciones financieras (NFCI)
+        unit: índice
+        note: semanal; negativo = condiciones laxas
+      - series_id: DTWEXBGS
+        label: Dólar amplio (DXY del panel)
+        unit: índice
+        note: semanal
+      - series_id: VIXCLS
+        label: VIX
+        unit: pts
+        note: FRED arrastra el cierre anterior en festivos de mercado
+      - series_id: DGS10
+        label: Tesoro 10 años
+        unit: "%"
+        note: null
+      - series_id: T10YIE
+        label: Inflación implícita 10a
+        unit: pp
+        note: null
+      - series_id: DFF
+        label: Fed funds efectiva
+        unit: "%"
+        note: null
+      - series_id: CPIAUCSL
+        label: IPC general (nivel)
+        unit: índice
+        note: se publica con ~6 semanas de rezago
+      - series_id: PCEPILFE
+        label: PCE subyacente (nivel)
+        unit: índice
+        note: la métrica que mira la Fed; ~8 semanas de rezago
+      - series_id: PAYEMS
+        label: Nóminas no agrícolas
+        unit: miles
+        note: se revisa; el panel muestra la versión vigente en cada fecha
+
+    # Gráficas. Series de la MISMA unidad en cada una: dos escalas en un mismo eje
+    # es la forma más común de mentir con una gráfica.
+    charts:
+      - title: Prima de crédito — el detector temprano de risk-off
+        unit: pp
+        series: [BAA10Y, BAMLH0A0HYM2]
+        zero_rule: false
+      - title: Curva 10a − 2a
+        unit: pp
+        series: [T10Y2Y]
+        zero_rule: true        # el cruce por cero es el hecho, no un umbral elegido
 
 # ---------------------------------------------------------------------------
 # Ingesta — política común de reintentos (ingest/base.py)

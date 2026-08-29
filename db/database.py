@@ -22,7 +22,10 @@ import os
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
+
+if TYPE_CHECKING:  # pragma: no cover
+    import pandas as pd
 
 from core.logging_setup import get_logger
 
@@ -136,3 +139,44 @@ def open_connection(sqlite_path: Path) -> sqlite3.Connection | _PgConnection:
     conn = sqlite3.connect(sqlite_path)
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
+
+def read_observations(
+    conn: Any,
+    series_ids: Sequence[str] | None = None,
+    source: str | None = None,
+) -> "pd.DataFrame":
+    """Read observations into a DataFrame, optionally filtered by series or source.
+
+    Every version of a restated fact is returned — selecting the one vigent at a given
+    date is the caller's job and belongs in ``transform`` (section 9.6). Filtering here
+    would bake one answer into the data-access layer.
+
+    Args:
+        conn: Open connection from :func:`open_connection`.
+        series_ids: Restrict to these series. ``None`` means every series.
+        source: Restrict to one source label ('fred', 'yfinance', ...).
+
+    Returns:
+        Frame with columns ``[source, series_id, ts, ts_release, value]``. Empty (but
+        correctly shaped) when nothing matches, so callers never special-case it.
+    """
+    import pandas as pd  # noqa: PLC0415 — keeps the adapter importable without pandas
+
+    columns = ["source", "series_id", "ts", "ts_release", "value"]
+    sql = f"SELECT {', '.join(columns)} FROM observations"
+    clauses: list[str] = []
+    params: list[Any] = []
+    if series_ids:
+        clauses.append(f"series_id IN ({', '.join('?' for _ in series_ids)})")
+        params.extend(series_ids)
+    if source:
+        clauses.append("source = ?")
+        params.append(source)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+
+    rows = conn.execute(sql, params).fetchall()
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame([dict(zip(columns, r)) for r in rows])

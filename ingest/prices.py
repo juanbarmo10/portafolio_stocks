@@ -222,6 +222,7 @@ class PricesIngester(Ingester):
             "max_delay_s": retry_cfg.get("max_delay_s", 30.0),
         }
         self._actions: list[dict[str, Any]] = []
+        self._failures: list[str] = []
 
     @staticmethod
     def tickers_for(settings: Settings) -> list[str]:
@@ -266,17 +267,27 @@ class PricesIngester(Ingester):
         """
         frames: list[pd.DataFrame] = []
         self._actions = []
+        self._failures = []
 
         for ticker in self._tickers:
-            history = self._download(ticker)
-            splits = self._events(history, "Stock Splits")
-            dividends = self._events(history, "Dividends")
+            try:
+                history = self._download(ticker)
+                splits = self._events(history, "Stock Splits")
+                dividends = self._events(history, "Dividends")
+                raw = unadjust_history(history, splits)
+                actions = build_corporate_actions(ticker, splits, dividends, self._currency)
+            except Exception:
+                # One delisted or renamed ticker must not cost the other thirteen. The
+                # failure is logged and reported through partial_failures().
+                log.exception(
+                    "Ticker failed; continuing with the rest.",
+                    extra={"source": self.source, "series_id": f"{ticker}:close_raw"},
+                )
+                self._failures.append(ticker)
+                continue
 
-            raw = unadjust_history(history, splits)
             frames.append(build_observations(ticker, raw))
-            self._actions.extend(
-                build_corporate_actions(ticker, splits, dividends, self._currency)
-            )
+            self._actions.extend(actions)
             log.info(
                 "%d bars, %d splits, %d dividends.",
                 len(raw), len(splits), len(dividends),
@@ -289,6 +300,10 @@ class PricesIngester(Ingester):
     def fetch_tables(self) -> dict[str, list[dict[str, Any]]]:
         """Corporate actions collected during :meth:`fetch`."""
         return {"corporate_actions": self._actions}
+
+    def partial_failures(self) -> list[str]:
+        """Tickers that failed during the last :meth:`fetch`."""
+        return list(self._failures)
 
     @staticmethod
     def _events(history: pd.DataFrame, column: str) -> dict[dt.date, float]:

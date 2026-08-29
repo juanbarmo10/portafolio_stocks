@@ -62,6 +62,8 @@ packages = [
     "validation",
     "alerts",
     "fiscal",
+    "app",
+    "app.pages",
 ]
 
 [tool.pytest.ini_options]

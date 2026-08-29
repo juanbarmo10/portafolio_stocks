@@ -99,6 +99,20 @@ class Ingester(ABC):
         """
         return {}
 
+    def partial_failures(self) -> list[str]:
+        """Sub-units (series, tickers) that failed while the rest of the fetch succeeded.
+
+        A source usually fetches many independent units. Letting one broken unit abort the
+        whole source throws away good data for no reason — the same argument that makes
+        run_ingest isolate sources from each other (RESEARCH.md section 1.6). But a failure
+        must never be silent, so the ingester reports what it lost here and the runner turns
+        the exit code non-zero while still loading what it got.
+
+        Returns:
+            Human-readable labels of the units that failed. Empty when all succeeded.
+        """
+        return []
+
     @classmethod
     def validate(cls, df: pd.DataFrame) -> pd.DataFrame:
         """Assert the DataFrame honors the observation contract; fail loudly otherwise.

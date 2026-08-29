@@ -55,6 +55,16 @@ _VINTAGE_LIMIT_MARKER = "vintage dates"
 # and clamp realtime_end rather than failing on a one-day clock skew.
 _FRED_TODAY_RE = re.compile(r"today's date \((\d{4}-\d{2}-\d{2})\)")
 
+# Substring of the 400 FRED returns when the requested real-time window predates the
+# series' first ALFRED vintage. The message names ALFRED, not the window, so it reads
+# like "this series does not exist" — see _first_vintage for why that reading is wrong.
+_NOT_IN_ALFRED_MARKER = "does not exist in ALFRED"
+
+# Sentinel real-time bounds: FRED accepts these and returns one record per vintage span,
+# which is how the earliest archived vintage of a series is discovered.
+_ALFRED_EPOCH = "1776-07-04"
+_ALFRED_FOREVER = "9999-12-31"
+
 
 def parse_initial_releases(observations: list[dict], code: str) -> pd.DataFrame:
     """Convert FRED ``output_type=4`` observations to the long loader contract.
@@ -127,6 +137,11 @@ class FredIngester(Ingester):
             raise RuntimeError("FRED_API_KEY not set; cannot construct FredIngester.")
         self._api_key = api_key
 
+        # Series that failed while others succeeded, reported via partial_failures().
+        self._failures: list[str] = []
+        # code -> earliest ALFRED vintage date, memoized across a run.
+        self._first_vintage_cache: dict[str, str] = {}
+
     @staticmethod
     def is_available(settings: Settings) -> bool:
         """Whether the prerequisites (API key, at least one series) are present."""
@@ -151,6 +166,57 @@ class FredIngester(Ingester):
             **self._retry_kwargs,
         )
 
+    def _first_vintage(self, code: str) -> str:
+        """Earliest date at which ALFRED archives a vintage of ``code``.
+
+        A series' *observation* history and its *vintage* history are different things and
+        start on different dates. T10Y2Y has observations back to 1976 but ALFRED only
+        archives it from 2014-01-27; asking for initial releases before that returns a 400
+        whose message ("the series does not exist in ALFRED") describes the window, not the
+        series. Requesting from this date instead is what makes output_type=4 usable.
+
+        Args:
+            code: FRED series code.
+
+        Returns:
+            ISO date of the earliest archived vintage.
+
+        Raises:
+            RuntimeError: If FRED does not know the series at all — a typo in
+                settings.yaml must fail loudly, never degrade into an empty series
+                (section 10).
+        """
+        if code in self._first_vintage_cache:
+            return self._first_vintage_cache[code]
+
+        params = {
+            "series_id": code,
+            "api_key": self._api_key,
+            "file_type": "json",
+            "realtime_start": _ALFRED_EPOCH,
+            "realtime_end": _ALFRED_FOREVER,
+        }
+        resp = retry(
+            lambda: requests.get(
+                f"{self._base_url}/series", params=params, timeout=self._timeout
+            ),
+            exceptions=(requests.RequestException,),
+            **self._retry_kwargs,
+        )
+        if resp.status_code != 200:
+            message = resp.json().get("error_message", "") if resp.content else ""
+            raise RuntimeError(
+                f"FRED {code}: cannot resolve series metadata (HTTP {resp.status_code} "
+                f"{message[:120]}). Check the code in config/settings.yaml."
+            )
+        records = resp.json().get("seriess", [])
+        if not records:
+            raise RuntimeError(f"FRED {code}: series metadata came back empty.")
+
+        first = min(str(r["realtime_start"]) for r in records)
+        self._first_vintage_cache[code] = first
+        return first
+
     def fetch_observations(self, code: str, realtime_start: str, realtime_end: str) -> list[dict]:
         """Fetch initial-release observations, bisecting the real-time window if needed.
 
@@ -174,6 +240,18 @@ class FredIngester(Ingester):
             if match and realtime_end > match.group(1):
                 return self.fetch_observations(code, realtime_start, match.group(1))
 
+            # The window predates the series' first archived vintage. Inside a bisection
+            # that is a legitimately empty half, not an error: fetch() has already clamped
+            # the outer window, so reaching here means the left half fell entirely before
+            # the archive begins.
+            if _NOT_IN_ALFRED_MARKER in message:
+                log.debug(
+                    "No ALFRED vintages in %s..%s; treating as empty.",
+                    realtime_start, realtime_end,
+                    extra={"source": self.source, "series_id": code},
+                )
+                return []
+
             if _VINTAGE_LIMIT_MARKER in message:
                 start = dt.date.fromisoformat(realtime_start)
                 end = dt.date.fromisoformat(realtime_end)
@@ -189,12 +267,37 @@ class FredIngester(Ingester):
         raise RuntimeError(f"FRED {code}: HTTP {resp.status_code} {message[:160]}")
 
     def fetch(self) -> pd.DataFrame:
-        """Return every configured macro series as one long observations DataFrame."""
+        """Return every configured macro series as one long observations DataFrame.
+
+        Each series is fetched independently: one broken code does not cost the other ten
+        (see :meth:`Ingester.partial_failures`). The real-time window is clamped to the
+        series' first archived vintage, and the clamp is logged — a series whose
+        point-in-time history starts in 2014 must not look like one going back to 2000.
+        """
         realtime_end = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
         frames: list[pd.DataFrame] = []
+        self._failures = []
+
         for code in self._series:
-            observations = self.fetch_observations(code, self._observation_start, realtime_end)
-            reduced = parse_initial_releases(observations, code)
+            try:
+                first_vintage = self._first_vintage(code)
+                realtime_start = max(self._observation_start, first_vintage)
+                if realtime_start != self._observation_start:
+                    log.info(
+                        "Point-in-time history starts %s (requested %s): ALFRED archives no "
+                        "earlier vintage.", realtime_start, self._observation_start,
+                        extra={"source": self.source, "series_id": code},
+                    )
+                observations = self.fetch_observations(code, realtime_start, realtime_end)
+                reduced = parse_initial_releases(observations, code)
+            except Exception:
+                log.exception(
+                    "FRED series failed; continuing with the rest.",
+                    extra={"source": self.source, "series_id": code},
+                )
+                self._failures.append(code)
+                continue
+
             log.info(
                 "FRED: %d initial-release points.", len(reduced),
                 extra={"source": self.source, "series_id": code},
@@ -203,3 +306,7 @@ class FredIngester(Ingester):
 
         df = pd.concat(frames, ignore_index=True) if frames else empty_observations()
         return self.validate(df)
+
+    def partial_failures(self) -> list[str]:
+        """FRED codes that failed during the last :meth:`fetch`."""
+        return list(self._failures)

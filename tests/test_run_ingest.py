@@ -57,7 +57,12 @@ def test_fred_is_registered():
     assert set(run_ingest.select_ingesters(["fred"])) == {"fred"}
 
 
-def _stub(df=None, error: Exception | None = None, tables: dict | None = None):
+def _stub(
+    df=None,
+    error: Exception | None = None,
+    tables: dict | None = None,
+    partial: list[str] | None = None,
+):
     """A registry entry: always available, fetch() returns df or raises.
 
     Subclasses Ingester so the stub inherits the real fetch_tables() default; a bare
@@ -73,6 +78,9 @@ def _stub(df=None, error: Exception | None = None, tables: dict | None = None):
 
         def fetch_tables(self):
             return tables or {}
+
+        def partial_failures(self):
+            return partial or []
 
     return (lambda _s: True, lambda _s: _Stub())
 
@@ -148,6 +156,29 @@ def test_a_failing_source_does_not_abort_the_run_but_sets_exit_code(isolated_db,
         "good": _stub(good),
         "broken": _stub(error=RuntimeError("upstream structure changed")),
     })
+    assert run_ingest.main([]) == 1
+
+    from db import loader
+    conn = loader.connect(isolated_db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_partial_failure_loads_the_good_data_and_still_fails_the_run(isolated_db, monkeypatch):
+    """A source that lost one series keeps the other ten, but the run reports failure.
+
+    A partial run that exits 0 is indistinguishable from a clean one, which is how a
+    silently shrinking macro table survives for months.
+    """
+    good = pd.DataFrame([{
+        "source": "fred", "series_id": "CPIAUCSL", "ts": "2026-01-01",
+        "ts_release": "2026-02-11", "value": 317.6,
+    }])
+    monkeypatch.setattr(
+        run_ingest, "INGESTERS", {"fred": _stub(good, partial=["T10Y2Y"])}
+    )
     assert run_ingest.main([]) == 1
 
     from db import loader
