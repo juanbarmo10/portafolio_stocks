@@ -25,16 +25,22 @@ from core.logging_setup import configure_logging, get_logger
 from db import loader
 from ingest.base import Ingester
 from ingest.fred import FredIngester
+from ingest.ibkr_flex import (
+    IbkrFlexIngester,
+    cash_transactions_frame,
+    trades_frame,
+)
 from ingest.prices import PricesIngester
 
 log = get_logger(__name__)
 
 # Registry: name -> (availability predicate, constructor). The predicate keeps the
 # "skip, don't crash" decision next to the ingester that owns its prerequisites.
-# Grows with each phase (phase 1 still to come: ibkr_flex).
+# Grows with each phase (phase 2: sec_xbrl, sec_filings).
 INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Ingester]]] = {
     "fred": (FredIngester.is_available, FredIngester),
     "prices": (PricesIngester.is_available, PricesIngester),
+    "ibkr": (IbkrFlexIngester.is_available, IbkrFlexIngester),
 }
 
 # Where non-observation rows go. An ingester returning a table name absent from this
@@ -44,6 +50,12 @@ TABLE_LOADERS: dict[str, Callable[[Any, list[dict]], int]] = {
     "companies": loader.upsert_companies,
     "filings": loader.upsert_filings,
     "events": loader.upsert_events,
+    # The account tables take a frame rather than records, so they are adapted here
+    # instead of bending either side of the contract.
+    "trades": lambda conn, rows: loader.upsert_trades(conn, trades_frame(rows)),
+    "cash_transactions": lambda conn, rows: loader.upsert_cash_transactions(
+        conn, cash_transactions_frame(rows)
+    ),
 }
 
 

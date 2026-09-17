@@ -86,9 +86,35 @@ sources:
   ibkr_flex:
     base_url: https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService
     version: 3
-    # Handshake asíncrono: el primer GetStatement puede no estar listo (§4.1).
+    # ⚠️ El host de GetStatement NO es este: SendRequest lo devuelve en <Url> y apunta a
+    # gdcdyn (verificado 2026-09-16, RESEARCH.md §2.7). El cliente usa el devuelto.
+    # Handshake asíncrono: el primer GetStatement puede no estar listo (§4.1). Y un fallo
+    # llega con HTTP 200, con el error dentro del XML — no basta raise_for_status().
     poll_attempts: 6
     poll_base_delay_s: 3
+    poll_max_delay_s: 60
+    request_timeout_s: 60
+    # IBKR sella las ejecuciones en la zona horaria configurada del reporte, y el XML no
+    # dice cuál es. Aquí es un parámetro visible y verificable en el portal, no una
+    # suposición enterrada en el código (§10). Cámbialo si tu reporte usa otra zona.
+    statement_timezone: America/New_York
+    # Leyenda de los códigos de `notes` de una operación (RESEARCH.md §2.7). FP y RP no
+    # aparecen en la página de códigos de IBKR: se documentaron aparte, y son de
+    # fraccionadas, no de ejecución parcial.
+    trade_codes:
+      O:  Apertura
+      C:  Cierre
+      P:  Ejecución parcial
+      FP: Fracción de acción (Fractional Portion)
+      RP: Principal sin riesgo en fraccionadas (Riskless Principal)
+      R:  Reinversión de dividendo
+      Ca: Cancelada
+      A:  Asignación
+      Ex: Ejercicio
+      RI: Inversión recurrente
+      PI: Mejora de precio
+      T:  Transferencia
+      I:  Transferencia interna
 
 # ---------------------------------------------------------------------------
 # Panel — qué se muestra en cada nivel del checklist (§2). Nada de esto se
