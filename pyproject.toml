@@ -22,7 +22,11 @@ dependencies = [
 # Phase 1: real account. `ibflex` only downloads/parses the Activity Flex XML; it is
 # NOT a trading API and cannot place orders (CLAUDE.md section 4.1).
 ibkr = [
-    "ibflex>=0.15,<1",
+    # 1.1 is required, not a preference: 0.15 raises FlexParserError on any XML
+    # attribute it does not know, and a real statement carries ~1300 of them
+    # (AccountInformation.lastTradedDate is the first one hit). 1.x warns and
+    # skips instead, which is what keeps the parser alive across IBKR changes.
+    "ibflex>=1.1,<2",
 ]
 # Phase 1: daily prices and corporate actions. An optional extra, not a core dependency,
 # because it is an unofficial library over endpoints with no contract (section 4.3) —
