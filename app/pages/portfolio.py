@@ -10,11 +10,24 @@ from __future__ import annotations
 
 import streamlit as st
 
+from app.format import PUBLIC_NOTE
 from core.config import load_settings
 
 settings = load_settings()
 
 st.title("🔬 Cartera")
+
+if settings.public_mode:
+    # The unblocking steps below are instructions for whoever operates this panel, not
+    # content for a reader: publicly they are noise, and they name files nobody outside
+    # can edit. What the public view will hold is the relative half of level 4.
+    st.caption(PUBLIC_NOTE)
+    st.info(
+        "La cartera llega con `transform/portfolio.py` (fase 1, punto 4). Esta vista "
+        "publicará pesos por posición, drift frente al objetivo, concentración por "
+        "categoría de tesis y la curva de patrimonio en base 100 — nunca importes."
+    )
+    st.stop()
 
 token = settings.secret("IBKR_FLEX_TOKEN")
 query_id = settings.secret("IBKR_FLEX_QUERY_ID")

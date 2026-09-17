@@ -28,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import streamlit as st  # noqa: E402 — must follow the sys.path fix
 
+from app.format import PUBLIC_NOTE, PUBLIC_PAGES  # noqa: E402
 from core.config import load_settings  # noqa: E402
 
 st.set_page_config(page_title="equitydash", page_icon="📊", layout="wide")
@@ -43,7 +44,10 @@ pages = [
 
 settings = load_settings()
 if settings.public_mode:
-    # Public mode hides the real account and the fiscal layer (sections 11, 12).
-    pages = [p for p in pages if p.title != "Cartera"]
+    # Public mode publishes the method, not the balance. The portfolio page ships, with
+    # relative figures only (app/format.py); the fiscal layer never ships at all, because
+    # its own configuration reveals the jurisdiction (section 11).
+    pages = [p for p in pages if p.title in PUBLIC_PAGES]
+    st.sidebar.caption(PUBLIC_NOTE)
 
 st.navigation(pages).run()

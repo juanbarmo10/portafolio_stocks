@@ -11,7 +11,11 @@ logging:
   level: INFO
 
 app:
-  public_mode: false           # true oculta cuenta real (nivel 4) y capa fiscal (§11)
+  # true = despliegue público: la cartera se muestra SIN importes absolutos (base 100,
+  # pesos, porcentajes) y la capa fiscal no se despliega (§11). La lista de páginas
+  # publicables y la regla viven en app/format.py; tests/test_public_mode.py la verifica
+  # renderizando el panel entero. No hay factor de escala: ver RESEARCH.md §2.8.
+  public_mode: false
 
 # ---------------------------------------------------------------------------
 # Universo — tres círculos concéntricos (§5.1)
