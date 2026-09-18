@@ -236,6 +236,35 @@ def ttm(quarters: pd.DataFrame) -> float | None:
     return float(last["value"].sum())
 
 
+def ttm_series(
+    observations: pd.DataFrame, cik: str, metric: str, as_of: Any
+) -> pd.DataFrame:
+    """Rolling trailing-twelve-month series: ``[ts, value]``, one point per quarter end.
+
+    Each point sums the four quarters ending there, and only when those four are
+    contiguous — the same rule :func:`ttm` applies to the latest window, applied along the
+    whole history, so a fiscal-year change leaves a visible gap instead of a quiet step.
+
+    Note what this is and is not: it is *today's* view of history, filtered by what was
+    published on ``as_of``. It is not a series of what each date's TTM looked like *at that
+    date*, which would need one point-in-time pass per point; for a chart of how a business
+    has evolved, the former is the right object and the latter would mix restatements into
+    the shape of the line.
+    """
+    quarters, _skipped = quarterly(observations, cik, metric, as_of)
+    if len(quarters) < 4:
+        return pd.DataFrame(columns=["ts", "value"])
+
+    ordered = quarters.sort_values("ts").reset_index(drop=True)
+    points: list[dict[str, Any]] = []
+    for end in range(3, len(ordered)):
+        window = ordered.iloc[end - 3:end + 1]
+        value = ttm(window)
+        if value is not None:
+            points.append({"ts": window["ts"].iloc[-1], "value": value})
+    return pd.DataFrame(points, columns=["ts", "value"])
+
+
 def ttm_at(observations: pd.DataFrame, cik: str, metric: str, as_of: Any) -> float | None:
     """Trailing twelve months of one metric, as knowable on ``as_of``."""
     quarters, _skipped = quarterly(observations, cik, metric, as_of)

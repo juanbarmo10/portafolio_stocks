@@ -182,39 +182,63 @@ def read_observations(
     return pd.DataFrame([dict(zip(columns, r)) for r in rows])
 
 
-# Columns read back from the account tables. Declared here rather than imported from
-# db.loader because the dependency runs the other way (loader imports this module); a test
-# asserts the two lists stay identical, so the duplication cannot drift in silence.
-ACCOUNT_TABLES: dict[str, list[str]] = {
-    "trades": [
+# Tables readable row-by-row, with their columns and the column to order by. Declared here
+# rather than imported from db.loader because the dependency runs the other way (loader
+# imports this module); a test asserts the lists stay identical, so the duplication cannot
+# drift in silence. The allowlist is also what keeps a table name out of string-built SQL.
+READABLE_TABLES: dict[str, tuple[list[str], str]] = {
+    "trades": ([
         "trade_id", "cik", "ticker", "ts", "side", "quantity", "price", "currency",
         "commission", "fx_rate",
-    ],
-    "cash_transactions": ["tx_id", "cik", "ticker", "ts", "kind", "amount", "currency"],
+    ], "ts"),
+    "cash_transactions": (
+        ["tx_id", "cik", "ticker", "ts", "kind", "amount", "currency"], "ts",
+    ),
+    "filings": (
+        ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url"],
+        "filed_date",
+    ),
+    "events": (
+        ["event_id", "category", "cik", "ts", "is_estimated", "label", "payload"], "ts",
+    ),
+}
+
+# Kept for the account tables specifically, which is what most callers want.
+ACCOUNT_TABLES: dict[str, list[str]] = {
+    name: columns for name, (columns, _order) in READABLE_TABLES.items()
+    if name in ("trades", "cash_transactions")
 }
 
 
-def read_account_table(conn: Any, table: str) -> "pd.DataFrame":
-    """Read one of the IBKR account tables into a DataFrame.
+def read_table(conn: Any, table: str) -> "pd.DataFrame":
+    """Read one allowlisted table into a DataFrame, ordered by its time column.
 
     Args:
         conn: Open connection from :func:`open_connection`.
-        table: ``'trades'`` or ``'cash_transactions'``.
+        table: One of :data:`READABLE_TABLES`.
 
     Returns:
-        Frame with that table's columns, ordered by ``ts``. Empty (but correctly shaped)
-        when the table has no rows, so callers never special-case it.
+        Frame with that table's columns. Empty (but correctly shaped) when it has no rows,
+        so callers never special-case it.
 
     Raises:
-        ValueError: On any other table name. The allowlist is what keeps the table name
-            out of string-built SQL.
+        ValueError: On any other name.
     """
     import pandas as pd  # noqa: PLC0415 — keeps the adapter importable without pandas
 
-    if table not in ACCOUNT_TABLES:
-        raise ValueError(f"Unknown account table {table!r}. Known: {sorted(ACCOUNT_TABLES)}.")
-    columns = ACCOUNT_TABLES[table]
-    rows = conn.execute(f"SELECT {', '.join(columns)} FROM {table} ORDER BY ts").fetchall()
+    if table not in READABLE_TABLES:
+        raise ValueError(f"Unknown table {table!r}. Known: {sorted(READABLE_TABLES)}.")
+    columns, order_by = READABLE_TABLES[table]
+    rows = conn.execute(
+        f"SELECT {', '.join(columns)} FROM {table} ORDER BY {order_by}"
+    ).fetchall()
     if not rows:
         return pd.DataFrame(columns=columns)
     return pd.DataFrame([dict(zip(columns, r)) for r in rows])
+
+
+def read_account_table(conn: Any, table: str) -> "pd.DataFrame":
+    """Read one of the IBKR account tables. Thin alias over :func:`read_table`."""
+    if table not in ACCOUNT_TABLES:
+        raise ValueError(f"Unknown account table {table!r}. Known: {sorted(ACCOUNT_TABLES)}.")
+    return read_table(conn, table)

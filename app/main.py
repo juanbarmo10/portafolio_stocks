@@ -39,6 +39,7 @@ PAGES_DIR = Path(__file__).parent / "pages"
 # honest than a page that renders an empty chart (section 12).
 pages = [
     st.Page(PAGES_DIR / "today.py", title="Hoy", icon="🏠", default=True),
+    st.Page(PAGES_DIR / "company.py", title="Empresa", icon="🏢"),
     st.Page(PAGES_DIR / "portfolio.py", title="Cartera", icon="🔬"),
 ]
 

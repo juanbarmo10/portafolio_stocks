@@ -213,6 +213,10 @@ def test_a_public_render_carries_no_currency_figure(public_app):
     app = AppTest.from_file(MAIN, default_timeout=60).run()
     assert not app.exception, [e.value for e in app.exception]
 
+    # The company page is deliberately absent: it *does* show absolute amounts publicly,
+    # because a 10-K is public and hiding Microsoft's revenue would be theatre. Its rule is
+    # the asymmetric one — the company stays, the position disappears — and it is guarded
+    # in tests/test_company_page.py. Adding it here would fail on figures that are fine.
     pages = [MAIN, PORTFOLIO]
     for page in pages:
         if page != MAIN:

@@ -33,7 +33,9 @@ import pandas as pd
 MISSING = "—"
 """Rendered for an absent value. A hole stays visible; it never becomes a zero (section 12)."""
 
-PUBLIC_PAGES = frozenset({"Hoy", "Mercado", "Cartera", "Desplegar capital", "Método"})
+PUBLIC_PAGES = frozenset(
+    {"Hoy", "Mercado", "Empresa", "Cartera", "Desplegar capital", "Método"}
+)
 """Page titles that may ship in a public deployment.
 
 An allow-list, not a deny-list: a page added later is private until someone decides
@@ -80,6 +82,35 @@ def money(value: float | None, *, public: bool, currency: str = "USD") -> str:
     # two separators do not overwrite each other mid-replace.
     text = f"{value:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
     return f"{text} {currency}"
+
+
+def reported_amount(value: float | None, *, unit: str = "USD") -> str:
+    """Format a figure taken from a public filing. **Not gated, on purpose.**
+
+    Microsoft's revenue is public information: it is in a 10-K anyone can download, and
+    hiding it publicly would be theatre rather than privacy. What :func:`money` gates is
+    the *account* — the user's NAV, positions, commissions and dividends — because that is
+    the part a reader has no business knowing (RESEARCH.md section 2.8).
+
+    ⚠️ Using this function for an account figure would walk straight around that gate. If
+    the number came from IBKR, it goes through :func:`money`.
+
+    Large amounts are abbreviated, because a revenue line reading 331.839.000.000 is a
+    number nobody parses at a glance. The scale words are spelled out in Spanish on
+    purpose: "MM" means millions to some readers and thousands of millions to others, and
+    the English "billion" is not the Spanish "billón" — an abbreviation that needs a
+    convention to disambiguate is an abbreviation that will eventually be misread.
+    """
+    if value is None or pd.isna(value):
+        return MISSING
+    magnitude = abs(value)
+    for limit, scale in ((1e12, "billones"), (1e9, "mil millones"), (1e6, "millones")):
+        if magnitude >= limit:
+            scaled = f"{value / limit:,.2f}".replace(",", "\x00")
+            scaled = scaled.replace(".", ",").replace("\x00", ".")
+            return f"{scaled} {scale} {unit}"
+    text = f"{value:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+    return f"{text} {unit}"
 
 
 def pct(fraction: float | None, *, decimals: int = 1) -> str:

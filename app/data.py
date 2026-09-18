@@ -17,7 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from core.config import load_settings
-from db.database import open_connection, read_account_table, read_observations
+from db.database import open_connection, read_account_table, read_observations, read_table
 
 
 def db_path() -> Path:
@@ -88,6 +88,36 @@ def trades() -> pd.DataFrame:
 def cash_transactions() -> pd.DataFrame:
     """Dividends, withholding, interest, fees and deposits from the Flex Query."""
     return _account_table("cash_transactions", db_mtime())
+
+
+@st.cache_data(show_spinner=False)
+def _table(table: str, _mtime: float) -> pd.DataFrame:
+    """Any allowlisted table, cache-invalidated by the database mtime."""
+    path = db_path()
+    if not path.exists():
+        from db.database import READABLE_TABLES  # noqa: PLC0415 — only for the empty case
+
+        return pd.DataFrame(columns=READABLE_TABLES[table][0])
+    conn = open_connection(path)
+    try:
+        return read_table(conn, table)
+    finally:
+        conn.close()
+
+
+def filings() -> pd.DataFrame:
+    """Filing history from SEC submissions, including the amendment flag (section 9.6)."""
+    return _table("filings", db_mtime())
+
+
+def events() -> pd.DataFrame:
+    """Calendar events — earnings dates, confirmed and estimated (RESEARCH.md 2.14)."""
+    return _table("events", db_mtime())
+
+
+def sec_observations() -> pd.DataFrame:
+    """Audited XBRL facts for the tracked universe."""
+    return observations("sec", db_mtime())
 
 
 def account_observations() -> pd.DataFrame:
