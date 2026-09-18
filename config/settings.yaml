@@ -72,6 +72,13 @@ sources:
     cache_dir: .cache/sec      # caché agresiva: los datos solo cambian con un filing nuevo
     cache_ttl_hours: 24        # y si la red falla, se usa la copia vencida avisando
 
+    # Formularios que se guardan en la tabla `filings`. La versión enmendada entra sola:
+    # pedir `10-K` guarda también `10-K/A`, que es justo la interesante (§9.6). Se dejan
+    # fuera los Form 4 (transacciones de insiders) porque son cientos al año por empresa
+    # y hoy nadie los lee; añadirlos aquí es un cambio de una línea.
+    filing_forms: ["10-K", "10-Q", "8-K", "20-F", "40-F", "DEF 14A", "S-1"]
+    earnings_history: 8        # cuántos anuncios pasados se guardan en `events`
+
     # --- Normalización de taxonomía (§8 fase 2, punto 2) -----------------------------
     #
     # Las empresas usan conceptos distintos para lo mismo, y la MISMA empresa los cambia
