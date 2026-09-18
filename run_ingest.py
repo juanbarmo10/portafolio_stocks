@@ -31,16 +31,18 @@ from ingest.ibkr_flex import (
     trades_frame,
 )
 from ingest.prices import PricesIngester
+from ingest.sec_xbrl import SecXbrlIngester
 
 log = get_logger(__name__)
 
 # Registry: name -> (availability predicate, constructor). The predicate keeps the
 # "skip, don't crash" decision next to the ingester that owns its prerequisites.
-# Grows with each phase (phase 2: sec_xbrl, sec_filings).
+# Grows with each phase (phase 2 still to come: sec_filings).
 INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Ingester]]] = {
     "fred": (FredIngester.is_available, FredIngester),
     "prices": (PricesIngester.is_available, PricesIngester),
     "ibkr": (IbkrFlexIngester.is_available, IbkrFlexIngester),
+    "sec": (SecXbrlIngester.is_available, SecXbrlIngester),
 }
 
 # Where non-observation rows go. An ingester returning a table name absent from this

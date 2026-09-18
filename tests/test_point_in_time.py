@@ -127,3 +127,38 @@ def test_empty_input_does_not_raise():
     empty = pd.DataFrame(columns=["source", "series_id", "ts", "ts_release", "value"])
     assert macro.point_in_time(empty, "2026-08-01").empty
     assert macro.latest(empty, "CPIAUCSL", "2026-08-01").value is None
+
+
+# --- The same rule against real audited filings (section 4.4) -----------------
+
+
+def test_an_audited_fact_is_invisible_until_the_day_it_is_filed():
+    """Same discipline, now on SEC XBRL — where the lag is a month, not a week.
+
+    Microsoft's fiscal year ends 30 June; the 10-K carrying that revenue lands on 30 July.
+    A backtest that filtered by ``ts`` would have been trading on the annual result for a
+    month before anyone could read it. This is the case FRED cannot produce, because a
+    fiscal year is not a calendar month, and it is why phase 2 is the one that makes the
+    schema's ``ts_release`` earn its place.
+    """
+    import json
+    import pathlib
+
+    from core.config import load_settings
+    from ingest.sec_xbrl import extract_metric
+
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "sec_companyfacts_msft.json"
+    facts = json.loads(fixture.read_text(encoding="utf-8"))["facts"]
+    cfg = load_settings().source("sec")
+    records, _ = extract_metric(
+        facts, "revenue", cfg["concepts"]["revenue"], "0000789019", cfg["duration_windows"]
+    )
+    observations = pd.DataFrame(records)
+    series = "0000789019:revenue:fy"
+
+    def known_on(day: str) -> set[str]:
+        visible = macro.point_in_time(observations, pd.Timestamp(day).date())
+        return set(visible[visible["series_id"] == series]["ts"])
+
+    assert "2025-06-30" not in known_on("2025-07-29"), "the 10-K was not public yet"
+    assert "2025-06-30" in known_on("2025-07-30"), "it must appear exactly on its filing date"

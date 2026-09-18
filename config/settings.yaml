@@ -70,6 +70,93 @@ sources:
     user_agent_env: SEC_USER_AGENT
     rate_limit_rps: 8          # margen bajo el límite del orden de 10 req/s de la SEC
     cache_dir: .cache/sec      # caché agresiva: los datos solo cambian con un filing nuevo
+    cache_ttl_hours: 24        # y si la red falla, se usa la copia vencida avisando
+
+    # --- Normalización de taxonomía (§8 fase 2, punto 2) -----------------------------
+    #
+    # Las empresas usan conceptos distintos para lo mismo, y la MISMA empresa los cambia
+    # con el tiempo: MSFT reporta `Revenues` hasta ~2010 y
+    # `RevenueFromContractWithCustomerExcludingAssessedTax` después de ASC 606.
+    # Por eso cada métrica es una LISTA ORDENADA por preferencia, y el ingester guarda
+    # además qué preferencia usó en cada periodo (serie `...:src`), para poder auditar
+    # un salto raro en la serie. Si ningún concepto resuelve, el valor es None y visible
+    # — nunca se estima (§12).
+    #
+    # kind: `duration` (flujo: se acumula en un periodo) | `instant` (saldo a una fecha).
+    # unit: la unidad de `units` en companyfacts. Un hecho en otra unidad se descarta y
+    #       se cuenta; mezclar unidades en una serie es la forma silenciosa de mentir.
+    concepts:
+      revenue:
+        kind: duration
+        unit: USD
+        tags:
+          - RevenueFromContractWithCustomerExcludingAssessedTax
+          - RevenueFromContractWithCustomerIncludingAssessedTax
+          - Revenues
+          - SalesRevenueNet
+      net_income:
+        kind: duration
+        unit: USD
+        tags: [NetIncomeLoss, ProfitLoss]
+      operating_income:
+        kind: duration
+        unit: USD
+        tags: [OperatingIncomeLoss]
+      operating_cash_flow:
+        kind: duration
+        unit: USD
+        tags:
+          - NetCashProvidedByUsedInOperatingActivities
+          - NetCashProvidedByUsedInOperatingActivitiesContinuingOperations
+      capex:
+        kind: duration
+        unit: USD
+        tags:
+          - PaymentsToAcquirePropertyPlantAndEquipment
+          - PaymentsToAcquireProductiveAssets
+      sbc:                        # el análogo de los unlocks de cripto (§2)
+        kind: duration
+        unit: USD
+        tags: [ShareBasedCompensation, AllocatedShareBasedCompensationExpense]
+      buybacks:
+        kind: duration
+        unit: USD
+        tags: [PaymentsForRepurchaseOfCommonStock]
+      diluted_shares:             # la dilución: crecimiento del negocio vs. por acción
+        kind: duration
+        unit: shares
+        tags: [WeightedAverageNumberOfDilutedSharesOutstanding]
+      assets:
+        kind: instant
+        unit: USD
+        tags: [Assets]
+      liabilities:
+        kind: instant
+        unit: USD
+        tags: [Liabilities]
+      equity:
+        kind: instant
+        unit: USD
+        tags: [StockholdersEquity, StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest]
+      cash:
+        kind: instant
+        unit: USD
+        tags:
+          - CashAndCashEquivalentsAtCarryingValue
+          - CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents
+      long_term_debt:
+        kind: instant
+        unit: USD
+        tags: [LongTermDebtNoncurrent, LongTermDebt]
+
+    # Clasificación de la duración de un hecho, en días. companyfacts mezcla trimestres
+    # (3 meses) con acumulados YTD (6 y 9) y con el año (12) en el MISMO concepto, y
+    # todos comparten `end`. Meter un YTD en la serie trimestral sería un error enorme y
+    # perfectamente plausible a la vista. Lo que no cae en ninguna ventana se descarta y
+    # se cuenta — nunca en silencio.
+    duration_windows:
+      quarter: [80, 100]
+      year: [350, 380]
 
   # Stooq quedó descartado: robots.txt = `Disallow: /` y reto JS anti-bot (§4.2, §4.3).
   yfinance:
