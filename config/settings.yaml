@@ -125,6 +125,15 @@ sources:
 # elegirlos mirando el gráfico, que es §9.7 literal.
 # ---------------------------------------------------------------------------
 panel:
+  # Nivel 4 — cartera real.
+  portfolio:
+    # Diferencia relativa tolerada entre la valoración propia (cierres crudos de
+    # yfinance) y el NAV de posiciones que reporta IBKR, comparando ambos lados en la
+    # fecha del statement. Por encima: bandera visible en el panel, NUNCA un ajuste
+    # automático (§9.8) — son dos medidas distintas del mismo número, y que discrepen
+    # es información sobre los datos. Medido el 2026-09-17: 0,00%.
+    nav_tolerance: 0.005
+
   level1:
     lookback_days: 30          # ventana de la columna "cambio" de la tabla macro
     readings:
