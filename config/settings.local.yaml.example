@@ -23,6 +23,11 @@ universe:
   #    key_metric: "Concepto XBRL o derivado que hay que vigilar."
   #    invalidation: "Qué observación mata la tesis. Verificable, con umbral."
   #    review_date: 2027-01-15
+  #    # OPCIONAL (§8 fase 2, punto 7): la versión que el panel evalúa solo. El texto de
+  #    # `invalidation` sigue siendo obligatorio y sigue mandando; esto solo automatiza
+  #    # lo que es mecánico. Una regla que nombre una métrica que el panel no calcula
+  #    # reporta "no evaluable" — nunca pasa en silencio, que parecería salud.
+  #    invalidation_rule: { metric: cash_conversion, operator: "<", threshold: 0.6 }
 
 # Cartera objetivo: pesos por posición y por thesis_category, para que el drift
 # signifique algo (§13, entrada de usuario nº4). La cartera REAL nunca se escribe

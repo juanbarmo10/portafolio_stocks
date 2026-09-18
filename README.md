@@ -7,8 +7,10 @@ web con alertas y validación estadística.
 
 Horizonte: **mediano y largo plazo** (trimestres a años). **No es una herramienta de trading.**
 
-> **Estado: fase 0 (andamiaje) completa.** Todavía no hay ingesta de datos. Ver
-> [Hoja de ruta](#hoja-de-ruta).
+> **Estado: fases 0, 1 y 2 implementadas.** El panel lee macro point-in-time, precios
+> crudos, la cuenta real de IBKR y fundamentales auditados de la SEC. La cartera
+> **reconcilia contra el NAV que reporta el bróker** (dos cálculos independientes del
+> mismo número, diferencia −0,00%). Ver [Hoja de ruta](#hoja-de-ruta).
 
 ---
 
@@ -122,6 +124,22 @@ La ficha de tesis de cada empresa incluye qué observación concreta, verificabl
 mataría la tesis. No es una convención: `thesis_log.invalidation` es `NOT NULL` en el esquema
 y la carga de configuración rechaza una ficha incompleta.
 
+### La vista pública no enseña ninguna cifra absoluta
+
+Un despliegue público de este panel muestra **pesos, porcentajes y una curva de patrimonio
+en base 100**; nunca un importe. Lo que se publica es el método, no el saldo.
+
+Se descartó la alternativa obvia —escalar los importes por un factor secreto— por tres
+razones. Es **invertible**: las comisiones no escalan con el tamaño de la cartera (IBKR
+cobra un mínimo por orden), así que un solo importe publicado delata el factor y con él
+todas las cifras. **Falla abierto**: un despliegue que no herede la variable de entorno
+publica lo real. Y pone **números fabricados con aspecto de reales** en pantalla.
+
+La regla es código, no un recordatorio: la función que formatea importes **lanza una
+excepción** en modo público, la lista de páginas publicables es blanca (una página nueva es
+privada por defecto) y un test renderiza el panel entero y falla ante cualquier cadena con
+forma de dinero.
+
 ### Nunca un valor estimado en silencio
 
 Cuando un dato falta, se muestra `None`. Las empresas usan conceptos XBRL distintos para lo
@@ -183,6 +201,18 @@ query id. La query debe incluir las secciones `AccountInformation`, `OpenPositio
 python run_ingest.py --dry-run       # crea/verifica la base de datos, sin llamadas de red
 python run_ingest.py                 # ejecuta la ingesta registrada
 python run_ingest.py --only fred     # solo una fuente
+```
+
+Fuentes registradas: `fred`, `prices`, `ibkr`, `sec`, `sec_filings`. Una fuente sin sus
+credenciales configuradas **se omite con aviso**, no rompe el pipeline; y una unidad rota
+dentro de una fuente (una serie, un ticker, una empresa) se reporta y devuelve código de
+salida ≠ 0 sin llevarse por delante a las demás.
+
+El panel se abre con:
+
+```bash
+streamlit run app/main.py                      # vista local, con importes
+PUBLIC_MODE=1 streamlit run app/main.py        # vista pública, sin ninguna cifra absoluta
 ```
 
 Re-ejecutar es seguro por construcción: toda escritura pasa por un
@@ -248,8 +278,8 @@ o a medias.
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 | Andamiaje: esquema, adaptador de BD, loader idempotente, config, logging, CI | ✅ |
-| 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | macro ✅, precios ✅, resto pendiente |
-| 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor | pendiente |
+| 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | ✅ |
+| 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor | ✅ implementada; falta la página del nivel 3 |
 | 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | pendiente |
 | 4 | Alertas Telegram y validación estadística | pendiente |
 | 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | pendiente |
