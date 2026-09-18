@@ -122,10 +122,31 @@ sources:
         kind: duration
         unit: USD
         tags: [PaymentsForRepurchaseOfCommonStock]
+      # ⚠️ `average`, NO `duration`: es un promedio ponderado del periodo, no un flujo
+      # que se acumule. Sumar cuatro trimestres daría 4x el número de acciones, y
+      # derivar el Q4 restando (FY − Q1 − Q2 − Q3) daría un disparate — las dos cosas
+      # producirían una cifra plausible a la vista. Ver transform/value_accrual.py.
       diluted_shares:             # la dilución: crecimiento del negocio vs. por acción
-        kind: duration
+        kind: average
         unit: shares
         tags: [WeightedAverageNumberOfDilutedSharesOutstanding]
+      issuance:                   # emisión: lo que hay que restar a la recompra bruta (§2)
+        kind: duration
+        unit: USD
+        tags:
+          - ProceedsFromIssuanceOfCommonStock
+          - ProceedsFromIssuanceOrSaleOfEquity
+          - ProceedsFromStockOptionsExercised
+      income_tax_expense:         # para la tasa efectiva OBSERVADA, no una supuesta
+        kind: duration
+        unit: USD
+        tags: [IncomeTaxExpenseBenefit]
+      pretax_income:
+        kind: duration
+        unit: USD
+        tags:
+          - IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest
+          - IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments
       assets:
         kind: instant
         unit: USD
@@ -212,6 +233,14 @@ sources:
 # elegirlos mirando el gráfico, que es §9.7 literal.
 # ---------------------------------------------------------------------------
 panel:
+  # Nivel 3 — ¿sigue viva la tesis? (§2, fase 2)
+  level3:
+    # Coste de capital de referencia contra el que se compara el ROIC. En `null` el panel
+    # muestra "no calculable": estimar un WACC necesita beta y prima de riesgo, y un
+    # número inventado dentro de un cálculo que luego parece preciso es justo lo que
+    # prohíbe §12. Ponlo en settings.local.yaml cuando decidas TU tasa exigida.
+    hurdle_rate: null
+
   # Nivel 4 — cartera real.
   portfolio:
     # Diferencia relativa tolerada entre la valoración propia (cierres crudos de
