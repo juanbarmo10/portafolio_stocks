@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 import pandas as pd
 
@@ -98,6 +98,20 @@ class Ingester(ABC):
         Called by the runner right after :meth:`fetch`. Default: nothing.
         """
         return {}
+
+    def attach_database(self, conn: Any) -> None:
+        """Optional: read from the database what the ingester needs to know *what* to fetch.
+
+        Deliberately narrow: this is for deciding the work, never for transforming data
+        (section 10 keeps transformations pure and out of ingest). The price ingester is
+        the case that motivated it — the tickers actually held live in the account data,
+        so without this it would download the market references and the written universe
+        and still leave the real portfolio unpriced, which is exactly the hole the
+        reconciliation found.
+
+        Called by the runner before :meth:`fetch`. Default: nothing.
+        """
+        return None
 
     def partial_failures(self) -> list[str]:
         """Sub-units (series, tickers) that failed while the rest of the fetch succeeded.

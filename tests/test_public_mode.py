@@ -152,10 +152,13 @@ def _rendered_text(app: AppTest) -> str:
     return "\n".join(chunks)
 
 
-@pytest.fixture()
-def public_app(tmp_path, monkeypatch):
-    """A public deployment pointed at a throwaway database with macro rows in it."""
-    db_path = tmp_path / "public.db"
+def seed(db_path) -> None:
+    """A database with macro *and* account data in it.
+
+    The account rows are what make the leak scan mean anything: with an empty database the
+    portfolio page renders two paragraphs and no figure, so it would pass the scan without
+    ever exercising a valuation, a NAV curve or a metric.
+    """
     conn = loader.init_db(db_path)
     try:
         loader.upsert_observations(conn, pd.DataFrame([
@@ -163,9 +166,39 @@ def public_app(tmp_path, monkeypatch):
              "ts_release": "2026-08-28", "value": 0.39},
             {"source": "fred", "series_id": "VIXCLS", "ts": "2026-08-27",
              "ts_release": "2026-08-27", "value": 15.2},
+            {"source": "ibkr", "series_id": "TMUS:position_qty", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 3.0},
+            {"source": "ibkr", "series_id": "TMUS:position_cost_basis", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 650.85},
+            {"source": "ibkr", "series_id": "NAV:total", "ts": "2026-09-14",
+             "ts_release": "2026-09-14", "value": 1100.00},
+            {"source": "ibkr", "series_id": "NAV:total", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 1138.97},
+            {"source": "ibkr", "series_id": "NAV:stock", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 541.41},
+            {"source": "yfinance", "series_id": "TMUS:close_raw", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 180.47},
+        ]))
+        loader.upsert_trades(conn, pd.DataFrame([
+            {"trade_id": "1", "cik": None, "ticker": "TMUS",
+             "ts": "2025-10-24T17:00:00+00:00", "side": "buy", "quantity": 3.0,
+             "price": 216.60, "currency": "USD", "commission": -0.35, "fx_rate": 1.0},
+        ]))
+        loader.upsert_cash_transactions(conn, pd.DataFrame([
+            {"tx_id": "d1", "cik": None, "ticker": "TMUS", "ts": "2026-09-10T20:20:00+00:00",
+             "kind": "dividend", "amount": 1.02, "currency": "USD"},
+            {"tx_id": "w1", "cik": None, "ticker": "TMUS", "ts": "2026-09-10T20:20:00+00:00",
+             "kind": "withholding_tax", "amount": -0.31, "currency": "USD"},
         ]))
     finally:
         conn.close()
+
+
+@pytest.fixture()
+def public_app(tmp_path, monkeypatch):
+    """A public deployment pointed at a throwaway database with real-shaped data in it."""
+    db_path = tmp_path / "public.db"
+    seed(db_path)
 
     monkeypatch.setattr(app_data, "db_path", lambda: db_path)
     monkeypatch.setenv("PUBLIC_MODE", "1")
@@ -206,3 +239,100 @@ def test_the_public_portfolio_page_states_the_rule_and_drops_the_operator_notes(
     text = _rendered_text(app)
     assert "base 100" in text, "the public view does not say its figures are relative"
     assert "IBKR_FLEX_TOKEN" not in text, "operator instructions leaked into the public view"
+
+
+@pytest.fixture()
+def private_app(tmp_path, monkeypatch):
+    """The same database, rendered as the operator sees it."""
+    db_path = tmp_path / "private.db"
+    seed(db_path)
+    monkeypatch.setattr(app_data, "db_path", lambda: db_path)
+    monkeypatch.delenv("PUBLIC_MODE", raising=False)
+    config.load_settings.cache_clear()
+    st.cache_data.clear()
+    yield db_path
+    st.cache_data.clear()
+
+
+def test_the_portfolio_page_actually_renders_its_figures_publicly(public_app):
+    """Guards the guard: the leak scan above is only meaningful if this page has content."""
+    app = AppTest.from_file(MAIN, default_timeout=60).run()
+    app.switch_page(PORTFOLIO)
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+
+    text = _rendered_text(app)
+    assert "TMUS" in text, "the position table did not render"
+    assert "Reconciliación" in text, "the reconciliation section did not render"
+    assert app.get("arrow_vega_lite_chart") or app.get("vega_lite_chart"), "no equity curve"
+
+
+def test_the_same_page_shows_amounts_privately(private_app):
+    """The two modes must actually differ, or the public one proves nothing."""
+    app = AppTest.from_file(MAIN, default_timeout=60).run()
+    app.switch_page(PORTFOLIO)
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+
+    text = _rendered_text(app)
+    assert CURRENCY_FIGURE.search(text), "the operator's view lost its amounts"
+    assert "Cantidad" in text, "the quantity column is private-only and vanished"
+
+
+# Column labels a public table may carry. An allow-list, like PUBLIC_PAGES: a new column
+# is private until someone decides otherwise. It exists because the currency scan cannot
+# see a bare number — a column of amounts with no currency mark would sail past it, and
+# this is the structural answer to that documented limit.
+# Scoped to the portfolio page, which is the only one that handles money: switching to a
+# page re-runs the script, so these are its tables and nothing else. Keeping the macro
+# page's labels out matters — its "Valor" column holds a rate, and allowing that name here
+# would wave through a column of amounts called the same thing.
+PUBLIC_TABLE_COLUMNS = frozenset({
+    "Posición", "Peso", "Precio", "Coste medio", "Retorno no realizado",
+    "Fecha precio", "Categoría", "Posiciones", "Tickers",
+    "Peso actual", "Objetivo", "Drift",
+})
+
+
+def _chart_data(chart) -> pd.DataFrame:
+    """The data actually sent to the browser for a chart, decoded from its proto."""
+    import pyarrow as pa
+
+    return pa.ipc.open_stream(chart.proto.datasets[0].data.data).read_pandas()
+
+
+def test_public_tables_only_carry_relative_columns(public_app):
+    """A bare number in a table is invisible to the currency scan; the columns are not."""
+    app = AppTest.from_file(MAIN, default_timeout=60).run()
+    app.switch_page(PORTFOLIO)
+    app.run()
+
+    seen = set()
+    for element in app.get("dataframe"):
+        seen |= set(pd.DataFrame(element.value).columns)
+    assert seen, "no table rendered — the check would be vacuous"
+
+    forbidden = seen - PUBLIC_TABLE_COLUMNS
+    assert not forbidden, f"public table exposes {sorted(forbidden)}"
+
+
+def test_the_public_equity_curve_is_rebased_not_absolute(public_app):
+    """The chart is the other thing the text scan cannot see."""
+    app = AppTest.from_file(MAIN, default_timeout=60).run()
+    app.switch_page(PORTFOLIO)
+    app.run()
+
+    chart = (app.get("arrow_vega_lite_chart") or app.get("vega_lite_chart"))[0]
+    values = _chart_data(chart)["value"]
+    assert float(values.iloc[0]) == 100.0, "the public curve was not rebased"
+    assert float(values.max()) < 1000, "the curve carries NAV-sized numbers"
+
+
+def test_the_private_equity_curve_keeps_the_real_nav(private_app):
+    """Symmetry check: rebasing must be a public-mode decision, not a global one."""
+    app = AppTest.from_file(MAIN, default_timeout=60).run()
+    app.switch_page(PORTFOLIO)
+    app.run()
+
+    chart = (app.get("arrow_vega_lite_chart") or app.get("vega_lite_chart"))[0]
+    assert float(_chart_data(chart)["value"].iloc[0]) == 1100.00

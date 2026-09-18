@@ -150,6 +150,9 @@ def run(args: argparse.Namespace) -> int:
         failures: list[str] = []
         for name, ingester in ingesters.items():
             try:
+                # Lets an ingester look up what to fetch (held tickers, last ingested
+                # date) before it fetches it. Most do nothing here.
+                ingester.attach_database(conn)
                 df = ingester.fetch()
                 rows = loader.upsert_observations(conn, df)
                 log.info("Ingester '%s' upserted %d rows.", name, rows, extra={"source": name})

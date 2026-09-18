@@ -17,6 +17,7 @@ import pytest
 from db import loader
 from db.loader import OBSERVATION_COLUMNS
 from ingest.prices import (
+    PricesIngester,
     build_corporate_actions,
     build_observations,
     split_factor,
@@ -226,3 +227,52 @@ def test_empty_history_returns_empty_without_raising():
 def test_zero_ratio_split_is_ignored():
     """yfinance uses 0.0 for "no action on this bar"; it must never zero a price."""
     assert split_factor(dt.date(2020, 1, 1), {dt.date(2020, 6, 1): 0.0}) == 1.0
+
+
+def _settings():
+    """Real settings.yaml, so the configured ticker list is the one the project ships."""
+    from core.config import load_settings
+
+    return load_settings()
+
+
+def test_held_tickers_join_the_download_list(tmp_path):
+    """A position outside the written universe must still get a price (section 12).
+
+    Without this the reconciliation against IBKR's NAV cannot run at all for a holding
+    whose thesis card has not been written yet — and refusing to value what you own is not
+    the same discipline as refusing to invent a number.
+    """
+    import pandas as pd
+
+    from db import loader
+
+    ingester = PricesIngester(_settings())
+    before = list(ingester._tickers)
+    assert "TMUS" not in before
+
+    conn = loader.init_db(tmp_path / "held.db")
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            {"source": "ibkr", "series_id": "TMUS:position_qty", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 1.0},
+        ]))
+        ingester.attach_database(conn)
+    finally:
+        conn.close()
+
+    assert "TMUS" in ingester._tickers
+    assert before == ingester._tickers[:len(before)], "the configured list was reordered"
+
+
+def test_attaching_an_empty_database_changes_nothing(tmp_path):
+    from db import loader
+
+    ingester = PricesIngester(_settings())
+    before = list(ingester._tickers)
+    conn = loader.init_db(tmp_path / "empty.db")
+    try:
+        ingester.attach_database(conn)
+    finally:
+        conn.close()
+    assert ingester._tickers == before

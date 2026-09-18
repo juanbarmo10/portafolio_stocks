@@ -90,3 +90,16 @@ def test_postgres_executescript_splits_statements_and_skips_pragma():
     assert any(s.startswith("CREATE TABLE IF NOT EXISTS observations") for s in executed)
     # A ';' inside a comment must not have split a statement in two.
     assert all(s.upper().startswith(("CREATE TABLE", "CREATE INDEX")) for s in executed)
+
+
+def test_account_table_columns_match_the_loader():
+    """The reader declares its own columns because the import runs the other way.
+
+    db.loader imports db.database, so the reader cannot import the loader's constants back.
+    The duplication is deliberate and this test is the reason it cannot drift in silence.
+    """
+    from db import loader
+    from db.database import ACCOUNT_TABLES
+
+    assert ACCOUNT_TABLES["trades"] == loader.TRADE_COLUMNS
+    assert ACCOUNT_TABLES["cash_transactions"] == loader.CASH_TRANSACTION_COLUMNS

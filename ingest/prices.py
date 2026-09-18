@@ -232,6 +232,33 @@ class PricesIngester(Ingester):
         ]
         return list(dict.fromkeys([*settings.market_references, *tracked]))
 
+    def attach_database(self, conn: Any) -> None:
+        """Add whatever the account actually holds to the download list.
+
+        A position with no price cannot be valued, and the panel refuses to estimate one
+        (section 12), so the reconciliation against IBKR's NAV simply could not run for a
+        holding outside the written universe. Which is the common case early on: the
+        universe is a list of *analysis*, and a ticker can be held before its thesis card
+        is written — section 5.3 flags that separately, it does not excuse leaving the
+        position unpriced.
+        """
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT series_id FROM observations "
+                "WHERE source = 'ibkr' AND series_id LIKE '%:position_qty'"
+            ).fetchall()
+        except Exception as exc:  # a fresh database has no rows, not a failure
+            log.debug("Could not read held positions: %s", exc)
+            return
+        held = [str(row[0]).rsplit(":", 1)[0] for row in rows]
+        added = [ticker for ticker in held if ticker not in self._tickers]
+        if added:
+            self._tickers.extend(added)
+            log.info(
+                "Adding %d held ticker(s) to the price download: %s",
+                len(added), sorted(added), extra={"source": SOURCE},
+            )
+
     @staticmethod
     def is_available(settings: Settings) -> bool:
         """Whether yfinance is installed and there is at least one ticker configured."""

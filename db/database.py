@@ -180,3 +180,41 @@ def read_observations(
     if not rows:
         return pd.DataFrame(columns=columns)
     return pd.DataFrame([dict(zip(columns, r)) for r in rows])
+
+
+# Columns read back from the account tables. Declared here rather than imported from
+# db.loader because the dependency runs the other way (loader imports this module); a test
+# asserts the two lists stay identical, so the duplication cannot drift in silence.
+ACCOUNT_TABLES: dict[str, list[str]] = {
+    "trades": [
+        "trade_id", "cik", "ticker", "ts", "side", "quantity", "price", "currency",
+        "commission", "fx_rate",
+    ],
+    "cash_transactions": ["tx_id", "cik", "ticker", "ts", "kind", "amount", "currency"],
+}
+
+
+def read_account_table(conn: Any, table: str) -> "pd.DataFrame":
+    """Read one of the IBKR account tables into a DataFrame.
+
+    Args:
+        conn: Open connection from :func:`open_connection`.
+        table: ``'trades'`` or ``'cash_transactions'``.
+
+    Returns:
+        Frame with that table's columns, ordered by ``ts``. Empty (but correctly shaped)
+        when the table has no rows, so callers never special-case it.
+
+    Raises:
+        ValueError: On any other table name. The allowlist is what keeps the table name
+            out of string-built SQL.
+    """
+    import pandas as pd  # noqa: PLC0415 — keeps the adapter importable without pandas
+
+    if table not in ACCOUNT_TABLES:
+        raise ValueError(f"Unknown account table {table!r}. Known: {sorted(ACCOUNT_TABLES)}.")
+    columns = ACCOUNT_TABLES[table]
+    rows = conn.execute(f"SELECT {', '.join(columns)} FROM {table} ORDER BY ts").fetchall()
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame([dict(zip(columns, r)) for r in rows])
