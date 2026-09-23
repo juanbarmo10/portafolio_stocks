@@ -20,6 +20,7 @@ import streamlit as st
 from app import data as app_data
 from app.format import PUBLIC_NOTE, money, pct, rebase_100
 from core.config import load_settings
+from transform import corporate_actions as reorg
 from transform import portfolio
 
 # Categorical slot 1 of the reference palette, as on the macro page.
@@ -136,6 +137,26 @@ if unmatched:
         "Ventas sin compra en el histórico descargado: " + "; ".join(unmatched) + ". "
         "No se les asigna coste cero, así que su PnL realizado no se puede afirmar."
     )
+
+# Section 9.2: an unrecognized or contradicted corporate action puts the quantity and the
+# cost base of that position in doubt, so it is raised here — next to the other reasons a
+# number below might not mean what it says — and never resolved automatically.
+for review in reorg.review_positions(app_data.corporate_actions(), positions):
+    st.error(
+        f"**{review.ticker} — revisar.** "
+        + " ".join(finding.detail for finding in review.reviews)
+    )
+
+notes = reorg.data_quality_notes(app_data.corporate_actions())
+if notes:
+    with st.expander(f"Notas de calidad de datos ({len(notes)})"):
+        st.caption(
+            "Sobre valores que **no** tienes en cartera: referencias de mercado, sobre "
+            "todo. No bloquean nada; están aparte para que una bandera permanente no "
+            "entrene a ignorar las que sí importan."
+        )
+        for note in notes:
+            st.markdown(f"- **{note.ticker}** ({note.ex_date}): {note.detail}")
 
 # --- 2. Positions --------------------------------------------------------------------
 

@@ -201,6 +201,11 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
     "events": (
         ["event_id", "category", "cik", "ts", "is_estimated", "label", "payload"], "ts",
     ),
+    "corporate_actions": (
+        ["action_id", "cik", "ticker", "kind", "ex_date", "ratio", "amount", "currency",
+         "source"],
+        "ex_date",
+    ),
 }
 
 # Kept for the account tables specifically, which is what most callers want.

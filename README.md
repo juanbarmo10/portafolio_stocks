@@ -256,6 +256,7 @@ db/loader   upsert idempotente (ON CONFLICT DO UPDATE)
 db/         SQLite (fases 0-4) o PostgreSQL (fase 5) vía DATABASE_URL
               │
 transform/  funciones puras, sin red — entrada faltante -> None
+              ajuste por acciones corporativas A UNA FECHA DE CORTE, nunca "la de hoy"
               │
 app/        Streamlit multipágina (st.navigation)
               ├── 🏠 Hoy       nivel 1, macro point-in-time

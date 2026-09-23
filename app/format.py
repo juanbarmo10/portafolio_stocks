@@ -33,14 +33,18 @@ import pandas as pd
 MISSING = "—"
 """Rendered for an absent value. A hole stays visible; it never becomes a zero (section 12)."""
 
-PUBLIC_PAGES = frozenset(
-    {"Hoy", "Mercado", "Empresa", "Cartera", "Desplegar capital", "Método"}
-)
+PUBLIC_PAGES = frozenset({"Hoy", "Empresa", "Cartera"})
 """Page titles that may ship in a public deployment.
 
 An allow-list, not a deny-list: a page added later is private until someone decides
-otherwise, so the way this fails is a missing page rather than a published one. The
-fiscal page is absent deliberately and must stay absent — its configuration alone
+otherwise, so the way this fails is a missing page rather than a published one.
+
+**Only pages that exist are listed.** "Mercado", "Desplegar capital" and "Método" were
+here before they were built, which quietly broke the rule above: the day phase 3 created
+a page titled "Mercado" it would have shipped publicly without anyone deciding so. A name
+earns its place here when the page exists and someone has looked at what it renders.
+
+The fiscal page is absent deliberately and must stay absent — its configuration alone
 reveals the jurisdiction (section 11).
 """
 

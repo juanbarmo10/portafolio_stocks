@@ -115,6 +115,15 @@ def events() -> pd.DataFrame:
     return _table("events", db_mtime())
 
 
+def corporate_actions() -> pd.DataFrame:
+    """Splits, dividends and reorgs from **both** providers, each tagged with its source.
+
+    Both are returned on purpose: ``transform.corporate_actions`` needs the two witnesses
+    present to notice that they disagree (section 9.2).
+    """
+    return _table("corporate_actions", db_mtime())
+
+
 def sec_observations() -> pd.DataFrame:
     """Audited XBRL facts for the tracked universe."""
     return observations("sec", db_mtime())

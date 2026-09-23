@@ -110,6 +110,29 @@ def test_the_fiscal_page_can_never_be_allowed_publicly():
     assert "Fiscal" not in PUBLIC_PAGES
 
 
+def test_the_allow_list_only_names_pages_that_exist():
+    """A page cannot be pre-approved before anyone has seen what it renders.
+
+    The allow-list is only fail-closed if it is filled in *after* the page is built.
+    Listing "Mercado" ahead of phase 3 meant that page would have shipped publicly the
+    day it was created, with nobody deciding so — which is the failure this list exists
+    to prevent, arriving through the list itself.
+    """
+    pages_dir = pathlib.Path(__file__).resolve().parents[1] / "app" / "pages"
+    built = {
+        path.stem for path in pages_dir.glob("*.py")
+        if not path.stem.startswith("_")
+    }
+    titles = {"Hoy": "today", "Empresa": "company", "Cartera": "portfolio",
+              "Mercado": "market", "Desplegar capital": "deploy", "Método": "method",
+              "Fiscal": "fiscal"}
+    for title in PUBLIC_PAGES:
+        assert titles[title] in built, (
+            f"{title!r} is allowed publicly but app/pages/{titles[title]}.py does not "
+            "exist yet — add it to PUBLIC_PAGES when the page is built and reviewed"
+        )
+
+
 # --- Layer 2: the whole rendered app ------------------------------------------
 
 pytest.importorskip("streamlit", reason="the 'app' extra is not installed")

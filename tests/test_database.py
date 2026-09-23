@@ -103,3 +103,20 @@ def test_account_table_columns_match_the_loader():
 
     assert ACCOUNT_TABLES["trades"] == loader.TRADE_COLUMNS
     assert ACCOUNT_TABLES["cash_transactions"] == loader.CASH_TRANSACTION_COLUMNS
+
+
+def test_every_readable_table_matches_the_loader_column_list():
+    """The two lists are declared separately (the dependency runs one way) so they are
+    compared here — otherwise they drift in silence and a read returns the wrong shape."""
+    from db.database import READABLE_TABLES
+
+    expected = {
+        "trades": loader.TRADE_COLUMNS,
+        "cash_transactions": loader.CASH_TRANSACTION_COLUMNS,
+        "filings": loader.FILING_COLUMNS,
+        "events": loader.EVENT_COLUMNS,
+        "corporate_actions": loader.CORPORATE_ACTION_COLUMNS,
+    }
+    assert set(READABLE_TABLES) == set(expected), "a readable table has no column check"
+    for table, columns in expected.items():
+        assert READABLE_TABLES[table][0] == columns, table

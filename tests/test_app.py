@@ -131,3 +131,79 @@ def test_charts_never_put_two_scales_on_one_axis(app_db):
     credit = json.loads(charts[0].proto.spec)["layer"][0]["encoding"]["color"]["scale"]
     assert credit["range"] == ["#2a78d6", "#eb6834"], "the palette slots drifted"
     assert credit["domain"][0] == "Prima crédito Baa − 10a", "series order is not fixed"
+
+
+# --- Section 9.2 reaches the screen -------------------------------------------
+
+
+def test_a_contradicted_corporate_action_reaches_the_portfolio_page(app_db):
+    """The flag is only worth computing if the operator sees it before trusting a number.
+
+    A spin-off IBKR calls a spin-off and yfinance calls a split, on a ticker that is held:
+    the quantity and the cost base of that position are in doubt until a human looks.
+    """
+    conn = loader.init_db(app_db)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            {"source": "ibkr", "series_id": "XLF:position_qty", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 4.0},
+            {"source": "ibkr", "series_id": "XLF:position_cost_basis", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 160.0},
+            {"source": "yfinance", "series_id": "XLF:close_raw", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 45.0},
+            {"source": "ibkr", "series_id": "NAV:stock", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 180.0},
+        ]))
+        loader.upsert_corporate_actions(conn, [
+            {"action_id": "ibkr:1", "cik": None, "ticker": "XLF", "kind": "spinoff",
+             "ex_date": "2016-09-19", "ratio": None, "amount": None, "currency": "USD",
+             "source": "ibkr"},
+            {"action_id": "yf:1", "cik": None, "ticker": "XLF", "kind": "split",
+             "ex_date": "2016-09-19", "ratio": 1.231, "amount": None, "currency": None,
+             "source": "yfinance"},
+        ])
+    finally:
+        conn.close()
+
+    at = AppTest.from_file(MAIN, default_timeout=60).run()
+    at.switch_page(PORTFOLIO)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+
+    errors = " ".join(element.value for element in at.get("error"))
+    assert "XLF — revisar" in errors
+    assert "Manda IBKR" in errors, "the panel must say which source wins"
+    assert "no se corrige solo" in errors, "it must say it does not fix it by itself"
+
+
+def test_a_portfolio_with_no_contradiction_raises_nothing(app_db):
+    """Guards the guard: a flag that always fires is a flag nobody reads."""
+    conn = loader.init_db(app_db)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            {"source": "ibkr", "series_id": "AAPL:position_qty", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 4.0},
+            {"source": "ibkr", "series_id": "AAPL:position_cost_basis", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 160.0},
+            {"source": "yfinance", "series_id": "AAPL:close_raw", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 45.0},
+            {"source": "ibkr", "series_id": "NAV:stock", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 180.0},
+        ]))
+        loader.upsert_corporate_actions(conn, [
+            {"action_id": "ibkr:1", "cik": None, "ticker": "AAPL", "kind": "split",
+             "ex_date": "2020-08-31", "ratio": None, "amount": None, "currency": "USD",
+             "source": "ibkr"},
+            {"action_id": "yf:1", "cik": None, "ticker": "AAPL", "kind": "split",
+             "ex_date": "2020-08-31", "ratio": 4.0, "amount": None, "currency": None,
+             "source": "yfinance"},
+        ])
+    finally:
+        conn.close()
+
+    at = AppTest.from_file(MAIN, default_timeout=60).run()
+    at.switch_page(PORTFOLIO)
+    at.run()
+
+    errors = " ".join(element.value for element in at.get("error"))
+    assert "revisar" not in errors
