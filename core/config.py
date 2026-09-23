@@ -95,6 +95,30 @@ class Settings:
         """Companies with a written thesis (section 5.2). Lives in settings.local.yaml."""
         return list(self.raw.get("universe", {}).get("tracked", []) or [])
 
+    @property
+    def watchlist_companies(self) -> list[dict[str, Any]]:
+        """Candidates **under study**: ticker and CIK only, no thesis yet (section 5.1).
+
+        The fourth circle, added on 2026-09-23. Without it the panel had a deadlock: it
+        would not fetch a single figure about a company until its thesis card was complete,
+        so the tool built to support the research could not be used *during* it — and the
+        only way out was to invent an invalidation criterion, which is exactly what section
+        5.2 exists to prevent.
+
+        A watchlist entry buys data and nothing else. It never reaches the invalidation
+        board, never counts as universe, and never acquires an opinion it has not earned.
+        """
+        return list(self.raw.get("universe", {}).get("watchlist", []) or [])
+
+    @property
+    def researched_companies(self) -> list[dict[str, Any]]:
+        """Every company the ingesters should fetch: tracked **and** under study.
+
+        The union exists only to decide *what to download*. Anything that expresses a
+        judgement reads :attr:`tracked_companies`, which is the set with a written thesis.
+        """
+        return [*self.tracked_companies, *self.watchlist_companies]
+
     def source(self, name: str) -> dict[str, Any]:
         """Return the parameter block for a named data source (e.g. 'fred', 'sec')."""
         return dict(self.raw.get("sources", {}).get(name, {}))
@@ -186,6 +210,55 @@ def validate_theses(companies: list[dict[str, Any]]) -> None:
         )
 
 
+WATCHLIST_REQUIRED_FIELDS = ("ticker", "cik")
+
+
+def validate_watchlist(
+    watchlist: list[dict[str, Any]], tracked: list[dict[str, Any]]
+) -> None:
+    """Validate the under-study circle (section 5.1).
+
+    Only ``ticker`` and ``cik`` are required, and that is the entire point: a candidate is
+    something you are still reading about. Thesis fields may be present as a draft and are
+    simply carried; what a draft never does is promote itself, because promotion is the
+    act of moving the entry to ``tracked``, where :func:`validate_theses` applies in full.
+
+    Raises:
+        ValueError: On a missing or malformed field, or on a ticker that appears in both
+            circles — that one is ambiguous rather than harmless: the two answer the
+            question "does this company have a thesis?" differently.
+    """
+    problems: list[str] = []
+    for entry in watchlist:
+        missing = [
+            f for f in WATCHLIST_REQUIRED_FIELDS if not str(entry.get(f) or "").strip()
+        ]
+        if missing:
+            label = entry.get("ticker") or entry.get("cik") or "<unnamed>"
+            problems.append(f"{label}: missing {missing}")
+            continue
+        problem = _cik_problem(entry["cik"])
+        if problem:
+            problems.append(f"{entry['ticker']}: {problem}")
+
+    both = {str(e.get("ticker")) for e in watchlist} & {
+        str(e.get("ticker")) for e in tracked
+    }
+    if both:
+        problems.append(
+            f"{sorted(both)}: in `tracked` and in `watchlist` at once. A company either "
+            "has a written thesis or is still being read about; it cannot be both. "
+            "Promoting means REMOVING it from watchlist."
+        )
+
+    if problems:
+        raise ValueError(
+            "Invalid entries in universe.watchlist (CLAUDE.md section 5.1 — a candidate "
+            "under study needs a ticker and a CIK, nothing more):\n  "
+            + "\n  ".join(problems)
+        )
+
+
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     """Load and cache the effective settings.
@@ -239,4 +312,5 @@ def load_settings() -> Settings:
         public_mode=public_mode,
     )
     validate_theses(settings.tracked_companies)
+    validate_watchlist(settings.watchlist_companies, settings.tracked_companies)
     return settings

@@ -190,13 +190,18 @@ class SecXbrlIngester(Ingester):
 
     @staticmethod
     def companies_for(settings: Settings) -> list[tuple[str, str]]:
-        """``(cik, ticker)`` for every tracked company that has a CIK.
+        """``(cik, ticker)`` for every company to fetch: tracked **and** under study.
 
-        The CIK is the key, not the ticker (section 9.3). A thesis card without one is
-        skipped rather than guessed at.
+        The union on purpose. Fetching is not judging: a candidate in the watchlist has no
+        thesis and earns no opinion anywhere in the panel, but it does need its filings
+        downloaded — otherwise the tool meant to support the research could not be used
+        during it (section 5.1, the fourth circle).
+
+        The CIK is the key, not the ticker (section 9.3). An entry without one is skipped
+        rather than guessed at.
         """
         out: list[tuple[str, str]] = []
-        for card in settings.tracked_companies:
+        for card in settings.researched_companies:
             cik, ticker = card.get("cik"), card.get("ticker", "?")
             if cik:
                 out.append((str(cik).zfill(10), str(ticker)))
@@ -204,7 +209,11 @@ class SecXbrlIngester(Ingester):
 
     @staticmethod
     def is_available(settings: Settings) -> bool:
-        """Needs an identifiable User-Agent and at least one company with a CIK."""
+        """Needs an identifiable User-Agent and at least one company with a CIK.
+
+        A single watchlist entry is enough: that is what makes the panel usable while the
+        thesis is still being written.
+        """
         cfg = settings.source("sec")
         agent = settings.secret(str(cfg.get("user_agent_env", "SEC_USER_AGENT")))
         return bool(agent) and bool(SecXbrlIngester.companies_for(settings))
@@ -263,8 +272,9 @@ class SecXbrlIngester(Ingester):
         """Normalized fundamentals for every tracked company with a CIK."""
         if not self._companies:
             log.warning(
-                "No tracked company has a CIK. Write the thesis cards in "
-                "settings.local.yaml (sections 5.2, 9.3).", extra={"source": SOURCE},
+                "No company to fetch. Add a candidate to universe.watchlist (ticker and "
+                "CIK are enough) or a full thesis card to universe.tracked in "
+                "settings.local.yaml (sections 5.1, 5.2, 9.3).", extra={"source": SOURCE},
             )
             return empty_observations()
 

@@ -138,6 +138,30 @@ if unmatched:
         "No se les asigna coste cero, así que su PnL realizado no se puede afirmar."
     )
 
+# Section 5.2 biting where it should. The watchlist buys data, not permission: a candidate
+# you are still reading about is not a company with a thesis, and holding one means the
+# position exists before the reason to hold it was written down. Said once, plainly, and
+# never in public — which positions exist is account information.
+if not public:
+    held_tickers = set(positions["ticker"]) if not positions.empty else set()
+    studying = {str(c.get("ticker")) for c in settings.watchlist_companies}
+    written = {str(c.get("ticker")) for c in settings.tracked_companies}
+    premature = sorted(held_tickers & studying)
+    unwritten = sorted(held_tickers - studying - written)
+    if premature:
+        st.warning(
+            "**En cartera sin tesis terminada: " + ", ".join(premature) + ".** Están en "
+            "tu lista de estudio, así que la posición existe antes que la razón escrita "
+            "para tenerla. §5.2 pide el criterio de invalidación *antes* de comprar, "
+            "porque sin él no hay forma de saber cuándo vender."
+        )
+    if unwritten:
+        st.warning(
+            "**En cartera y sin escribir en ninguna parte: " + ", ".join(unwritten)
+            + ".** Ni ficha de tesis ni lista de estudio. Añádelos al menos a "
+            "`universe.watchlist` para que el panel pueda decirte algo sobre ellos."
+        )
+
 # Section 9.2: an unrecognized or contradicted corporate action puts the quantity and the
 # cost base of that position in doubt, so it is raised here — next to the other reasons a
 # number below might not mean what it says — and never resolved automatically.

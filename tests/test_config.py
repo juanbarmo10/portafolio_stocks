@@ -123,3 +123,108 @@ def _card(**overrides) -> dict:
     }
     card.update(overrides)
     return card
+
+
+# --- The fourth circle: candidates under study (section 5.1) ------------------
+
+
+def _candidate(**overrides) -> dict:
+    entry = {"ticker": "HIMS", "cik": "0001773751"}
+    entry.update(overrides)
+    return entry
+
+
+def test_a_candidate_needs_only_a_ticker_and_a_cik():
+    """The deadlock this circle resolves.
+
+    Without it the panel refused to fetch a single figure about a company until its thesis
+    was complete — so the tool built to support the research could not be used *during* it,
+    and the only way out was to invent an invalidation criterion.
+    """
+    config.validate_watchlist([_candidate()], [])
+
+
+def test_a_candidate_without_a_cik_is_refused():
+    """The CIK is the key (section 9.3); without it nothing can be fetched anyway."""
+    with pytest.raises(ValueError, match="missing"):
+        config.validate_watchlist([{"ticker": "HIMS"}], [])
+
+
+def test_a_candidate_cik_gets_the_same_octal_guard():
+    """HIMS is one of the vulnerable ones: 0001773751 reads as octal 522217."""
+    parsed = yaml.safe_load("cik: 0001773751")["cik"]
+    assert parsed == 522217, "PyYAML stopped reading leading zeros as octal"
+
+    with pytest.raises(ValueError, match="Quote it"):
+        config.validate_watchlist([_candidate(cik=parsed)], [])
+
+
+def test_a_draft_thesis_on_a_candidate_is_carried_not_rejected():
+    """Notes taken mid-research are useful. What a draft never does is promote itself."""
+    config.validate_watchlist([_candidate(thesis="telesalud con marca propia")], [])
+
+
+def test_the_same_ticker_cannot_be_in_both_circles():
+    """Ambiguous rather than harmless: the two answer "has a thesis?" differently."""
+    with pytest.raises(ValueError, match="at once"):
+        config.validate_watchlist([_candidate()], [_card(ticker="HIMS")])
+
+
+def test_promoting_means_removing_it_from_the_watchlist():
+    """The error has to say what to do, not just that something is wrong."""
+    with pytest.raises(ValueError, match="REMOVING it from watchlist"):
+        config.validate_watchlist([_candidate()], [_card(ticker="HIMS")])
+
+
+def test_the_two_circles_are_separate_but_fetched_together(tmp_path, monkeypatch):
+    """Fetching is not judging: the union decides downloads, tracked decides opinions."""
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(
+        'universe:\n'
+        '  watchlist:\n'
+        '    - ticker: HIMS\n'
+        '      cik: "0001773751"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+    settings = config.load_settings()
+
+    assert settings.tracked_companies == [], "a candidate must never count as universe"
+    assert [c["ticker"] for c in settings.watchlist_companies] == ["HIMS"]
+    assert [c["ticker"] for c in settings.researched_companies] == ["HIMS"]
+    config.load_settings.cache_clear()
+
+
+def test_a_candidate_is_enough_to_make_the_sec_ingester_run(tmp_path, monkeypatch):
+    """The whole point: data flows before the thesis exists."""
+    from ingest.sec_xbrl import SecXbrlIngester
+
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(
+        'universe:\n  watchlist:\n    - ticker: HIMS\n      cik: "0001773751"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    monkeypatch.setenv("SEC_USER_AGENT", "Nombre correo@x.com")
+    config.load_settings.cache_clear()
+    settings = config.load_settings()
+
+    assert SecXbrlIngester.companies_for(settings) == [("0001773751", "HIMS")]
+    assert SecXbrlIngester.is_available(settings) is True
+    config.load_settings.cache_clear()
+
+
+def test_a_candidate_gets_its_prices_downloaded_too(tmp_path, monkeypatch):
+    from ingest.prices import PricesIngester
+
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(
+        'universe:\n  watchlist:\n    - ticker: HIMS\n      cik: "0001773751"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+
+    assert "HIMS" in PricesIngester.tickers_for(config.load_settings())
+    config.load_settings.cache_clear()

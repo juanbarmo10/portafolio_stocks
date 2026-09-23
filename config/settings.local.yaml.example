@@ -20,6 +20,22 @@ universe:
   # ocho tickers, UBER y T eran vulnerables. La configuración ahora rechaza un CIK que no
   # sea texto, porque después de que YAML lo parsee ya no hay forma de detectarlo.
   tracked: []
+
+  # --- En estudio (§5.1, cuarto círculo) --------------------------------------------
+  #
+  # Candidatos que estás leyendo. Ticker y CIK, nada más — y eso es el punto: una ficha
+  # de tesis se escribe DESPUÉS de mirar los números, no antes. Un criterio de
+  # invalidación inventado para poder guardar la ficha no protege de nada.
+  #
+  # Qué te da: el panel baja sus fundamentales auditados, presentaciones y calendario de
+  # resultados, y la página de Empresa te los enseña enteros.
+  # Qué NO hace: opinar. No entra al tablero de tesis ni cuenta como universo.
+  #
+  # Cuando termines la investigación, MUEVE la entrada a `tracked` y complétala. Estar en
+  # los dos sitios a la vez se rechaza al cargar: o tiene tesis o no la tiene.
+  watchlist: []
+  #  - ticker: HIMS
+  #    cik: "0001773751"          # entre comillas SIEMPRE: sin ellas YAML lo lee octal
   #  - ticker: AAPL
   #    cik: "0000320193"          # clave primaria real; el ticker es mutable (§9.3)
   #    sector: "Information Technology"

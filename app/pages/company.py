@@ -39,7 +39,13 @@ SERIES_COLORS = ["#2a78d6", "#eb6834"]
 
 settings = load_settings()
 public = settings.public_mode
-cards = settings.tracked_companies
+tracked = settings.tracked_companies
+watchlist = settings.watchlist_companies
+cards = [*tracked, *watchlist]
+# Tickers with no written thesis. This set is what section 1 branches on, and it is the
+# only thing on the page that behaves differently — a candidate gets the same audited
+# numbers as anything else, because the numbers are what you study it with (section 5.1).
+under_study = {str(entry.get("ticker")) for entry in watchlist}
 level3 = settings.raw.get("panel", {}).get("level3", {})
 hurdle = level3.get("hurdle_rate")
 earnings_window = int(level3.get("earnings_window_days", th.EARNINGS_WINDOW_DAYS))
@@ -51,14 +57,28 @@ st.title("🏢 Empresa")
 if not cards:
     if public:
         st.caption(PUBLIC_NOTE)
-    st.warning("No hay ninguna empresa con ficha de tesis escrita.")
+    st.warning("No hay ninguna empresa escrita todavía, ni en estudio ni con tesis.")
     st.markdown(
         """
-Esta página analiza una empresa a la vez, y **no se abre sin ficha** (§5.2). No es una
-limitación técnica: sin criterio de invalidación escrito no hay forma de saber cuándo
-vender, y la posición se sostiene sola por inercia.
+Hay **dos formas** de que una empresa llegue a esta página, y la diferencia importa.
 
-Cada ficha vive en `config/settings.local.yaml` y necesita, como mínimo:
+### Para empezar a estudiar una: `watchlist`
+
+Ticker y CIK, nada más:
+
+```yaml
+universe:
+  watchlist:
+    - ticker: HIMS
+      cik: "0001773751"      # entre comillas SIEMPRE (§9.13)
+```
+
+Con eso el panel baja sus fundamentales auditados y te los enseña. No opina — no tiene con
+qué. Es la herramienta con la que haces la investigación.
+
+### Cuando la termines: `tracked`
+
+Ahí la ficha sí es completa, y es lo que activa la vigilancia:
 
 | Campo | Qué es |
 |---|---|
@@ -73,7 +93,11 @@ Opcionalmente, `invalidation_rule: { metric, operator, threshold }` para la part
 panel puede evaluar solo. Los CIK de tus posiciones ya están resueltos y comentados en el
 fichero.
 
-Después: `python run_ingest.py --only sec sec_filings`.
+El orden importa: **la ficha se escribe después de mirar los números**, no antes. Por eso
+existe `watchlist` — un criterio de invalidación inventado para poder guardar la ficha no
+protege de nada.
+
+Después, en cualquiera de los dos casos: `python run_ingest.py --only sec sec_filings`.
 """
     )
     st.stop()
@@ -83,7 +107,10 @@ Después: `python run_ingest.py --only sec sec_filings`.
 by_ticker = {str(card.get("ticker", "?")): card for card in cards}
 left, right = st.columns([1, 1])
 with left:
-    ticker = st.selectbox("Empresa", sorted(by_ticker), index=0)
+    ticker = st.selectbox(
+        "Empresa", sorted(by_ticker), index=0,
+        format_func=lambda t: f"{t} · en estudio" if t in under_study else t,
+    )
 with right:
     as_of = st.date_input(
         "Ver la empresa al día",
@@ -140,29 +167,57 @@ if observations.empty or snapshot.revenue_ttm is None:
 # --- 1. The thesis --------------------------------------------------------------------
 
 st.divider()
-st.subheader("1 · La tesis")
+st.subheader("1 · En estudio" if ticker in under_study else "1 · La tesis")
 
+# The mechanical flags apply to a candidate exactly as they do to a holding: an amended
+# 10-K is a governance flag whether or not anyone has written a thesis yet, and results
+# inside the blackout window are still results inside the blackout window.
 for flag in status.flags:
     st.warning(flag)
 
-thesis_column, invalidation_column = st.columns([1, 1])
-with thesis_column:
-    st.markdown(f"**Tesis.** {card.get('thesis') or '_sin escribir_'}")
-    st.markdown(f"**Captura de valor.** {card.get('value_accrual') or '_sin escribir_'}")
-    st.markdown(f"**Métrica clave.** `{card.get('key_metric') or '—'}`")
-with invalidation_column:
-    st.markdown(f"**Criterio de invalidación.** {card.get('invalidation') or '_sin escribir_'}")
-    st.caption(
-        "Se muestra tal cual lo escribiste. El panel **no lo interpreta ni decide que se "
-        "ha cumplido** — para eso lo escribiste tú."
+if ticker in under_study:
+    st.info(
+        f"**{ticker} está en tu lista de estudio, sin ficha de tesis.** Debajo tienes sus "
+        "cifras auditadas completas — que es con lo que se estudia una empresa. Lo que el "
+        "panel **no** hace es opinar: sin criterio de invalidación escrito no hay nada que "
+        "evaluar, así que no entra al tablero de tesis ni cuenta como universo (§5.2)."
     )
-    if status.rule:
-        st.markdown(f"**Regla automática.** {status.rule_detail}")
-    review = status.review_date or "sin fecha"
     st.markdown(
-        f"**Revisión.** {review}"
-        + (" — ⚠️ vencida" if status.review_overdue else "")
+        """
+**Cuando termines la investigación**, mueve la entrada de `watchlist` a `tracked` en
+`config/settings.local.yaml` y complétala. Ahí es donde el panel empieza a vigilarla por ti:
+
+| Campo | Qué es |
+|---|---|
+| `thesis` | Una frase: por qué esta empresa gana |
+| `value_accrual` | Cómo llega ese resultado **a ti** como accionista |
+| `key_metric` | El concepto que hay que vigilar |
+| `invalidation` | Qué observación mata la tesis. **Con umbral.** Obligatorio |
+| `review_date` | Cuándo toca releerla |
+
+El orden importa: la ficha se escribe **después de mirar los números**, no antes. Un
+criterio de invalidación inventado para poder guardar la ficha no protege de nada.
+"""
     )
+else:
+    thesis_column, invalidation_column = st.columns([1, 1])
+    with thesis_column:
+        st.markdown(f"**Tesis.** {card.get('thesis') or '_sin escribir_'}")
+        st.markdown(f"**Captura de valor.** {card.get('value_accrual') or '_sin escribir_'}")
+        st.markdown(f"**Métrica clave.** `{card.get('key_metric') or '—'}`")
+    with invalidation_column:
+        st.markdown(f"**Criterio de invalidación.** {card.get('invalidation') or '_sin escribir_'}")
+        st.caption(
+            "Se muestra tal cual lo escribiste. El panel **no lo interpreta ni decide que se "
+            "ha cumplido** — para eso lo escribiste tú."
+        )
+        if status.rule:
+            st.markdown(f"**Regla automática.** {status.rule_detail}")
+        review = status.review_date or "sin fecha"
+        st.markdown(
+            f"**Revisión.** {review}"
+            + (" — ⚠️ vencida" if status.review_overdue else "")
+        )
 
 # --- 2. Fundamentals ------------------------------------------------------------------
 

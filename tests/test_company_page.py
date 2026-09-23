@@ -35,6 +35,13 @@ COMPANY = str(REPO_ROOT / "app" / "pages" / "company.py")
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sec_companyfacts_msft.json"
 CIK = "0000789019"
 
+CANDIDATE = """
+universe:
+  watchlist:
+    - ticker: HIMS
+      cik: "0001773751"
+"""
+
 CARD = """
 universe:
   tracked:
@@ -191,16 +198,22 @@ def test_public_mode_hides_the_position_but_keeps_the_company(company_app, monke
 # --- Without a written thesis -------------------------------------------------
 
 
-def test_without_a_thesis_card_the_page_explains_instead_of_breaking(tmp_path, monkeypatch):
-    """Section 5.2: no company enters the universe without a falsification criterion."""
+def test_with_nothing_written_the_page_explains_both_routes(tmp_path, monkeypatch):
+    """The empty state has to teach the distinction, because it is the whole design.
+
+    A company reaches this page either as a candidate under study (ticker and CIK) or with
+    a full thesis card. Offering only the second is what made the panel unusable *during*
+    the research, and the empty state is where a new reader learns there are two.
+    """
     monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", tmp_path / "absent.yaml")
     config.load_settings.cache_clear()
     monkeypatch.setattr(app_data, "db_path", lambda: tmp_path / "empty.db")
     st.cache_data.clear()
 
     text = rendered_text(render())
-    assert "no se abre sin ficha" in text
-    assert "invalidation" in text, "the required fields must be spelled out"
+    assert "watchlist" in text, "the under-study route is not explained"
+    assert "invalidation" in text, "the required thesis fields must be spelled out"
+    assert "después de mirar los números" in text, "the order is the point"
 
 
 def test_a_card_without_a_cik_never_reaches_the_page(tmp_path, monkeypatch):
@@ -221,3 +234,56 @@ def test_a_card_without_a_cik_never_reaches_the_page(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="cik"):
         config.load_settings()
+
+
+# --- A candidate under study (section 5.1) ------------------------------------
+
+
+@pytest.fixture()
+def study_app(tmp_path, monkeypatch):
+    """A panel whose only company is one being read about, with no thesis."""
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(CANDIDATE, encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+
+    db_path = tmp_path / "study.db"
+    seed_database(db_path)          # the Microsoft figures; the point is the thesis block
+    monkeypatch.setattr(app_data, "db_path", lambda: db_path)
+    st.cache_data.clear()
+    yield db_path
+    st.cache_data.clear()
+
+
+def test_a_candidate_gets_the_numbers_but_no_opinion(study_app):
+    """The asymmetry of the fourth circle: full data, zero judgement.
+
+    The numbers are what you study a company *with*, so withholding them would defeat the
+    purpose. What is withheld is the thesis block — there is nothing written to show, and
+    rendering empty fields would suggest the panel is waiting for something rather than
+    that the research is in progress.
+    """
+    text = rendered_text(render())
+
+    assert "En estudio" in text
+    assert "sin ficha de tesis" in text
+    assert "Criterio de invalidación" not in text, "an empty thesis block was rendered"
+    assert "no entra al tablero de tesis" in text
+
+
+def test_the_page_says_how_to_promote_it(study_app):
+    """A dead end with no exit is a worse deadlock than the one this replaced."""
+    text = rendered_text(render())
+
+    assert "watchlist" in text and "tracked" in text
+    assert "después de mirar los números" in text, "the order is the point"
+
+
+def test_a_candidate_never_reaches_the_thesis_board(study_app):
+    """Section 5.2, defended at the layer that decides: the board reads tracked only."""
+    from transform import thesis as th
+
+    settings = config.load_settings()
+    assert settings.tracked_companies == []
+    assert th.board(settings.tracked_companies, pd.DataFrame(), None, None,
+                    "2026-09-23") == []

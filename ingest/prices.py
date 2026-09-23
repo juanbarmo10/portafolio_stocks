@@ -226,11 +226,17 @@ class PricesIngester(Ingester):
 
     @staticmethod
     def tickers_for(settings: Settings) -> list[str]:
-        """Market references (section 5.1) plus any tracked company, deduplicated."""
-        tracked = [
-            str(c["ticker"]) for c in settings.tracked_companies if c.get("ticker")
+        """Market references (section 5.1), plus every company written down, deduplicated.
+
+        "Written down" includes the watchlist: a candidate under study needs its price
+        history as much as a company with a thesis does. Held tickers are added separately
+        by :meth:`attach_database`, because what is held is read from the account, never
+        from config.
+        """
+        written = [
+            str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")
         ]
-        return list(dict.fromkeys([*settings.market_references, *tracked]))
+        return list(dict.fromkeys([*settings.market_references, *written]))
 
     def attach_database(self, conn: Any) -> None:
         """Add whatever the account actually holds to the download list.
