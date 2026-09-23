@@ -150,6 +150,61 @@ que es peor que un hueco.
 
 ---
 
+## El universo: cuatro círculos
+
+Una empresa no entra al panel de cualquier manera, y la diferencia entre los círculos es
+una decisión de diseño, no una taxonomía.
+
+| Círculo | Qué exige | Qué obtiene |
+|---|---|---|
+| **Referencias de mercado** | nada, van en `settings.yaml` | Alimentan los niveles 1 y 2. No son posiciones |
+| **En estudio** (`watchlist`) | ticker y CIK | Datos completos: fundamentales, presentaciones, calendario |
+| **Seguimiento** (`tracked`) | ficha de tesis completa | Lo anterior **más** el tablero de invalidación |
+| **Cartera real** | nada: se lee de IBKR | Valoración, PnL, drift, reconciliación contra el NAV |
+
+La ficha de tesis exige un **criterio de invalidación verificable y con umbral**, y el
+esquema lo rechaza si falta. Sin criterio de falsación no hay forma de saber cuándo vender,
+y una posición se sostiene sola por inercia.
+
+**Por qué existe el círculo "en estudio".** Exigir la ficha para todo creaba un punto
+muerto: el panel no bajaba una sola cifra hasta que la tesis estuviera escrita, así que la
+herramienta construida para apoyar la investigación no se podía usar *durante* ella — y la
+única salida era inventarse un criterio de invalidación, que es lo que la regla existe para
+impedir. **La ficha se escribe después de mirar los números, no antes.** Un candidato
+obtiene datos, no opinión: no entra al tablero ni cuenta como universo. Promocionarlo es
+mover la entrada y completarla.
+
+---
+
+## Convenciones contables que el panel implementa
+
+Tres reconstrucciones que un panel ingenuo hace mal, y en las tres el resultado equivocado
+es **plausible a la vista** — que es lo que las hace peligrosas.
+
+**No existe el 10-Q del cuarto trimestre.** El Q4 solo aparece dentro del 10-K, así que un
+ejercicio llega como tres trimestres más una cifra anual. Pintar "revenue trimestral"
+directo de XBRL se deja una barra de cada cuatro y la serie sigue pareciendo una serie. El
+Q4 se deriva (`FY − Q1 − Q2 − Q3`) y **hereda la fecha del 10-K**, no la del cierre del
+trimestre: fecharlo al cierre regala dos meses de futuro cada año, invisibles, porque el
+número en sí es correcto.
+
+**El estado de flujos suele presentarse como Q1 + acumulados.** Muchas empresas solo dan un
+hecho de tres meses en el Q1; el Q2 y Q3 llegan como acumulados de 6 y 9 meses. Filar un
+acumulado en la serie trimestral daría una cifra dos o tres veces mayor; descartarlos sin
+más deja **un trimestre de flujo de caja por año** y por tanto ningún FCF. Se guardan
+aparte y el trimestre se deriva (`Q2 = YTD2 − Q1`), heredando la fecha del documento que
+trae el acumulado.
+
+**Un recuento de acciones no es un flujo.** El número medio ponderado de acciones diluidas
+llega como concepto de duración, pero es un promedio del periodo: sumar cuatro trimestres
+lo multiplica por cuatro y derivar el Q4 restando da un número negativo. La configuración
+las marca `kind: average` y solo se leen por una vía que se niega a sumarlas.
+
+Cada derivación se valida contra la realidad, no contra sí misma: se deriva una métrica que
+la empresa **sí** reporta suelta y se compara con lo reportado.
+
+---
+
 ## Fuentes de datos
 
 Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
