@@ -103,12 +103,23 @@ def _near(left: Any, right: Any, days: int = MATCH_WINDOW_DAYS) -> bool:
     return abs((a - b).days) <= days
 
 
+def _day(value: Any) -> str | None:
+    """Ex-date as a plain date string for display.
+
+    ``corporate_actions.ex_date`` is stored as a full ISO timestamp, so a raw ``str()``
+    puts ``2016-09-19T00:00:00+00:00`` on screen. The panel shows days, not instants —
+    these are daily events and the time carries no information.
+    """
+    day = as_date(value)
+    return None if day is None else day.isoformat()
+
+
 def _summary(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return {
         "kind": row.get("kind"),
-        "ex_date": row.get("ex_date"),
+        "ex_date": _day(row.get("ex_date")),
         "ratio": None if row.get("ratio") is None or pd.isna(row.get("ratio"))
         else float(row["ratio"]),
         "amount": None if row.get("amount") is None or pd.isna(row.get("amount"))
@@ -149,11 +160,11 @@ def reconcile_ticker(
         )
         if partner is None:
             findings.append(ActionReview(
-                ticker=ticker, ex_date=str(quote.get("ex_date")), reason="unconfirmed",
+                ticker=ticker, ex_date=_day(quote.get("ex_date")), reason="unconfirmed",
                 ibkr=None, yfinance=_summary(quote),
                 detail=(
                     f"yfinance reporta un **{quote.get('kind')}** el "
-                    f"{quote.get('ex_date')} que IBKR no corrobora. IBKR es la fuente "
+                    f"{_day(quote.get('ex_date'))} que IBKR no corrobora. IBKR es la fuente "
                     "autorizada de lo que le pasó a TU cartera (§9.2); si tenías la "
                     "posición, revisa qué ocurrió antes de fiarte de cantidad o coste."
                 ),
@@ -164,12 +175,12 @@ def reconcile_ticker(
         matched_broker.append(partner)
         if row.get("kind") != quote.get("kind"):
             findings.append(ActionReview(
-                ticker=ticker, ex_date=str(row.get("ex_date")), reason="kind_mismatch",
+                ticker=ticker, ex_date=_day(row.get("ex_date")), reason="kind_mismatch",
                 ibkr=_summary(row), yfinance=_summary(quote),
                 detail=(
                     f"IBKR dice **{row.get('kind')}** y yfinance dice "
                     f"**{quote.get('kind')}** para el mismo evento "
-                    f"({quote.get('ex_date')}). Manda IBKR. Un spin-off tratado como "
+                    f"({_day(quote.get('ex_date'))}). Manda IBKR. Un spin-off tratado como "
                     "split deja la base de coste entera en la entidad original y falsea "
                     "el PnL para siempre (§9.2) — no se corrige solo."
                 ),
@@ -179,10 +190,10 @@ def reconcile_ticker(
         if index in matched_broker:
             continue
         findings.append(ActionReview(
-            ticker=ticker, ex_date=str(row.get("ex_date")), reason="unconfirmed",
+            ticker=ticker, ex_date=_day(row.get("ex_date")), reason="unconfirmed",
             ibkr=_summary(row), yfinance=None,
             detail=(
-                f"IBKR reporta un **{row.get('kind')}** el {row.get('ex_date')} que "
+                f"IBKR reporta un **{row.get('kind')}** el {_day(row.get('ex_date'))} que "
                 "yfinance no recoge. La serie de precios puede no reflejarlo, así que la "
                 "valoración de esa posición queda en duda hasta comprobarlo (§9.8)."
             ),
@@ -190,7 +201,7 @@ def reconcile_ticker(
 
     for flagged in unclean_split_ratios(frame[frame["ticker"] == ticker]):
         findings.append(ActionReview(
-            ticker=ticker, ex_date=str(flagged["ex_date"]), reason="unclean_ratio",
+            ticker=ticker, ex_date=_day(flagged["ex_date"]), reason="unclean_ratio",
             ibkr=None, yfinance=_summary(flagged) if flagged["source"] == YFINANCE else None,
             detail=flagged["detail"],
         ))
@@ -269,7 +280,7 @@ def data_quality_notes(
     notes: list[ActionReview] = []
     for flagged in unclean_split_ratios(frame):
         notes.append(ActionReview(
-            ticker=str(flagged["ticker"]), ex_date=str(flagged["ex_date"]),
+            ticker=str(flagged["ticker"]), ex_date=_day(flagged["ex_date"]),
             reason="unclean_ratio", ibkr=None, yfinance=None, detail=flagged["detail"],
         ))
     return notes

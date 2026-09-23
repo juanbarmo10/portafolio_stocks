@@ -215,3 +215,16 @@ def test_a_ratio_of_exactly_four_is_never_a_note():
 def test_ordinary_ratios_stay_quiet(ratio):
     actions = [action("X", "split", "2020-01-02", "yfinance", ratio=ratio)]
     assert data_quality_notes(actions) == []
+
+
+def test_a_stored_timestamp_ex_date_is_shown_as_a_plain_day():
+    """The table stores a full ISO timestamp; the panel shows days, not instants.
+
+    Measured on the real database: XLF's spin-off is stored as
+    ``2016-09-19T00:00:00+00:00`` and rendered raw it reads as an instant, which these
+    events are not.
+    """
+    actions = [action("XLF", "split", "2016-09-19T00:00:00+00:00", "yfinance", ratio=1.231)]
+    note = data_quality_notes(actions)[0]
+
+    assert note.ex_date == "2016-09-19"
