@@ -32,6 +32,7 @@ from ingest.ibkr_flex import (
 )
 from ingest.prices import PricesIngester
 from ingest.sec_filings import SecFilingsIngester
+from ingest.short_interest import ShortInterestIngester
 from ingest.sec_xbrl import SecXbrlIngester
 
 log = get_logger(__name__)
@@ -45,6 +46,7 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "ibkr": (IbkrFlexIngester.is_available, IbkrFlexIngester),
     "sec": (SecXbrlIngester.is_available, SecXbrlIngester),
     "sec_filings": (SecFilingsIngester.is_available, SecFilingsIngester),
+    "short_interest": (ShortInterestIngester.is_available, ShortInterestIngester),
 }
 
 # Where non-observation rows go. An ingester returning a table name absent from this

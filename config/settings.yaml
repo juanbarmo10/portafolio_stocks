@@ -225,6 +225,30 @@ sources:
     # reescala todas las barras pasadas que sirve Yahoo, y solo una ventana que abarque
     # el split permite recuperar el crudo.
 
+  # FINRA — interés corto consolidado (nivel 2, posicionamiento). Verificado 2026-09-23:
+  # API REST pública, SIN credenciales, respuesta CSV.
+  finra:
+    short_interest_url: https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest
+    user_agent: "equitydash/0.1 (personal research)"
+    request_timeout_s: 60
+    page_limit: 500            # el dataset está particionado por settlementDate
+    cache_dir: .cache/finra
+    cache_ttl_hours: 24
+
+    # ⚠️ EL PARÁMETRO IMPORTANTE. FINRA NO publica fecha de difusión en el dataset: trae
+    # `settlementDate` (la referencia) y nada que diga cuándo se hizo público. Tampoco hay
+    # dataset de calendario en la API (probado: 404). Así que `ts_release` es DERIVADO, no
+    # observado, y este es el supuesto — visible y ajustable, no enterrado en el código.
+    #
+    # Medido sobre las 28 fechas del calendario que FINRA publica en su web (2026-09-23):
+    # el rezago es de 7 días hábiles en 19 ciclos y de 8 en los otros 9. NO es constante.
+    #
+    # Por eso el valor por defecto es el MÁXIMO y no la mediana: un rezago corto afirmaría
+    # que una cifra era pública antes de serlo, que es look-ahead (§9.4); uno largo solo
+    # vuelve al panel algo conservador. Cuando una fecha derivada tiene que equivocarse,
+    # tiene que equivocarse TARDE.
+    publication_lag_business_days: 8
+
   ibkr_flex:
     base_url: https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService
     version: 3
