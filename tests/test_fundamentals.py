@@ -226,3 +226,109 @@ def test_nothing_is_knowable_before_the_first_filing(observations):
     snapshot = fun.snapshot(observations, CIK, "1990-01-01")
     assert snapshot.revenue_ttm is None
     assert snapshot.equity is None
+
+
+# --- Quarters hidden inside year-to-date cumulatives (RESEARCH.md 2.21) -------
+
+
+def cumulative_frame(rows) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["ts", "ts_release", "value"])
+
+
+def test_the_quarters_a_company_never_files_are_recovered():
+    """Q2 = YTD2 - Q1 and Q3 = YTD3 - YTD2. The case HIMS made concrete.
+
+    Many companies file the cash-flow statement as a three-month Q1 plus six- and
+    nine-month totals. Without this, such a company has one cash-flow quarter a year,
+    never four contiguous, and therefore no free cash flow at all.
+    """
+    q1 = cumulative_frame([("2025-03-31", "2025-05-05", 100.0)])
+    half = cumulative_frame([("2025-06-30", "2025-08-05", 250.0)])
+    three = cumulative_frame([("2025-09-30", "2025-11-05", 420.0)])
+
+    derived, skipped = fun.derive_from_cumulatives(q1, half, three, metric="fcf")
+
+    assert skipped == []
+    by_ts = derived.set_index("ts")["value"].to_dict()
+    assert by_ts["2025-06-30"] == 150.0, "Q2 is YTD2 minus Q1"
+    assert by_ts["2025-09-30"] == 170.0, "Q3 is YTD3 minus YTD2"
+
+
+def test_a_derived_quarter_is_invisible_until_its_filing_lands():
+    """Section 9.4 on a derived figure — the part that would be invisible if wrong.
+
+    The number itself is correct the moment the quarter ends, which is exactly why dating
+    it there would hand a backtest weeks of the future without anything looking odd.
+    """
+    q1 = cumulative_frame([("2025-03-31", "2025-05-05", 100.0)])
+    half = cumulative_frame([("2025-06-30", "2025-08-05", 250.0)])
+
+    derived, _ = fun.derive_from_cumulatives(q1, half, None, metric="fcf")
+    q2 = derived[derived["ts"] == "2025-06-30"].iloc[0]
+
+    assert q2["ts_release"] == "2025-08-05", "it inherited the quarter end, not the filing"
+
+
+def test_a_reported_quarter_is_never_overwritten_by_a_derived_one():
+    """Reported beats derived, always."""
+    quarters = cumulative_frame([
+        ("2025-03-31", "2025-05-05", 100.0),
+        ("2025-06-30", "2025-08-05", 149.0),   # the company filed Q2 itself
+    ])
+    half = cumulative_frame([("2025-06-30", "2025-08-05", 250.0)])
+
+    derived, _ = fun.derive_from_cumulatives(quarters, half, None, metric="fcf")
+    assert derived.set_index("ts")["value"]["2025-06-30"] == 149.0
+
+
+def test_a_cumulative_with_no_preceding_quarter_is_reported_not_guessed():
+    """Section 12: a gap is reported, never closed by assuming the missing piece."""
+    half = cumulative_frame([("2025-06-30", "2025-08-05", 250.0)])
+    derived, skipped = fun.derive_from_cumulatives(
+        cumulative_frame([]), half, None, metric="fcf"
+    )
+
+    assert derived.empty
+    assert len(skipped) == 1 and "cannot derive Q2" in skipped[0]
+
+
+def test_an_average_metric_is_refused_outright():
+    """Section 9.11: a nine-month average share count minus a six-month one is nothing.
+
+    It would return a float, like every other mistake in this family.
+    """
+    q1 = cumulative_frame([("2025-03-31", "2025-05-05", 7_450_000_000.0)])
+    half = cumulative_frame([("2025-06-30", "2025-08-05", 7_460_000_000.0)])
+
+    derived, skipped = fun.derive_from_cumulatives(
+        q1, half, None, metric="diluted_shares"
+    )
+
+    assert list(derived["ts"]) == ["2025-03-31"], "a share count was differenced"
+    assert "period average" in skipped[0]
+
+
+def test_the_matching_is_by_date_not_by_position():
+    """A cumulative whose prior quarter is a year away is not its prior quarter."""
+    q1 = cumulative_frame([("2024-03-31", "2024-05-05", 100.0)])
+    half = cumulative_frame([("2025-06-30", "2025-08-05", 250.0)])
+
+    derived, skipped = fun.derive_from_cumulatives(q1, half, None, metric="fcf")
+    assert list(derived["ts"]) == ["2024-03-31"]
+    assert skipped and "cannot derive Q2" in skipped[0]
+
+
+# --- Cash conversion over a loss ---------------------------------------------
+
+
+def test_cash_conversion_is_undefined_over_a_loss():
+    """Measured on HIMS: +61.65M of FCF against -142.03M of net income gives -0.43.
+
+    That reads as the worst possible result when the fact is the opposite — the company
+    generated cash while reporting a loss. The ratio has no meaning without a profit base,
+    so it is not computed (section 12).
+    """
+    assert fun.cash_conversion(61_650_000.0, -142_030_000.0) is None
+    assert fun.cash_conversion(61_650_000.0, 0.0) is None
+    assert fun.cash_conversion(50.0, 100.0) == 0.5
+    assert fun.cash_conversion(None, 100.0) is None

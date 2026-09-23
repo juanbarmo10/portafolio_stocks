@@ -249,6 +249,23 @@ row[3].metric(
          "la caja — capex, circulante o contabilidad agresiva.",
 )
 
+# Una conversión a caja sobre beneficio negativo no significa nada, y computada saldría
+# NEGATIVA justo cuando el hecho es bueno: caja positiva pese a pérdida contable. Se dice
+# con palabras (§12).
+if (
+    snapshot.cash_conversion is None
+    and snapshot.fcf_ttm is not None
+    and snapshot.net_income_ttm is not None
+    and snapshot.net_income_ttm <= 0
+):
+    st.caption(
+        f"**Conversión a caja no definida:** la empresa reporta pérdida contable "
+        f"({reported_amount(snapshot.net_income_ttm)}) y **flujo de caja libre positivo** "
+        f"({reported_amount(snapshot.fcf_ttm)}). Un cociente sobre base negativa saldría "
+        "negativo justo cuando el hecho es favorable, así que no se muestra. El dato es "
+        "que genera caja sin dar beneficio — mira qué partidas lo explican."
+    )
+
 revenue_series = fun.ttm_series(observations, cik, "revenue", as_of_iso)
 fcf_operating = fun.ttm_series(observations, cik, "operating_cash_flow", as_of_iso)
 capex_series = fun.ttm_series(observations, cik, "capex", as_of_iso)

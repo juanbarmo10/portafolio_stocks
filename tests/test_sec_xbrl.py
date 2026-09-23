@@ -227,10 +227,43 @@ def test_a_fact_in_another_unit_is_counted_not_mixed_in(sec_config):
     assert stats["wrong_unit"] == 1
 
 
-def test_year_to_date_cumulatives_are_discarded_and_counted(facts, sec_config):
+def test_year_to_date_cumulatives_are_kept_but_never_as_quarters(facts, sec_config):
+    """Cumulatives are labelled, not discarded — and labelled is what keeps them safe.
+
+    A 6- or 9-month figure filed into the quarterly series would be two or three times too
+    large and would look entirely plausible. Kept under their own suffix they are useful
+    instead of dangerous: they are the only way to recover the quarters a company never
+    files on their own (RESEARCH.md section 2.21).
+    """
     concepts, windows = sec_config
-    _records, stats = extract_metric(facts, "revenue", concepts["revenue"], CIK, windows)
-    assert stats["unclassified_period"] > 0, "the 6- and 9-month facts vanished silently"
+    records, _stats = extract_metric(facts, "revenue", concepts["revenue"], CIK, windows)
+    periods = {row["series_id"].split(":")[-1] for row in records
+               if not row["series_id"].endswith(":src")}
+
+    assert {"ytd2", "ytd3"} <= periods, "the cumulatives vanished"
+
+    quarters = {row["ts"] for row in records if row["series_id"] == f"{CIK}:revenue:q"}
+    cumulative = {row["ts"] for row in records if row["series_id"] == f"{CIK}:revenue:ytd2"}
+    for ts in quarters & cumulative:
+        q = next(r["value"] for r in records
+                 if r["series_id"] == f"{CIK}:revenue:q" and r["ts"] == ts)
+        ytd = next(r["value"] for r in records
+                   if r["series_id"] == f"{CIK}:revenue:ytd2" and r["ts"] == ts)
+        assert q != ytd, f"a cumulative was filed as a quarter on {ts}"
+
+
+def test_a_duration_matching_no_window_is_still_discarded_and_counted(sec_config):
+    """Synthetic: a 45-day stub period belongs to no bucket and must not be guessed at."""
+    _concepts, windows = sec_config
+    facts = {"us-gaap": {"Revenues": {"units": {"USD": [
+        {"start": "2025-01-01", "end": "2025-02-15", "val": 1.0, "filed": "2025-03-01"},
+    ]}}}}
+    records, stats = extract_metric(
+        facts, "revenue", {"tags": ["Revenues"], "unit": "USD"}, CIK, windows
+    )
+
+    assert records == []
+    assert stats["unclassified_period"] == 1
 
 
 def test_balance_sheet_items_are_instants_with_no_period_suffix(facts, sec_config):

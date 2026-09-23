@@ -74,9 +74,17 @@ def _period_label(
         windows: ``{'quarter': [lo, hi], 'year': [lo, hi]}`` in days.
 
     Returns:
-        ``''`` for an instant (no ``start``), ``'q'``, ``'fy'``, or ``None`` when the
-        duration matches no window — a year-to-date cumulative, typically, which must not
-        be filed as if it were a quarter.
+        ``''`` for an instant (no ``start``), ``'q'`` for a quarter, ``'ytd2'`` / ``'ytd3'``
+        for a two- or three-quarter **cumulative**, ``'fy'`` for the year, or ``None`` when
+        the duration matches no configured window.
+
+    The cumulatives are labelled and kept rather than discarded (they were dropped until
+    2026-09-23). They are emphatically *not* quarters — filing one into the quarterly
+    series would produce a figure two or three times too large, which is the exact failure
+    section 12 exists to prevent — but they are the only way to recover the quarters a
+    company never files on their own. Many file the cash-flow statement as Q1 plus
+    cumulatives; without these rows, such a company has no quarterly cash flow at all and
+    therefore no free cash flow (RESEARCH.md section 2.21).
     """
     start = fact.get("start")
     if not start:
@@ -85,12 +93,13 @@ def _period_label(
         days = (dt.date.fromisoformat(fact["end"]) - dt.date.fromisoformat(start)).days
     except (ValueError, KeyError, TypeError):
         return None
-    quarter_lo, quarter_hi = windows["quarter"]
-    year_lo, year_hi = windows["year"]
-    if quarter_lo <= days <= quarter_hi:
-        return "q"
-    if year_lo <= days <= year_hi:
-        return "fy"
+    # Ordered longest-first is not required (the windows do not overlap), but it keeps the
+    # reading order the same as the fiscal one.
+    for label, key in (("q", "quarter"), ("ytd2", "half"), ("ytd3", "three_quarters"),
+                       ("fy", "year")):
+        window = windows.get(key)
+        if window and window[0] <= days <= window[1]:
+            return label
     return None
 
 

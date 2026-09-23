@@ -38,6 +38,15 @@ from transform.macro import point_in_time
 
 QUARTER = "q"
 ANNUAL = "fy"
+HALF = "ytd2"           # cumulative, two quarters into the fiscal year
+THREE_QUARTERS = "ytd3"  # cumulative, three quarters in
+
+# Metrics that are a period AVERAGE, not something that accumulates. They must never be
+# summed or differenced across periods: a nine-month average share count minus a six-month
+# one is not a quarter's share count, it is nothing at all. Defined here rather than in
+# value_accrual because this is the layer that does the arithmetic and therefore the layer
+# that has to refuse (section 9.11).
+AVERAGE_METRICS = frozenset({"diluted_shares"})
 
 # A fiscal quarter is ~91 days. Anything outside this is a gap in the data, a fiscal-year
 # change, or a company that reports on a different calendar — never something to smooth over.
@@ -199,13 +208,121 @@ def derive_fourth_quarter(
     return combined.sort_values("ts").reset_index(drop=True), skipped
 
 
+def derive_from_cumulatives(
+    quarters: pd.DataFrame,
+    half: pd.DataFrame,
+    three_quarters: pd.DataFrame,
+    *,
+    metric: str = "",
+) -> tuple[pd.DataFrame, list[str]]:
+    """Recover the quarters a company reports only inside year-to-date cumulatives.
+
+    Many companies file the cash-flow statement as **Q1 plus cumulatives**: a three-month
+    figure for the first quarter, then six- and nine-month totals. Measured on HIMS, whose
+    only three-month operating cash flow in each fiscal year is Q1 — so the quarterly
+    series has one point a year, never four contiguous, and the TTM (and therefore free
+    cash flow, and therefore cash conversion) is simply unavailable.
+
+    The arithmetic is the same family as :func:`derive_fourth_quarter`::
+
+        Q2 = YTD2 − Q1          Q3 = YTD3 − YTD2
+
+    and so is the publication rule, which is the part that matters: a derived quarter
+    inherits the **latest** filing date of its inputs, because it only became knowable when
+    the document carrying the cumulative landed. Dating it to the quarter end would hand a
+    backtest weeks of the future, invisibly, since the number itself is right (section 9.4).
+
+    A quarter the company *did* file on its own is never overwritten: reported beats
+    derived, always.
+
+    ⚠️ Refuses outright for an average metric (section 9.11). Differencing a nine-month
+    weighted-average share count against a six-month one produces a float and means
+    nothing.
+
+    Returns:
+        ``(quarters_including_derived, skipped)`` — one reason per cumulative that could
+        not be resolved, never a silent gap.
+    """
+    columns = ["ts", "ts_release", "value"]
+    if metric in AVERAGE_METRICS:
+        return quarters.copy(), [
+            f"{metric}: is a period average, so quarters are never derived from "
+            "cumulatives by subtraction (section 9.11)"
+        ]
+
+    base = quarters.copy() if quarters is not None else pd.DataFrame(columns=columns)
+    skipped: list[str] = []
+    # Q2 comes from the two-quarter cumulative minus the quarter before it; Q3 from the
+    # three-quarter cumulative minus the two-quarter one. Both subtract the cumulative that
+    # ends exactly one quarter earlier, so the two passes share their logic.
+    passes = (
+        (half, base, "Q2", "the preceding quarter"),
+        (three_quarters, half, "Q3", "the two-quarter cumulative"),
+    )
+
+    derived: list[dict[str, Any]] = []
+    for cumulative, previous, label, described in passes:
+        if cumulative is None or cumulative.empty:
+            continue
+        for row in cumulative.itertuples():
+            if not base.empty and row.ts in set(base["ts"]):
+                continue  # the company filed that quarter on its own; reported wins
+            earlier = _one_quarter_before(previous, row.ts)
+            if earlier is None:
+                skipped.append(
+                    f"{row.ts}: cannot derive {label}, {described} is missing"
+                )
+                continue
+            derived.append({
+                "ts": row.ts,
+                # Knowable only with the later of the two documents (section 9.4).
+                "ts_release": max(str(row.ts_release), str(earlier["ts_release"])),
+                "value": float(row.value) - float(earlier["value"]),
+            })
+
+    if not derived:
+        return base, skipped
+    combined = pd.concat([base, pd.DataFrame(derived, columns=columns)], ignore_index=True)
+    return combined.sort_values("ts").reset_index(drop=True), skipped
+
+
+def _one_quarter_before(frame: pd.DataFrame, ts: Any) -> dict[str, Any] | None:
+    """The row of ``frame`` ending roughly one quarter before ``ts``, or ``None``.
+
+    Matched by date rather than by position: counting rows assumes a cadence this data does
+    not have, which is precisely the mistake section 9.11 records.
+    """
+    if frame is None or frame.empty:
+        return None
+    target = pd.Timestamp(ts)
+    ends = pd.to_datetime(frame["ts"])
+    gaps = (target - ends).dt.days
+    candidates = gaps[(gaps >= QUARTER_GAP_DAYS[0]) & (gaps <= QUARTER_GAP_DAYS[1])]
+    if candidates.empty:
+        return None
+    return frame.loc[candidates.index[0]].to_dict()
+
+
 def quarterly(
     observations: pd.DataFrame, cik: str, metric: str, as_of: Any
 ) -> tuple[pd.DataFrame, list[str]]:
-    """The complete quarterly series as knowable on ``as_of``, Q4 included."""
+    """The complete quarterly series as knowable on ``as_of``, every quarter included.
+
+    Two derivations, in the only order that works. First the quarters hidden inside
+    year-to-date cumulatives (Q2 and Q3 for a company that files the cash-flow statement as
+    Q1 plus totals), then the fourth quarter, which needs the other three to exist before it
+    can be computed. Each is reported when it cannot be done, never silently skipped.
+    """
     quarters = known(observations, cik, metric, QUARTER, as_of)
     annual = known(observations, cik, metric, ANNUAL, as_of)
+    half = known(observations, cik, metric, HALF, as_of)
+    three_quarters = known(observations, cik, metric, THREE_QUARTERS, as_of)
+
+    quarters, from_cumulatives = derive_from_cumulatives(
+        quarters, half, three_quarters, metric=metric
+    )
     completed, skipped = derive_fourth_quarter(quarters, annual)
+    skipped = [*from_cumulatives, *skipped]
     # A derived Q4 may be dated before as_of but only became knowable with the 10-K, so
     # the publication filter is applied again after deriving.
     if not completed.empty:
@@ -315,6 +432,25 @@ def ratio(numerator: float | None, denominator: float | None) -> float | None:
 # --- Derived readings ---------------------------------------------------------
 
 
+def cash_conversion(fcf: float | None, net_income: float | None) -> float | None:
+    """FCF over net income, or ``None`` when the profit base is not positive.
+
+    The guard is the whole function. "Cash conversion of 0.50" means half the accounting
+    profit reached the bank account; the sentence has no meaning when there was no profit.
+    Computed anyway, a loss-making company with **positive** free cash flow reports a
+    *negative* conversion — which reads as the worst possible result when the underlying
+    fact is the opposite and notable.
+
+    Measured on HIMS (2026-09-23): free cash flow +61.65M against net income −142.03M gives
+    −0.43. The honest reading is not a ratio at all; it is that the company generated cash
+    while reporting a loss, and the panel says that in words instead (section 12, and the
+    same principle as :func:`growth` refusing a non-positive base).
+    """
+    if fcf is None or net_income is None or net_income <= 0:
+        return None
+    return float(fcf) / float(net_income)
+
+
 def free_cash_flow(observations: pd.DataFrame, cik: str, as_of: Any) -> float | None:
     """TTM operating cash flow minus TTM capital expenditure.
 
@@ -367,7 +503,7 @@ def snapshot(observations: pd.DataFrame, cik: str, as_of: Any) -> Snapshot:
         operating_margin=ratio(operating_income, revenue),
         net_margin=ratio(net_income, revenue),
         fcf_margin=ratio(fcf, revenue),
-        cash_conversion=ratio(fcf, net_income),
+        cash_conversion=cash_conversion(fcf, net_income),
         revenue_growth_yoy=growth(revenue, previous),
         assets=latest_instant(observations, cik, "assets", as_of),
         liabilities=latest_instant(observations, cik, "liabilities", as_of),
