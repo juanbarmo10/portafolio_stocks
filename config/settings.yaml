@@ -58,7 +58,12 @@ sources:
       # misma idea (prima de crédito), grado de inversión en vez de HY, desde 1986.
       - BAA10Y        # Moody's Baa − tesoro 10a: prima de crédito con histórico largo
       - NFCI          # condiciones financieras Chicago Fed
-      - VIXCLS        # VIX
+      - VIXCLS        # VIX (volatilidad implícita a 30 días)
+      # VXVCLS es el VIX3M de CBOE, servido por FRED. Verificado el 2026-09-23: existe,
+      # es diario y arranca en 2007-12-04. Con él, la estructura de volatilidad de la
+      # fase 3 (VIX < VIX3M normal; invertida = estrés) NO necesita raspar CBOE — una
+      # fuente frágil menos (§4.3), con point-in-time de ALFRED de fábrica.
+      - VXVCLS        # VIX3M — estructura de volatilidad (§8 fase 3)
       - DGS10         # tesoro 10 años
       - T10YIE        # inflación implícita 10 años
 
