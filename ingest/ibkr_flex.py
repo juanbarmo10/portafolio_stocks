@@ -505,8 +505,11 @@ class IbkrFlexIngester(Ingester):
         }
         # ticker -> CIK from the written universe. The SEC ticker↔CIK map is phase 2; until
         # then an untracked ticker resolves to NULL, which section 9.3 prefers to a guess.
+        # zfill to ten digits, exactly as the SEC ingesters normalize it: otherwise the
+        # same company is keyed "789019" in trades and "0000789019" in observations, and
+        # nothing joins (section 9.3).
         self._cik_by_ticker = {
-            str(company["ticker"]): str(company["cik"])
+            str(company["ticker"]): str(company["cik"]).zfill(10)
             for company in settings.tracked_companies
             if company.get("ticker") and company.get("cik")
         }

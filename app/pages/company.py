@@ -28,7 +28,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING, PUBLIC_NOTE, money, pct, reported_amount
+from app.format import MISSING, PUBLIC_NOTE, money, pct, quantity, reported_amount
 from core.config import load_settings
 from transform import fundamentals as fun
 from transform import portfolio as port
@@ -40,7 +40,9 @@ SERIES_COLORS = ["#2a78d6", "#eb6834"]
 settings = load_settings()
 public = settings.public_mode
 cards = settings.tracked_companies
-hurdle = settings.raw.get("panel", {}).get("level3", {}).get("hurdle_rate")
+level3 = settings.raw.get("panel", {}).get("level3", {})
+hurdle = level3.get("hurdle_rate")
+earnings_window = int(level3.get("earnings_window_days", th.EARNINGS_WINDOW_DAYS))
 
 st.title("🏢 Empresa")
 
@@ -110,7 +112,7 @@ filings = app_data.filings()
 events = app_data.events()
 
 status = th.status(card, observations, filings, events, as_of_iso,
-                   hurdle_rate=hurdle, earnings_window_days=5)
+                   hurdle_rate=hurdle, earnings_window_days=earnings_window)
 snapshot = fun.snapshot(observations, cik, as_of_iso)
 accrual = va.assess(observations, cik, as_of_iso, hurdle_rate=hurdle)
 
@@ -254,13 +256,11 @@ row[1].metric("Recompras netas (TTM)", reported_amount(accrual.net_buybacks_ttm)
               help="Recompras − emisión. La bruta engaña si el SBC la anula.")
 row[2].metric(
     "Acciones retiradas",
-    reported_amount(accrual.shares_removed, unit="acciones")
-    if accrual.shares_removed else MISSING,
+    reported_amount(accrual.shares_removed, unit="acciones"),
 )
 row[3].metric(
     "Coste por acción retirada",
-    reported_amount(accrual.buyback_per_share_removed)
-    if accrual.buyback_per_share_removed else MISSING,
+    reported_amount(accrual.buyback_per_share_removed),
     help="Recompra neta dividida por la caída real del recuento. Si es mucho mayor que el "
          "precio de mercado, la recompra está compensando dilución, no devolviendo capital.",
 )
@@ -383,7 +383,7 @@ if not public:
         avg = float(costs["avg_cost"].iloc[0]) if not costs.empty else None
 
         row = st.columns(4)
-        row[0].metric("Cantidad", f"{position['quantity']:,.4f}".replace(".", ","))
+        row[0].metric("Cantidad", quantity(position["quantity"]))
         row[1].metric("Coste medio", money(avg, public=False))
         row[2].metric("Valor", money(position["market_value"], public=False))
         row[3].metric(

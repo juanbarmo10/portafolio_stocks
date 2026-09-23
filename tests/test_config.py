@@ -84,3 +84,42 @@ def test_public_mode_env_var_wins(monkeypatch):
     config.load_settings.cache_clear()
     assert config.load_settings().public_mode is True
     config.load_settings.cache_clear()
+
+
+# --- The CIK must survive YAML (section 9.3) ----------------------------------
+
+
+def test_an_unquoted_cik_is_refused_instead_of_silently_becoming_another_company():
+    """The bug this guards is invisible after the fact, so it is caught at load time.
+
+    PyYAML resolves a bare number with leading zeros as **octal**. Alphabet's real CIK,
+    written ``cik: 0001652044``, parses to the integer 480292 — which zero-fills back to
+    ``0000480292``, a syntactically perfect CIK belonging to somebody else. Nothing
+    downstream can notice: by then the original digits no longer exist.
+    """
+    parsed = yaml.safe_load('cik: 0001652044')["cik"]
+    assert parsed == 480292, "PyYAML stopped reading leading zeros as octal"
+
+    with pytest.raises(ValueError, match="Quote it"):
+        config.validate_theses([_card(cik=parsed)])
+
+
+def test_a_quoted_cik_is_accepted():
+    config.validate_theses([_card(cik="0001652044")])
+
+
+def test_a_cik_that_is_not_ten_digits_is_refused():
+    with pytest.raises(ValueError, match="not a CIK"):
+        config.validate_theses([_card(cik="00016520440000")])
+    with pytest.raises(ValueError, match="not a CIK"):
+        config.validate_theses([_card(cik="GOOGL")])
+
+
+def _card(**overrides) -> dict:
+    card = {
+        "ticker": "GOOGL", "cik": "0001652044", "thesis": "t",
+        "value_accrual": "v", "key_metric": "k", "invalidation": "i",
+        "review_date": "2027-01-01",
+    }
+    card.update(overrides)
+    return card

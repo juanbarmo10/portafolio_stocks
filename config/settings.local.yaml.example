@@ -13,6 +13,12 @@ universe:
   # Una ficha sin `invalidation` se rechaza al cargar la configuración. No es una
   # validación cosmética: sin criterio de falsación no hay forma de saber cuándo
   # vender, y la posición se sostiene sola por inercia.
+  #
+  # ⚠️ El CIK va SIEMPRE ENTRE COMILLAS. Sin ellas YAML lo lee como número, y un número
+  # con ceros a la izquierda es OCTAL: el CIK de UBER, `0001543151`, se convierte en
+  # 444009 — otro CIK perfectamente válido, de otra empresa, sin ningún error. De tus
+  # ocho tickers, UBER y T eran vulnerables. La configuración ahora rechaza un CIK que no
+  # sea texto, porque después de que YAML lo parsee ya no hay forma de detectarlo.
   tracked: []
   #  - ticker: AAPL
   #    cik: "0000320193"          # clave primaria real; el ticker es mutable (§9.3)

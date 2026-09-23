@@ -51,6 +51,17 @@ PUBLIC_NOTE = (
 )
 
 
+def _spanish(text: str) -> str:
+    """Swap an English-formatted number to Spanish notation: ``1,138.97`` -> ``1.138,97``.
+
+    Via a placeholder, because replacing ``,`` and ``.`` in sequence makes the second
+    replacement eat the output of the first — ``1,234.5678`` comes out as ``1,234,5678``,
+    which reads as a different number and is exactly the bug this helper exists to stop
+    being rewritten by hand at each call site.
+    """
+    return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 class PublicModeViolation(RuntimeError):
     """An absolute money figure was requested in a deployment that must not show one."""
 
@@ -78,10 +89,7 @@ def money(value: float | None, *, public: bool, currency: str = "USD") -> str:
         )
     if value is None or pd.isna(value):
         return MISSING
-    # f-string gives '1,138.97'; swap to the Spanish '1.138,97' via a placeholder so the
-    # two separators do not overwrite each other mid-replace.
-    text = f"{value:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
-    return f"{text} {currency}"
+    return f"{_spanish(f'{value:,.2f}')} {currency}"
 
 
 def reported_amount(value: float | None, *, unit: str = "USD") -> str:
@@ -106,11 +114,18 @@ def reported_amount(value: float | None, *, unit: str = "USD") -> str:
     magnitude = abs(value)
     for limit, scale in ((1e12, "billones"), (1e9, "mil millones"), (1e6, "millones")):
         if magnitude >= limit:
-            scaled = f"{value / limit:,.2f}".replace(",", "\x00")
-            scaled = scaled.replace(".", ",").replace("\x00", ".")
-            return f"{scaled} {scale} {unit}"
-    text = f"{value:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
-    return f"{text} {unit}"
+            return f"{_spanish(f'{value / limit:,.2f}')} {scale} {unit}"
+    return f"{_spanish(f'{value:,.2f}')} {unit}"
+
+
+def quantity(value: float | None, *, decimals: int = 4) -> str:
+    """Format a share count in Spanish notation. Safe in both modes — a count is not money.
+
+    Fractional shares are enabled on this account, so the decimals are not decoration.
+    """
+    if value is None or pd.isna(value):
+        return MISSING
+    return _spanish(f"{value:,.{decimals}f}")
 
 
 def pct(fraction: float | None, *, decimals: int = 1) -> str:

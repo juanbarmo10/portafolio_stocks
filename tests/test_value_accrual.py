@@ -203,3 +203,50 @@ def test_an_unknown_company_reads_as_holes(observations):
     assert accrual.diluted_shares is None
     assert accrual.sbc_over_fcf is None
     assert accrual.roic is None
+
+
+# --- The year-earlier count, when only quarters are filed ---------------------
+
+
+def quarterly_only(values: list[tuple[str, str, float]]) -> pd.DataFrame:
+    """A company whose annual figures are not in yet: only filed quarters."""
+    return pd.DataFrame([
+        {"source": "sec", "series_id": "0000000009:diluted_shares:q",
+         "ts": ts, "ts_release": released, "value": value}
+        for ts, released, value in values
+    ])
+
+
+def test_the_year_earlier_count_is_matched_by_date_not_by_row():
+    """Section 9.12 meets section 9.11: counting rows back overshoots by a quarter.
+
+    A fiscal year arrives as **three** filed quarters, because nobody files a Q4 10-Q. So
+    stepping back four rows lands 455 days ago, not 365 — and the resulting dilution is
+    simply larger, with nothing to signal it. Here the true year-on-year change is
+    1050/1020 − 1 = 2.94%; matching by row would report 1050/1010 − 1 = 3.96%.
+    """
+    observations = quarterly_only([
+        ("2025-03-31", "2025-04-29", 1000.0),
+        ("2025-06-30", "2025-07-29", 1010.0),
+        ("2025-09-30", "2025-10-29", 1020.0),
+        # no Q4 filed — section 9.12
+        ("2026-03-31", "2026-04-29", 1030.0),
+        ("2026-06-30", "2026-07-29", 1040.0),
+        ("2026-09-30", "2026-10-29", 1050.0),
+    ])
+
+    assert va.share_count_year_earlier(observations, "0000000009", "2026-11-01") == 1020.0
+    assert va.dilution(observations, "0000000009", "2026-11-01") == pytest.approx(
+        1050 / 1020 - 1
+    )
+
+
+def test_no_quarter_a_year_back_reports_nothing_rather_than_the_nearest_one():
+    """Section 12: with only two quarters filed there is no year-on-year to report."""
+    observations = quarterly_only([
+        ("2026-06-30", "2026-07-29", 1040.0),
+        ("2026-09-30", "2026-10-29", 1050.0),
+    ])
+
+    assert va.share_count_year_earlier(observations, "0000000009", "2026-11-01") is None
+    assert va.dilution(observations, "0000000009", "2026-11-01") is None

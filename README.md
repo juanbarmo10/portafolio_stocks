@@ -258,6 +258,9 @@ db/         SQLite (fases 0-4) o PostgreSQL (fase 5) vía DATABASE_URL
 transform/  funciones puras, sin red — entrada faltante -> None
               │
 app/        Streamlit multipágina (st.navigation)
+              ├── 🏠 Hoy       nivel 1, macro point-in-time
+              ├── 🏢 Empresa   nivel 3, una empresa a fondo contra su propia tesis
+              └── 🔬 Cartera   nivel 4, posiciones y reconciliación contra el NAV
 alerts/     Telegram, con deduplicación vía alerts_log
 validation/ retornos forward + bootstrap por permutación + FDR Benjamini-Hochberg
 ```
@@ -279,7 +282,7 @@ o a medias.
 |---|---|---|
 | 0 | Andamiaje: esquema, adaptador de BD, loader idempotente, config, logging, CI | ✅ |
 | 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | ✅ |
-| 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor | ✅ implementada; falta la página del nivel 3 |
+| 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor, página por empresa | ✅ |
 | 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | pendiente |
 | 4 | Alertas Telegram y validación estadística | pendiente |
 | 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | pendiente |

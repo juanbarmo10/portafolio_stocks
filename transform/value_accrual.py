@@ -115,14 +115,32 @@ def share_count(
 def share_count_year_earlier(
     observations: pd.DataFrame, cik: str, as_of: Any, metric: str = "diluted_shares"
 ) -> float | None:
-    """The same count one fiscal year back, for the year-on-year comparison."""
+    """The same count one fiscal year back, for the year-on-year comparison.
+
+    The annual series is consecutive, so one row back really is one year back. **The
+    quarterly fallback is not**, and that is the trap: no company files a fourth-quarter
+    10-Q (section 9.12), so a fiscal year arrives as *three* filed quarters and counting
+    rows backwards overshoots. Measured on Microsoft's filed quarters: four rows back is
+    365 days, five rows back is **455**. Comparing against a count from fifteen months ago
+    raises no error and returns a perfectly plausible dilution figure, roughly a third too
+    large — section 9.11 again, an ordinary operation applied to the wrong row.
+
+    So the fallback matches by **date**: the filed quarter nearest to one year before the
+    latest one, and only when it really is a year away. Otherwise ``None`` (section 12).
+    """
     annual = fun.known(observations, cik, metric, fun.ANNUAL, as_of)
     if len(annual) >= 2:
         return float(annual["value"].iloc[-2])
+
     quarters = fun.known(observations, cik, metric, fun.QUARTER, as_of)
-    if len(quarters) >= 5:
-        return float(quarters["value"].iloc[-5])
-    return None
+    if len(quarters) < 2:
+        return None
+    ends = pd.to_datetime(quarters["ts"])
+    gaps = (ends.iloc[-1] - ends.iloc[:-1]).dt.days
+    nearest = (gaps - 365).abs().idxmin()
+    if not fun.YEAR_DAYS[0] <= gaps.loc[nearest] <= fun.YEAR_DAYS[1]:
+        return None
+    return float(quarters["value"].loc[nearest])
 
 
 def dilution(observations: pd.DataFrame, cik: str, as_of: Any) -> float | None:

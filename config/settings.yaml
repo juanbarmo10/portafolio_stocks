@@ -248,6 +248,11 @@ panel:
     # prohíbe §12. Ponlo en settings.local.yaml cuando decidas TU tasa exigida.
     hurdle_rate: null
 
+    # Días antes de resultados dentro de los cuales §2 prohíbe abrir posición sin
+    # decisión explícita. Es el análogo del unlock: evento binario con fecha conocida.
+    # Umbral, así que vive aquí y no dentro de una página (§10).
+    earnings_window_days: 5
+
   # Nivel 4 — cartera real.
   portfolio:
     # Diferencia relativa tolerada entre la valoración propia (cierres crudos de

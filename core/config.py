@@ -131,6 +131,31 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+def _cik_problem(cik: Any) -> str | None:
+    """Reject a CIK that YAML may already have corrupted, before anything uses it.
+
+    **A CIK must be quoted in YAML.** Written bare it is a number, and PyYAML resolves a
+    number with leading zeros as *octal* — so Alphabet's ``0001652044`` silently becomes
+    ``480292``, which zero-fills back to ``0000480292``: a different company's key, with
+    no error anywhere. Nothing downstream can detect it, because by the time the config is
+    loaded the original digits are gone (section 9.3 — the CIK is the primary key, and
+    section 12 — a wrong number is worse than a missing one).
+
+    Requiring a string is the only check that survives that, so it is the check made here:
+    the damage happens during parsing, not after.
+    """
+    if not isinstance(cik, str):
+        return (
+            f"cik is {type(cik).__name__} {cik!r}, not text. Quote it in the YAML "
+            '(cik: "0001652044"): unquoted, a CIK with leading zeros is read as an '
+            "octal number and silently becomes a different company."
+        )
+    digits = cik.strip()
+    if not digits.isdigit() or len(digits) > 10:
+        return f"cik {cik!r} is not a CIK: expected up to 10 digits."
+    return None
+
+
 def validate_theses(companies: list[dict[str, Any]]) -> None:
     """Reject any thesis card missing a required field (section 5.2).
 
@@ -149,6 +174,10 @@ def validate_theses(companies: list[dict[str, Any]]) -> None:
         if missing:
             label = entry.get("ticker") or entry.get("cik") or "<unnamed>"
             problems.append(f"{label}: missing {missing}")
+            continue
+        problem = _cik_problem(entry["cik"])
+        if problem:
+            problems.append(f"{entry['ticker']}: {problem}")
     if problems:
         raise ValueError(
             "Incomplete thesis cards in config (CLAUDE.md section 5.2 — a company "
