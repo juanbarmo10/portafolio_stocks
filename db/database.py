@@ -141,6 +141,68 @@ def open_connection(sqlite_path: Path) -> sqlite3.Connection | _PgConnection:
     return conn
 
 
+
+def table_columns(conn: Any, table: str) -> set[str]:
+    """Column names of an existing table, empty when it does not exist.
+
+    Backend-specific by necessity: SQLite answers through ``PRAGMA table_info`` and
+    PostgreSQL through ``information_schema``. It is the only introspection this project
+    does, and it exists for :func:`add_missing_columns`.
+    """
+    if isinstance(conn, _PgConnection):
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            [table],
+        ).fetchall()
+        return {str(row[0]) for row in rows}
+    rows = conn.execute(f"PRAGMA table_info({_quote_identifier(table)})").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _quote_identifier(name: str) -> str:
+    """Double-quote a table name. Only ever called with a literal from this module."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def add_missing_columns(conn: Any, wanted: dict[str, dict[str, str]]) -> list[str]:
+    """Add columns that a pre-existing database does not have yet. Idempotent.
+
+    ``CREATE TABLE IF NOT EXISTS`` does nothing to a table that already exists, so a
+    column added to schema.sql never reaches a database created before it. The long-format
+    ``observations`` table exists precisely so that new *series* never need this (section
+    6) — but the account tables are relational, and ``conid`` had to be added to them.
+
+    Deliberately minimal, and deliberately not a migration framework: it only ever ADDs a
+    nullable column. It does not drop, rename, retype or backfill. A column added this way
+    is NULL on existing rows until the next ingest upserts over them, which is safe because
+    every ingest is idempotent and rewrites every non-key column.
+
+    Args:
+        conn: Open connection.
+        wanted: ``{table: {column: sql_type}}``.
+
+    Returns:
+        Labels of the columns actually added, for logging. Empty on an up-to-date database.
+    """
+    added: list[str] = []
+    for table, columns in wanted.items():
+        existing = table_columns(conn, table)
+        if not existing:
+            continue  # the table itself is absent; schema.sql will have just created it
+        for column, sql_type in columns.items():
+            if column in existing:
+                continue
+            conn.execute(
+                f"ALTER TABLE {_quote_identifier(table)} "
+                f"ADD COLUMN {_quote_identifier(column)} {sql_type}"
+            )
+            added.append(f"{table}.{column}")
+    if added:
+        conn.commit()
+        log.info("Schema updated: added %s.", ", ".join(added))
+    return added
+
+
 def read_observations(
     conn: Any,
     series_ids: Sequence[str] | None = None,
@@ -188,11 +250,11 @@ def read_observations(
 # drift in silence. The allowlist is also what keeps a table name out of string-built SQL.
 READABLE_TABLES: dict[str, tuple[list[str], str]] = {
     "trades": ([
-        "trade_id", "cik", "ticker", "ts", "side", "quantity", "price", "currency",
-        "commission", "fx_rate",
+        "trade_id", "conid", "cik", "ticker", "ts", "side", "quantity", "price",
+        "currency", "commission", "fx_rate",
     ], "ts"),
     "cash_transactions": (
-        ["tx_id", "cik", "ticker", "ts", "kind", "amount", "currency"], "ts",
+        ["tx_id", "conid", "cik", "ticker", "ts", "kind", "amount", "currency"], "ts",
     ),
     "filings": (
         ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url"],
@@ -205,6 +267,12 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
         ["action_id", "cik", "ticker", "kind", "ex_date", "ratio", "amount", "currency",
          "source"],
         "ex_date",
+    ),
+    "securities": (
+        ["conid", "ticker", "cik", "name", "isin", "cusip", "figi", "asset_category",
+         "sub_category", "listing_exchange", "issuer_country", "currency", "multiplier",
+         "first_seen", "last_seen", "source"],
+        "ticker",
     ),
 }
 

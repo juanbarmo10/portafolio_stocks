@@ -72,7 +72,8 @@ def seed_database(db_path) -> None:
              "ts_release": "2026-09-15", "value": 500.0},
         ]))
         loader.upsert_trades(conn, pd.DataFrame([
-            {"trade_id": "1", "cik": CIK, "ticker": "MSFT", "ts": "2026-02-02T15:00:00+00:00",
+            {"trade_id": "1", "conid": "272093", "cik": CIK, "ticker": "MSFT",
+             "ts": "2026-02-02T15:00:00+00:00",
              "side": "buy", "quantity": 2.0, "price": 449.0, "currency": "USD",
              "commission": -0.35, "fx_rate": 1.0},
         ]))

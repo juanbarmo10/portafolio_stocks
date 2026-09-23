@@ -221,7 +221,8 @@ def test_payment_in_lieu_is_not_filed_as_a_dividend():
     """Synthetic: it may not be taxed like one, so it never shares a bucket (section 11)."""
     tx = types.SimpleNamespace(
         transactionID=7, type=types.SimpleNamespace(name="PAYMENTINLIEU"),
-        accountId="U1", symbol="T", dateTime=dt.datetime(2026, 2, 2, 20, 20),
+        accountId="U1", symbol="T", conid=37018770,
+        dateTime=dt.datetime(2026, 2, 2, 20, 20),
         reportDate=dt.date(2026, 2, 2), amount=1.5, currency="USD",
     )
     rows, failures = cash_transaction_rows(
@@ -436,7 +437,9 @@ def test_fetch_tables_omits_the_sections_that_came_back_empty(tmp_path):
     ingester.fetch()
     tables = ingester.fetch_tables()
 
-    assert set(tables) == {"trades", "cash_transactions"}, "empty tables must not be sent"
+    assert set(tables) == {"trades", "cash_transactions", "securities"}, (
+        "empty tables must not be sent, and the ones with rows must be"
+    )
     assert len(tables["trades"]) == 25
     assert ingester.partial_failures() == []
 
@@ -455,18 +458,192 @@ def test_ingesting_the_statement_twice_does_not_duplicate(tmp_path):
             loader.upsert_cash_transactions(
                 conn, cash_transactions_frame(tables["cash_transactions"])
             )
+            loader.upsert_securities(conn, tables["securities"])
 
         counts = {
             table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in ("observations", "trades", "cash_transactions")
+            for table in ("observations", "trades", "cash_transactions", "securities")
         }
         assert counts["trades"] == 25
         assert counts["cash_transactions"] == 21
+        assert counts["securities"] == 8, "conid is the key, so a re-read updates in place"
         assert counts["observations"] == 44, "10 NAV days x 4 series + 2 positions x 2"
 
         stored = pd.read_sql_query(
             "SELECT value FROM observations WHERE series_id = 'NAV:total' ORDER BY ts", conn
         )
         assert float(stored["value"].iloc[-1]) == 1138.96750879
+    finally:
+        conn.close()
+
+
+# --- Security master (section 9.3) --------------------------------------------
+
+
+def test_the_security_master_is_keyed_on_conid_not_on_the_ticker(statement):
+    """Section 9.3: the ticker is not a key. ``conid`` is IBKR's permanent contract id."""
+    from ingest.ibkr_flex import security_rows
+
+    rows, failures = security_rows(statement, no_cik)
+
+    assert failures == []
+    assert len(rows) == 8
+    assert all(row["conid"] for row in rows), "a row without the key was stored"
+    assert len({row["conid"] for row in rows}) == len(rows), "conid is not unique"
+
+    msft = next(row for row in rows if row["ticker"] == "MSFT")
+    assert msft["conid"] == "272093"
+    assert msft["name"] == "MICROSOFT CORP"
+
+
+def test_the_standard_identifiers_travel_with_it(statement):
+    """ISIN, CUSIP and FIGI survive a rename too, and are not IBKR-specific."""
+    from ingest.ibkr_flex import security_rows
+
+    msft = next(r for r in security_rows(statement, no_cik)[0] if r["ticker"] == "MSFT")
+
+    assert msft["isin"] == "US5949181045"
+    assert msft["cusip"] == "594918104"
+    assert msft["figi"] == "BBG000BPH459"
+
+
+def test_the_issuer_country_is_carried_because_section_11_needs_it(statement):
+    """Situs. It appears nowhere else in the statement, and nothing is computed from it.
+
+    Section 11 shows US-situs exposure as a question for an adviser; the panel asserts no
+    tax treatment, so this is stored as an observed attribute and left alone.
+    """
+    from ingest.ibkr_flex import security_rows
+
+    rows, _ = security_rows(statement, no_cik)
+    assert {row["issuer_country"] for row in rows} == {"US"}
+
+
+def test_a_security_with_no_conid_is_reported_not_stored_under_its_ticker():
+    """Without the key the row could only be identified by the thing 9.3 rejects."""
+    from ingest.ibkr_flex import security_rows
+
+    class Info:
+        symbol, conid, description, currency, multiplier = "ZZZZ", None, "X", "USD", None
+        assetCategory = subCategory = listingExchange = issuerCountryCode = None
+        isin = cusip = figi = None
+
+    class Stmt:
+        SecuritiesInfo = [Info()]
+        fromDate = toDate = None
+
+    rows, failures = security_rows(Stmt(), no_cik)
+    assert rows == []
+    assert "no conid" in failures[0]
+
+
+def test_trades_and_cash_carry_the_join_key(statement):
+    """Without conid on the movements, the master could only be reached via the ticker."""
+    from ingest.ibkr_flex import cash_transaction_rows, trade_rows
+
+    trades, _ = trade_rows(statement, no_cik, NEW_YORK)
+    cash, _ = cash_transaction_rows(statement, no_cik, NEW_YORK)
+
+    assert all(row["conid"] for row in trades), "a trade has no conid"
+    assert all(row["conid"] for row in cash if row["ticker"]), "a security cash row has none"
+
+
+# --- StmtFunds: verified, never stored ----------------------------------------
+
+
+def test_the_cash_ledger_agrees_with_everything_this_module_parsed(statement):
+    """The third witness. Measured: 46 ledger rows, 25 executions, 549.76 of other cash.
+
+    StmtFunds holds no fact that trades and cash_transactions do not — they are slices of
+    it — so it is not stored. What it adds is the running balance, an arithmetic chain
+    that has to tie out, which makes it a check rather than data.
+    """
+    from ingest.ibkr_flex import cash_transaction_rows, trade_rows, verify_against_funds
+
+    trades, _ = trade_rows(statement, no_cik, NEW_YORK)
+    cash, _ = cash_transaction_rows(statement, no_cik, NEW_YORK)
+
+    assert verify_against_funds(statement, trades, cash) == []
+
+
+def test_a_dropped_commission_is_caught_by_the_ledger(statement):
+    """The check has to bite, or it is decoration.
+
+    A commission silently lost in parsing produces trades that look entirely reasonable —
+    and the broker's own ledger is the only thing that says otherwise.
+    """
+    from ingest.ibkr_flex import cash_transaction_rows, trade_rows, verify_against_funds
+
+    trades, _ = trade_rows(statement, no_cik, NEW_YORK)
+    cash, _ = cash_transaction_rows(statement, no_cik, NEW_YORK)
+    damaged = [{**row, "commission": 0.0} for row in trades]
+
+    problems = verify_against_funds(statement, damaged, cash)
+    assert problems, "a lost commission went unnoticed"
+    assert "disagrees with the parsed cash" in problems[0]
+
+
+def test_a_flipped_side_is_caught_by_the_ledger(statement):
+    """A sign error is the other failure that produces perfectly plausible rows."""
+    from ingest.ibkr_flex import cash_transaction_rows, trade_rows, verify_against_funds
+
+    trades, _ = trade_rows(statement, no_cik, NEW_YORK)
+    cash, _ = cash_transaction_rows(statement, no_cik, NEW_YORK)
+    flipped = [{**row, "side": "sell" if row["side"] == "buy" else "buy"} for row in trades]
+
+    assert verify_against_funds(statement, flipped, cash), "a flipped side went unnoticed"
+
+
+def test_missing_cash_transactions_are_caught_in_aggregate(statement):
+    from ingest.ibkr_flex import cash_transaction_rows, trade_rows, verify_against_funds
+
+    trades, _ = trade_rows(statement, no_cik, NEW_YORK)
+    cash, _ = cash_transaction_rows(statement, no_cik, NEW_YORK)
+
+    problems = verify_against_funds(statement, trades, cash[:-3])
+    assert any("non-trade cash" in problem for problem in problems)
+
+
+def test_an_absent_ledger_is_reported_as_not_run_rather_than_as_passed():
+    """Silence must not be indistinguishable from verified (section 12)."""
+    from ingest.ibkr_flex import verify_against_funds
+
+    class Stmt:
+        StmtFunds = []
+
+    assert verify_against_funds(Stmt(), [], []) == []
+
+
+def test_the_master_joins_the_movements_by_the_stable_key(tmp_path):
+    """The point of storing it: a movement finds its security without going via the ticker.
+
+    Today both spellings agree, so the join looks redundant. It stops being redundant the
+    day a ticker is renamed — which is exactly when a ticker-keyed join starts lying and
+    nothing complains (section 9.3).
+    """
+    from ingest.ibkr_flex import cash_transactions_frame, trades_frame
+
+    conn = loader.init_db(tmp_path / "join.db")
+    try:
+        ingester = IbkrFlexIngester(settings_for(tmp_path), statement=FIXTURE)
+        ingester.fetch()
+        tables = ingester.fetch_tables()
+        loader.upsert_trades(conn, trades_frame(tables["trades"]))
+        loader.upsert_cash_transactions(
+            conn, cash_transactions_frame(tables["cash_transactions"])
+        )
+        loader.upsert_securities(conn, tables["securities"])
+
+        orphans = conn.execute(
+            "SELECT COUNT(*) FROM trades t "
+            "LEFT JOIN securities s ON s.conid = t.conid WHERE s.conid IS NULL"
+        ).fetchone()[0]
+        assert orphans == 0, "a trade points at no security"
+
+        isin = conn.execute(
+            "SELECT s.isin FROM trades t JOIN securities s ON s.conid = t.conid "
+            "WHERE t.ticker = 'MSFT' LIMIT 1"
+        ).fetchone()[0]
+        assert isin == "US5949181045"
     finally:
         conn.close()

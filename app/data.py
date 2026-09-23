@@ -124,6 +124,15 @@ def corporate_actions() -> pd.DataFrame:
     return _table("corporate_actions", db_mtime())
 
 
+def securities() -> pd.DataFrame:
+    """Security master from the Flex Query, keyed on IBKR's permanent ``conid``.
+
+    The only stable key the account side has (section 9.3), and the only place the
+    issuer country — an asset's situs, which section 11 needs — is recorded.
+    """
+    return _table("securities", db_mtime())
+
+
 def sec_observations() -> pd.DataFrame:
     """Audited XBRL facts for the tracked universe."""
     return observations("sec", db_mtime())

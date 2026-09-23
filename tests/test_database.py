@@ -116,7 +116,107 @@ def test_every_readable_table_matches_the_loader_column_list():
         "filings": loader.FILING_COLUMNS,
         "events": loader.EVENT_COLUMNS,
         "corporate_actions": loader.CORPORATE_ACTION_COLUMNS,
+        "securities": loader.SECURITY_COLUMNS,
     }
     assert set(READABLE_TABLES) == set(expected), "a readable table has no column check"
     for table, columns in expected.items():
         assert READABLE_TABLES[table][0] == columns, table
+
+
+# --- Additive migration for tables that already existed ----------------------
+
+
+def test_a_column_added_later_reaches_a_database_that_predates_it(tmp_path):
+    """``CREATE TABLE IF NOT EXISTS`` does nothing to a table that already exists.
+
+    The long-format ``observations`` table exists so new *series* never need a migration
+    (section 6), but the account tables are relational and ``conid`` had to be added to
+    them. Without this step a database created last week would silently keep the old
+    shape and every write would fail on the missing column.
+    """
+    import sqlite3
+
+    from db.database import add_missing_columns, table_columns
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "CREATE TABLE trades (trade_id TEXT PRIMARY KEY, ticker TEXT NOT NULL)"
+        )
+        conn.execute("INSERT INTO trades VALUES ('T1', 'AAPL')")
+        conn.commit()
+
+        assert "conid" not in table_columns(conn, "trades")
+        added = add_missing_columns(conn, {"trades": {"conid": "TEXT"}})
+
+        assert added == ["trades.conid"]
+        assert "conid" in table_columns(conn, "trades")
+        # The existing row survives, with the new column empty until the next ingest
+        # upserts over it — which is safe precisely because every ingest is idempotent.
+        assert conn.execute("SELECT trade_id, conid FROM trades").fetchone() == ("T1", None)
+    finally:
+        conn.close()
+
+
+def test_applying_the_migration_twice_changes_nothing(tmp_path):
+    """Idempotent, like everything else that touches the database (section 6)."""
+    import sqlite3
+
+    from db.database import add_missing_columns
+
+    conn = sqlite3.connect(tmp_path / "twice.db")
+    try:
+        conn.execute("CREATE TABLE trades (trade_id TEXT PRIMARY KEY)")
+        conn.commit()
+        assert add_missing_columns(conn, {"trades": {"conid": "TEXT"}}) == ["trades.conid"]
+        assert add_missing_columns(conn, {"trades": {"conid": "TEXT"}}) == []
+    finally:
+        conn.close()
+
+
+def test_a_table_that_does_not_exist_yet_is_left_to_the_schema(tmp_path):
+    """schema.sql has just created it with the column already in place."""
+    import sqlite3
+
+    from db.database import add_missing_columns
+
+    conn = sqlite3.connect(tmp_path / "absent.db")
+    try:
+        assert add_missing_columns(conn, {"nope": {"conid": "TEXT"}}) == []
+    finally:
+        conn.close()
+
+
+def test_init_db_on_a_legacy_database_makes_it_writable_again(tmp_path):
+    """End to end: an old database is opened, migrated, and accepts the new rows."""
+    import sqlite3
+
+    import pandas as pd
+
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db)
+    try:
+        # The trades table exactly as it was before conid existed.
+        conn.execute(
+            """CREATE TABLE trades (
+                trade_id TEXT PRIMARY KEY, cik TEXT, ticker TEXT NOT NULL, ts TEXT NOT NULL,
+                side TEXT NOT NULL, quantity REAL NOT NULL, price REAL NOT NULL,
+                currency TEXT NOT NULL, commission REAL, fx_rate REAL, ingested_at TEXT NOT NULL
+            )"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    conn = loader.init_db(db)
+    try:
+        written = loader.upsert_trades(conn, pd.DataFrame([{
+            "trade_id": "T1", "conid": "272093", "cik": None, "ticker": "MSFT",
+            "ts": "2026-01-05T14:31:00+00:00", "side": "buy", "quantity": 1.0,
+            "price": 400.0, "currency": "USD", "commission": -0.35, "fx_rate": 1.0,
+        }]))
+        assert written == 1
+        assert conn.execute("SELECT conid FROM trades").fetchone()[0] == "272093"
+    finally:
+        conn.close()

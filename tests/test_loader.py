@@ -118,12 +118,14 @@ def test_empty_frame_is_a_noop(conn):
 def test_trades_and_cash_transactions_are_idempotent(conn):
     """Account data re-read from the Flex Query must not duplicate (sections 4.1, 6)."""
     trades = pd.DataFrame([{
-        "trade_id": "IBKR-1", "cik": "0000320193", "ticker": "AAPL",
+        "trade_id": "IBKR-1", "conid": "265598", "cik": "0000320193",
+        "ticker": "AAPL",
         "ts": "2026-01-05T14:31:00+00:00", "side": "buy", "quantity": 10.0,
         "price": 195.5, "currency": "USD", "commission": 1.0, "fx_rate": None,
     }])
     cash = pd.DataFrame([{
-        "tx_id": "IBKR-DIV-1", "cik": "0000320193", "ticker": "AAPL",
+        "tx_id": "IBKR-DIV-1", "conid": "265598", "cik": "0000320193",
+        "ticker": "AAPL",
         "ts": "2026-02-13T00:00:00+00:00", "kind": "withholding_tax",
         "amount": -0.37, "currency": "USD",
     }])

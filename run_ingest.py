@@ -54,6 +54,7 @@ TABLE_LOADERS: dict[str, Callable[[Any, list[dict]], int]] = {
     "companies": loader.upsert_companies,
     "filings": loader.upsert_filings,
     "events": loader.upsert_events,
+    "securities": loader.upsert_securities,
     # The account tables take a frame rather than records, so they are adapted here
     # instead of bending either side of the contract.
     "trades": lambda conn, rows: loader.upsert_trades(conn, trades_frame(rows)),

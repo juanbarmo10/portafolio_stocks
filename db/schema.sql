@@ -89,10 +89,50 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 
+-- Security master, from the Flex Query SecuritiesInfo section. One row per instrument the
+-- account has ever touched.
+--
+-- WHY conid IS THE KEY (section 9.3): the ticker is not one. It gets reassigned between
+-- companies and renamed under the same company (FB -> META), so a table keyed on it cannot
+-- describe history. `conid` is IBKR's own permanent contract identifier, and the ISIN,
+-- CUSIP and FIGI stored next to it are the industry-standard identifiers that survive a
+-- rename as well. This is the only stable key the ACCOUNT side of the project has; the SEC
+-- side keys on CIK, and the two meet here when the ticker resolves.
+--
+-- `issuer_country` earns its place on its own: it is the field that determines the SITUS of
+-- an asset, which section 11 needs to show US-situs exposure as a question for an adviser.
+-- It exists nowhere else in the statement. Nothing is computed from it here (section 11:
+-- Claude asserts no tax treatment).
+--
+-- first_seen / last_seen make a rename visible instead of silently overwriting it: the row
+-- keeps the current ticker, and the dates say when this mapping was observed.
+CREATE TABLE IF NOT EXISTS securities (
+    conid            TEXT PRIMARY KEY,      -- IBKR permanent contract id (section 9.3)
+    ticker           TEXT NOT NULL,         -- current symbol, mutable
+    cik              TEXT,                  -- NULL when unresolved; never guessed (9.3)
+    name             TEXT,
+    isin             TEXT,
+    cusip            TEXT,
+    figi             TEXT,
+    asset_category   TEXT,                  -- 'STK' | 'ETF' | ...
+    sub_category     TEXT,                  -- 'COMMON' | ...
+    listing_exchange TEXT,
+    issuer_country   TEXT,                  -- situs of the asset (section 11)
+    currency         TEXT,
+    multiplier       REAL,
+    first_seen       TEXT,
+    last_seen        TEXT,
+    source           TEXT NOT NULL,
+    ingested_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_securities_ticker ON securities(ticker);
+CREATE INDEX IF NOT EXISTS idx_securities_cik ON securities(cik);
+
 -- Executed trades, read from the IBKR Activity Flex Query — never written by hand.
 -- cik stays NULL with a warning when the ticker does not resolve; never guessed (9.3).
 CREATE TABLE IF NOT EXISTS trades (
     trade_id    TEXT PRIMARY KEY,           -- IBKR tradeID (idempotency key)
+    conid       TEXT,                       -- -> securities.conid, the stable key (9.3)
     cik         TEXT,
     ticker      TEXT NOT NULL,
     ts          TEXT NOT NULL,              -- ISO8601 UTC execution time
@@ -110,6 +150,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_ticker_ts ON trades(ticker, ts);
 -- Withholding is the OBSERVED figure; never a assumed treaty rate (section 11).
 CREATE TABLE IF NOT EXISTS cash_transactions (
     tx_id       TEXT PRIMARY KEY,
+    conid       TEXT,                       -- -> securities.conid, the stable key (9.3)
     cik         TEXT,
     ticker      TEXT,
     ts          TEXT NOT NULL,

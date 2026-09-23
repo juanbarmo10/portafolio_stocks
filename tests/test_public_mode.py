@@ -203,14 +203,16 @@ def seed(db_path) -> None:
              "ts_release": "2026-09-15", "value": 180.47},
         ]))
         loader.upsert_trades(conn, pd.DataFrame([
-            {"trade_id": "1", "cik": None, "ticker": "TMUS",
+            {"trade_id": "1", "conid": "125980227", "cik": None, "ticker": "TMUS",
              "ts": "2025-10-24T17:00:00+00:00", "side": "buy", "quantity": 3.0,
              "price": 216.60, "currency": "USD", "commission": -0.35, "fx_rate": 1.0},
         ]))
         loader.upsert_cash_transactions(conn, pd.DataFrame([
-            {"tx_id": "d1", "cik": None, "ticker": "TMUS", "ts": "2026-09-10T20:20:00+00:00",
+            {"tx_id": "d1", "conid": "125980227", "cik": None, "ticker": "TMUS",
+             "ts": "2026-09-10T20:20:00+00:00",
              "kind": "dividend", "amount": 1.02, "currency": "USD"},
-            {"tx_id": "w1", "cik": None, "ticker": "TMUS", "ts": "2026-09-10T20:20:00+00:00",
+            {"tx_id": "w1", "conid": "125980227", "cik": None, "ticker": "TMUS",
+             "ts": "2026-09-10T20:20:00+00:00",
              "kind": "withholding_tax", "amount": -0.31, "currency": "USD"},
         ]))
     finally:

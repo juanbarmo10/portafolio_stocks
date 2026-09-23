@@ -209,6 +209,12 @@ sources:
     poll_base_delay_s: 3
     poll_max_delay_s: 60
     request_timeout_s: 60
+    # Tolerancia de caja del cruce contra StmtFunds (el libro mayor de IBKR). Medio
+    # céntimo: tanto el mayor como las ejecuciones son cifras exactas, así que cualquier
+    # cosa por encima del redondeo es un desacuerdo real entre lo que parseamos y lo que
+    # movió el bróker. StmtFunds se VERIFICA, no se guarda: no trae ningún hecho que no
+    # estén ya en trades y cash_transactions (RESEARCH.md §2.19).
+    funds_tolerance: 0.005
     # IBKR sella las ejecuciones en la zona horaria configurada del reporte, y el XML no
     # dice cuál es. Aquí es un parámetro visible y verificable en el portal, no una
     # suposición enterrada en el código (§10). Cámbialo si tu reporte usa otra zona.

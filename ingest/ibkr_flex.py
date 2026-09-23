@@ -43,7 +43,7 @@ import datetime as dt
 import warnings
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -344,6 +344,7 @@ def trade_rows(
             continue
         rows.append({
             "trade_id": str(trade.tradeID),
+            "conid": None if trade.conid is None else str(trade.conid),
             "cik": resolve_cik(trade.symbol),
             "ticker": trade.symbol,
             "ts": _iso_instant(trade.dateTime, timezone) or _iso_date(trade.tradeDate),
@@ -382,6 +383,7 @@ def cash_transaction_rows(
             failures.append(f"cash transaction with no transactionID; derived key {tx_id}")
         rows.append({
             "tx_id": tx_id,
+            "conid": None if tx.conid is None else str(tx.conid),
             "cik": resolve_cik(tx.symbol) if tx.symbol else None,
             "ticker": tx.symbol,
             "ts": _iso_instant(tx.dateTime, timezone) or _iso_date(tx.reportDate),
@@ -390,6 +392,69 @@ def cash_transaction_rows(
             "currency": tx.currency,
         })
     return rows, failures
+
+
+def security_rows(
+    statement: Any, resolve_cik: Callable[[str], str | None]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """``SecuritiesInfo`` -> ``securities`` rows: the security master (section 9.3).
+
+    This is the only stable key the **account** side of the project has. Everywhere else it
+    keys on the ticker, which section 9.3 says is not a key: it gets renamed under the same
+    company (FB -> META) and reassigned between companies. ``conid`` is IBKR's permanent
+    contract identifier, and the ISIN, CUSIP and FIGI beside it are the industry-standard
+    ones that survive a rename too.
+
+    ``issuerCountryCode`` is carried because it determines an asset's **situs**, which
+    section 11 needs in order to show US-situs exposure as a question for an adviser. It
+    appears nowhere else in the statement. Nothing is computed from it.
+
+    ``first_seen`` / ``last_seen`` bracket when this conid-to-ticker mapping was observed,
+    so a rename is visible rather than an overwrite nobody notices.
+
+    Returns:
+        ``(rows, failures)`` — a security with no conid is skipped and reported, because
+        without the key the row could only be identified by the ticker.
+    """
+    rows: list[dict[str, Any]] = []
+    failures: list[str] = []
+    observed = _statement_period(statement)
+
+    for info in statement.SecuritiesInfo or ():
+        conid = getattr(info, "conid", None)
+        if not conid:
+            failures.append(
+                f"security {info.symbol!r}: no conid, so it has no stable key (§9.3)"
+            )
+            continue
+        rows.append({
+            "conid": str(conid),
+            "ticker": info.symbol,
+            "cik": resolve_cik(info.symbol) if info.symbol else None,
+            "name": info.description,
+            "isin": getattr(info, "isin", None),
+            "cusip": getattr(info, "cusip", None),
+            "figi": getattr(info, "figi", None),
+            "asset_category": getattr(info.assetCategory, "value", None)
+            or (str(info.assetCategory) if info.assetCategory else None),
+            "sub_category": getattr(info, "subCategory", None),
+            "listing_exchange": getattr(info, "listingExchange", None),
+            "issuer_country": getattr(info, "issuerCountryCode", None),
+            "currency": info.currency,
+            "multiplier": None if info.multiplier is None else float(info.multiplier),
+            "first_seen": observed[0],
+            "last_seen": observed[1],
+            "source": SOURCE,
+        })
+    return rows, failures
+
+
+def _statement_period(statement: Any) -> tuple[str | None, str | None]:
+    """``(fromDate, toDate)`` of the statement as ISO dates, for first_seen / last_seen."""
+    return (
+        _iso_date(getattr(statement, "fromDate", None)),
+        _iso_date(getattr(statement, "toDate", None)),
+    )
 
 
 def corporate_action_rows(
@@ -430,6 +495,126 @@ def corporate_action_rows(
             "source": SOURCE,
         })
     return rows, failures
+
+
+def verify_against_funds(
+    statement: Any,
+    trades: Sequence[Mapping[str, Any]],
+    cash: Sequence[Mapping[str, Any]],
+    *,
+    tolerance: float = 0.005,
+) -> list[str]:
+    """Check what this module parsed against IBKR's own cash ledger. **Verify, not store.**
+
+    ``StmtFunds`` (Statement of Funds) is every cash movement of the account in order, each
+    row carrying a running ``balance``. It contains no fact that ``trades`` and
+    ``cash_transactions`` do not already hold — the two are slices of it by type — so
+    storing it would duplicate the database. What it adds is **the balance chain**: an
+    arithmetic sequence that has to tie out from the first row to the last.
+
+    So it is used as a third witness instead, the same argument phase 1 made for the NAV:
+    two independent derivations that agree are evidence, and a copied number is not. Since
+    nothing is stored, the check has to run here, where the statement is in hand.
+
+    Three checks, in increasing value:
+
+    1. **The ledger is internally consistent** — each balance equals the previous one plus
+       that row's amount, per currency. A break means the section came back truncated or
+       out of order, which would make checks 2 and 3 meaningless.
+    2. **Every execution's cash matches, trade by trade.** For each ledger row carrying a
+       ``tradeID``, the cash implied by the parsed trade — ``±quantity × price +
+       commission`` — must equal the amount the broker moved. This is what actually tests
+       the parser: a dropped commission, a sign flip or a wrong side shows up here.
+    3. **Non-trade cash matches in aggregate**: dividends, withholding, interest, fees and
+       deposits, against ``cash_transactions``.
+
+    Measured against the real statement on 2026-09-23: 0 breaks in 46 rows, 25 of 25 trades
+    matching to the cent, and 549.76 against 549.76 of non-trade cash.
+
+    Returns:
+        Discrepancy labels for :meth:`Ingester.partial_failures`, so a mismatch reaches the
+        exit code. Empty when everything ties out. A disagreement here means this module
+        parsed something differently from the broker, which is never cosmetic.
+    """
+    lines = list(statement.StmtFunds or ())
+    if not lines:
+        # Not a failure: the section is optional in the query. But silence would be
+        # indistinguishable from "verified", so say which one it is.
+        log.info(
+            "StmtFunds is absent from the statement; the cash ledger cross-check did not "
+            "run.", extra={"source": SOURCE},
+        )
+        return []
+
+    problems: list[str] = []
+
+    # 1. The balance chain, per currency.
+    previous: dict[str, float] = {}
+    breaks = 0
+    for line in lines:
+        currency = str(line.currency or "")
+        amount, balance = line.amount, line.balance
+        if amount is None or balance is None:
+            continue
+        before = previous.get(currency)
+        if before is not None and abs(before + float(amount) - float(balance)) > tolerance:
+            breaks += 1
+        previous[currency] = float(balance)
+    if breaks:
+        problems.append(
+            f"StmtFunds: {breaks} break(s) in the running balance — the ledger is "
+            "truncated or out of order, so the cash cross-check cannot be trusted"
+        )
+
+    # 2. Per-execution cash. The check that actually exercises the trade parser.
+    by_id = {str(row["trade_id"]): row for row in trades}
+    mismatched: list[str] = []
+    missing: list[str] = []
+    for line in lines:
+        if not line.tradeID or line.amount is None:
+            continue
+        trade = by_id.get(str(line.tradeID))
+        if trade is None:
+            missing.append(str(line.tradeID))
+            continue
+        sign = 1.0 if trade["side"] == "sell" else -1.0
+        expected = (
+            sign * float(trade["quantity"]) * float(trade["price"])
+            + float(trade["commission"] or 0.0)
+        )
+        if abs(expected - float(line.amount)) > tolerance:
+            mismatched.append(
+                f"{line.tradeID} (computed {expected:.6f} vs ledger {float(line.amount):.6f})"
+            )
+    if missing:
+        problems.append(
+            f"StmtFunds moved cash for {len(missing)} execution(s) this module did not "
+            f"parse into trades: {', '.join(missing[:5])}"
+        )
+    if mismatched:
+        problems.append(
+            f"StmtFunds disagrees with the parsed cash of {len(mismatched)} trade(s): "
+            + "; ".join(mismatched[:5])
+        )
+
+    # 3. Non-trade cash, in aggregate.
+    ledger_cash = sum(
+        float(line.amount) for line in lines if not line.tradeID and line.amount is not None
+    )
+    parsed_cash = sum(float(row["amount"]) for row in cash)
+    if abs(ledger_cash - parsed_cash) > tolerance:
+        problems.append(
+            f"StmtFunds non-trade cash {ledger_cash:.4f} vs parsed cash_transactions "
+            f"{parsed_cash:.4f} (difference {ledger_cash - parsed_cash:+.4f})"
+        )
+
+    if not problems:
+        log.info(
+            "StmtFunds cross-check passed: %d ledger rows, %d execution(s) matched, "
+            "non-trade cash %.2f.", len(lines), len(by_id), parsed_cash,
+            extra={"source": SOURCE},
+        )
+    return problems
 
 
 def observation_records(statement: Any) -> list[dict[str, Any]]:
@@ -513,6 +698,10 @@ class IbkrFlexIngester(Ingester):
             for company in settings.tracked_companies
             if company.get("ticker") and company.get("cik")
         }
+        # Cash tolerance for the StmtFunds cross-check. Half a cent: the ledger and the
+        # executions are both exact figures, so anything above rounding is a real
+        # disagreement (section 10 — a threshold belongs in config).
+        self._funds_tolerance = float(cfg.get("funds_tolerance", 0.005))
         self._xml: str | Path = ""
         self._tables: dict[str, list[dict[str, Any]]] = {}
         self._failures: list[str] = []
@@ -577,13 +766,25 @@ class IbkrFlexIngester(Ingester):
         trades, trade_failures = trade_rows(statement, self._resolve_cik, self._timezone)
         cash, cash_failures = cash_transaction_rows(statement, self._resolve_cik, self._timezone)
         actions, action_failures = corporate_action_rows(statement, self._resolve_cik)
+        securities, security_failures = security_rows(statement, self._resolve_cik)
+
+        # StmtFunds is verified, never stored: it holds no fact trades and cash_transactions
+        # do not, only the running balance that ties them together. A disagreement means
+        # this module parsed something differently from the broker.
+        funds_problems = verify_against_funds(
+            statement, trades, cash, tolerance=self._funds_tolerance
+        )
 
         self._tables = {
             "trades": trades,
             "cash_transactions": cash,
             "corporate_actions": actions,
+            "securities": securities,
         }
-        self._failures = [*trade_failures, *cash_failures, *action_failures]
+        self._failures = [
+            *trade_failures, *cash_failures, *action_failures, *security_failures,
+            *funds_problems,
+        ]
 
         if self._unresolved:
             # One summary line, not one per row: a per-row warning for an empty universe
@@ -601,7 +802,7 @@ class IbkrFlexIngester(Ingester):
         return self.validate(self.observation_frame(records))
 
     def fetch_tables(self) -> dict[str, list[dict[str, Any]]]:
-        """Trades, cash transactions and corporate actions parsed by :meth:`fetch`."""
+        """Trades, cash, corporate actions and the security master, from :meth:`fetch`."""
         return {table: rows for table, rows in self._tables.items() if rows}
 
     def partial_failures(self) -> list[str]:

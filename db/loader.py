@@ -23,7 +23,7 @@ from typing import Any, Iterable, Sequence
 import pandas as pd
 
 from core.logging_setup import get_logger
-from db.database import open_connection
+from db.database import add_missing_columns, open_connection
 
 log = get_logger(__name__)
 
@@ -51,10 +51,17 @@ CORPORATE_ACTION_COLUMNS = [
 ]
 EVENT_COLUMNS = ["event_id", "category", "cik", "ts", "is_estimated", "label", "payload"]
 TRADE_COLUMNS = [
-    "trade_id", "cik", "ticker", "ts", "side", "quantity", "price", "currency",
+    "trade_id", "conid", "cik", "ticker", "ts", "side", "quantity", "price", "currency",
     "commission", "fx_rate",
 ]
-CASH_TRANSACTION_COLUMNS = ["tx_id", "cik", "ticker", "ts", "kind", "amount", "currency"]
+CASH_TRANSACTION_COLUMNS = [
+    "tx_id", "conid", "cik", "ticker", "ts", "kind", "amount", "currency",
+]
+SECURITY_COLUMNS = [
+    "conid", "ticker", "cik", "name", "isin", "cusip", "figi", "asset_category",
+    "sub_category", "listing_exchange", "issuer_country", "currency", "multiplier",
+    "first_seen", "last_seen", "source",
+]
 THESIS_LOG_COLUMNS = [
     "cik", "thesis", "value_accrual", "invalidation", "review_date", "created_at",
 ]
@@ -173,11 +180,21 @@ def connect(db_path: Path):
     return open_connection(db_path)
 
 
+# Columns added to tables that already existed in earlier databases. `CREATE TABLE IF NOT
+# EXISTS` cannot reach those, so they are applied separately (see add_missing_columns).
+# Only ever additive and nullable; existing rows fill in on the next idempotent ingest.
+LATE_COLUMNS: dict[str, dict[str, str]] = {
+    "trades": {"conid": "TEXT"},
+    "cash_transactions": {"conid": "TEXT"},
+}
+
+
 def apply_schema(conn: sqlite3.Connection) -> None:
-    """Apply db/schema.sql to the connection. Idempotent (IF NOT EXISTS)."""
+    """Apply db/schema.sql to the connection, then any late column. Idempotent."""
     ddl = SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(ddl)
     conn.commit()
+    add_missing_columns(conn, LATE_COLUMNS)
     log.debug("Schema applied from %s", SCHEMA_PATH)
 
 
@@ -288,6 +305,21 @@ def upsert_cash_transactions(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
     return _upsert(
         conn, "cash_transactions", ("tx_id",), CASH_TRANSACTION_COLUMNS, records,
         True, "cash transactions",
+    )
+
+
+def upsert_securities(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
+    """Upsert the security master, keyed by IBKR's permanent ``conid`` (section 9.3).
+
+    The ticker is a plain attribute here, not the key: it gets renamed under the same
+    company and reassigned between companies, so a master keyed on it could not describe
+    its own history. ``issuer_country`` is carried because it determines an asset's situs,
+    which section 11 needs — and nothing is computed from it (Claude asserts no tax
+    treatment).
+    """
+    return _upsert(
+        conn, "securities", ("conid",), SECURITY_COLUMNS,
+        _to_records(rows, SECURITY_COLUMNS, numeric=("multiplier",)), True, "securities",
     )
 
 
