@@ -137,8 +137,12 @@ publica lo real. Y pone **números fabricados con aspecto de reales** en pantall
 
 La regla es código, no un recordatorio: la función que formatea importes **lanza una
 excepción** en modo público, la lista de páginas publicables es blanca (una página nueva es
-privada por defecto) y un test renderiza el panel entero y falla ante cualquier cadena con
-forma de dinero.
+privada por defecto) y un test renderiza las páginas públicas y falla ante cualquier cadena
+con forma de dinero. Las páginas de **Empresa** y de **Mercado** se protegen de otra forma,
+porque muestran cifras en dólares que son públicas —los ingresos de un 10-K, la liquidez de
+la Fed—: lo que se protege es **la cuenta, no el mercado**. En público desaparece el bloque
+de tu posición y el interés corto (que nombra lo que tienes), y un test comprueba que ningún
+ticker en cartera aparece en pantalla.
 
 ### Nunca un valor estimado en silencio
 

@@ -7,8 +7,12 @@ nothing is bought however good the company looks.
 Everything on this page is read point-in-time and at daily resolution. Nothing here
 refreshes by itself and nothing moves intraday (section 2: pull, not push).
 
-Private until the user decides otherwise: it is absent from ``PUBLIC_PAGES``, and the
-short-interest block names held tickers, so it stays out of any public render regardless.
+**Public since 2026-09-24, by the user's decision.** Everything here is public market data
+except one block: short interest, which lists the held tickers alongside the ones under
+study, and so reveals positions. That block renders only in private mode. The page's one
+dollar figure — the Fed's net liquidity — is a published macro aggregate, the same
+asymmetry the company page has (RESEARCH.md section 2.16): the account is protected, the
+market is not.
 """
 
 from __future__ import annotations
@@ -325,6 +329,8 @@ st.caption(f"Datos del {vix.ts or MISSING}. Point-in-time del VIX3M solo desde 2
 
 # --- 6. Short interest (private) ----------------------------------------------------------------
 
+# Private only: the list is the watchlist plus whatever FINRA was asked about because it
+# is HELD, so publishing it would publish the positions.
 if not public:
     st.subheader("6 · Interés corto")
     tickers = sorted({str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")})

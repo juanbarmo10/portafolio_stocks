@@ -142,6 +142,66 @@ def test_an_empty_database_explains_what_to_run(market_db):
     assert "run_ingest.py" in text
 
 
-def test_the_page_is_private_until_the_user_decides():
-    """Section 13, the user's decision of 2026-09-23: built pages start private."""
-    assert "Mercado" not in PUBLIC_PAGES
+def test_the_page_is_public_by_the_users_decision():
+    """Published on 2026-09-24, after its public render was checked."""
+    assert "Mercado" in PUBLIC_PAGES
+
+
+def test_a_public_render_names_no_position(market_db, monkeypatch):
+    """The one block with account information — short interest, which lists held
+    tickers — must not render publicly, and no held ticker may appear anywhere.
+
+    Seeded with a held position and its short interest, so the check is not vacuous: the
+    private render does show them (next test).
+    """
+    seed(market_db, healthy=True)
+    seed_account(market_db)
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    from core import config
+    config.load_settings.cache_clear()
+
+    text = page_text(render())
+    assert "Interés corto" not in text
+    assert "ZZHELD" not in text, "a held ticker leaked into the public page"
+
+
+def test_the_private_render_does_show_it(market_db, monkeypatch):
+    """Guards the guard: without this, the public test could pass on a block that never
+    rendered at all."""
+    seed(market_db, healthy=True)
+    seed_account(market_db)
+    monkeypatch.delenv("PUBLIC_MODE", raising=False)
+    from core import config
+    config.load_settings.cache_clear()
+
+    text = page_text(render())
+    assert "Interés corto" in text
+    assert "ZZHELD" in text
+
+
+def seed_account(db_path) -> None:
+    """A held position with FINRA short interest, as the ingesters would store them."""
+    conn = loader.init_db(db_path)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            {"source": "ibkr", "series_id": "ZZHELD:position_qty", "ts": "2025-03-14",
+             "ts_release": "2025-03-14", "value": 3.0},
+            {"source": "finra", "series_id": "ZZHELD:short_interest",
+             "ts": "2025-02-28T00:00:00+00:00", "ts_release": "2025-03-12T00:00:00+00:00",
+             "value": 1_000_000.0},
+        ]))
+    finally:
+        conn.close()
+
+
+def page_text(app: AppTest) -> str:
+    chunks = []
+    for kind in ("markdown", "caption", "subheader", "metric", "info", "warning"):
+        for element in app.get(kind):
+            for attribute in ("value", "label", "body"):
+                piece = getattr(element, attribute, None)
+                if isinstance(piece, str):
+                    chunks.append(piece)
+    for frame in app.dataframe:
+        chunks.append(pd.DataFrame(frame.value).to_string())
+    return "\n".join(chunks)

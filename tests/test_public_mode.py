@@ -242,6 +242,9 @@ def test_a_public_render_carries_no_currency_figure(public_app):
     # because a 10-K is public and hiding Microsoft's revenue would be theatre. Its rule is
     # the asymmetric one — the company stays, the position disappears — and it is guarded
     # in tests/test_company_page.py. Adding it here would fail on figures that are fine.
+    # The market page (public since 2026-09-24) is absent for the same reason: its one
+    # dollar figure is the Fed's net liquidity, a published aggregate. Its account block —
+    # short interest, which names held tickers — is guarded in tests/test_market_page.py.
     pages = [MAIN, PORTFOLIO]
     for page in pages:
         if page != MAIN:
