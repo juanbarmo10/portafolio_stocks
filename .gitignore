@@ -44,7 +44,10 @@ logs/
 *.swp
 
 # Documentos internos de diseño (contexto personal) — no van al repo público.
-# El documento público es README.md; estos dos llevan instrucciones para Claude
-# y la referencia técnica/fiscal detallada (CLAUDE.md §14).
+# El documento público es README.md; estos llevan instrucciones para Claude, la
+# referencia técnica/fiscal detallada y el material de estudio (CLAUDE.md §14).
+# THEORY.md es teoría general, pero sus ejemplos usan cifras de la cuenta real
+# (retención observada, comisiones, posiciones), así que es privado igual.
 CLAUDE.md
 RESEARCH.md
+THEORY.md
