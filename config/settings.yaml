@@ -225,6 +225,27 @@ sources:
     # reescala todas las barras pasadas que sirve Yahoo, y solo una ventana que abarque
     # el split permite recuperar el crudo.
 
+  # Composición histórica del S&P 500 — para la AMPLITUD del nivel 2 (§9.5).
+  # Dataset `fja05680/sp500`, licencia MIT (Copyright (c) 2019-2020 Farrell J. Aultman):
+  # 1996-2019 de la descarga del libro *Trading Evolved* (Andreas Clenow) y actualizado a
+  # mano desde Wikipedia. Fiable desde 2001. Evaluado el 2026-09-23 (RESEARCH.md §2.24).
+  sp500_membership:
+    url: "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20(Updated).csv"
+    cache_dir: .cache/universe
+    cache_ttl_hours: 168          # la fuente se actualiza cada par de meses
+    # Desde cuándo se bajan los cierres de los miembros. 2017 da la ventana de 200 sesiones
+    # de calentamiento antes de donde la cobertura roza el 85 % (2018-2019), y deja sitio a
+    # recuperar renombrados si algún día se hace (subiría el cruce a ~2018).
+    price_history_start: "2017-01-01"
+    batch_size: 80
+    batch_pause_s: 3
+    # Sesiones que la fuente devuelve casi vacías (visto: 2026-09-22 sin XOM ni KO, y
+    # seguía así horas después). Se guardan como llegan, sin rellenar. Un reintento corto;
+    # y solo cuenta como fallo si está entre las N últimas sesiones — una vieja que sigue
+    # ahí es un defecto conocido de la fuente, y fallar cada día por él sería gritar lobo.
+    hole_retry_pause_s: 5
+    hole_alert_sessions: 5
+
   # FINRA — interés corto consolidado (nivel 2, posicionamiento). Verificado 2026-09-23:
   # API REST pública, SIN credenciales, respuesta CSV.
   finra:
@@ -318,6 +339,18 @@ panel:
     # automático (§9.8) — son dos medidas distintas del mismo número, y que discrepen
     # es información sobre los datos. Medido el 2026-09-17: 0,00%.
     nav_tolerance: 0.005
+
+  # Nivel 2 — estructura de mercado (§2, fase 3).
+  level2:
+    breadth:
+      window: 200                 # sesiones de la media: ~un año bursátil, la referencia clásica
+      # Cobertura mínima para que una lectura de amplitud se presente como del índice: la
+      # fracción de miembros de ESE día con precio ese día. Por debajo, el valor existe pero
+      # se marca. Elegido por el usuario el 2026-09-23. Medido: 84,2 % a mediados de 2019,
+      # 86,1 % a principios de 2020 — con 0,85 la serie es utilizable desde ~finales de 2019.
+      # ⚠️ La cobertura DECAE con el tiempo (yfinance borra a los que salen de bolsa), así
+      # que ese cruce se mueve hacia delante, nunca hacia atrás.
+      coverage_threshold: 0.85
 
   level1:
     lookback_days: 30          # ventana de la columna "cambio" de la tabla macro

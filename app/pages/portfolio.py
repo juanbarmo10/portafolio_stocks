@@ -171,7 +171,18 @@ for review in reorg.review_positions(app_data.corporate_actions(), positions):
         + " ".join(finding.detail for finding in review.reviews)
     )
 
-notes = reorg.data_quality_notes(app_data.corporate_actions())
+# Only the securities this panel is about. The breadth universe adds ~700 index members to
+# corporate_actions, and their spin-offs-coded-as-splits are noise on this page: a
+# permanent list of irrelevant flags trains the reader to skip the relevant ones.
+relevant = {
+    *settings.market_references,
+    *(str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")),
+    *(set(positions["ticker"]) if not positions.empty else set()),
+}
+all_actions = app_data.corporate_actions()
+notes = reorg.data_quality_notes(
+    all_actions[all_actions["ticker"].isin(relevant)] if not all_actions.empty else all_actions
+)
 if notes:
     with st.expander(f"Notas de calidad de datos ({len(notes)})"):
         st.caption(

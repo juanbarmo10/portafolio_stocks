@@ -128,6 +128,29 @@ CREATE TABLE IF NOT EXISTS securities (
 CREATE INDEX IF NOT EXISTS idx_securities_ticker ON securities(ticker);
 CREATE INDEX IF NOT EXISTS idx_securities_cik ON securities(cik);
 
+-- Index membership as intervals: who was in the universe, from when until when (section 9.5).
+-- Exists for market breadth, which needs to know the members ON EACH DATE — today's list
+-- applied to the past is survivorship bias, worst exactly in the crises breadth should see.
+--
+-- Intervals rather than daily snapshots: ~1.5k rows instead of ~1.4M, and a ticker that
+-- leaves and later re-enters keeps both intervals (the source's README warns this happens).
+-- end_date is EXCLUSIVE: the first date the ticker was no longer a member. NULL = current.
+--
+-- `first_seen` is when THIS project first learned of the interval, and is never overwritten.
+-- The historical list is a reconstruction published long after the fact, so every row
+-- backfilled from it says so; rows observed going forward carry the date they were seen.
+CREATE TABLE IF NOT EXISTS universe_membership (
+    universe    TEXT NOT NULL,              -- 'sp500'
+    ticker      TEXT NOT NULL,              -- as the source spells it: BRK.B, not BRK-B
+    start_date  TEXT NOT NULL,
+    end_date    TEXT,                       -- exclusive; NULL while still a member
+    source      TEXT NOT NULL,              -- provenance of the interval (section 9.8)
+    first_seen  TEXT NOT NULL,
+    ingested_at TEXT NOT NULL,
+    PRIMARY KEY (universe, ticker, start_date)
+);
+CREATE INDEX IF NOT EXISTS idx_membership_dates ON universe_membership(universe, start_date, end_date);
+
 -- Executed trades, read from the IBKR Activity Flex Query — never written by hand.
 -- cik stays NULL with a warning when the ticker does not resolve; never guessed (9.3).
 CREATE TABLE IF NOT EXISTS trades (

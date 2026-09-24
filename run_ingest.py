@@ -33,6 +33,7 @@ from ingest.ibkr_flex import (
 from ingest.prices import PricesIngester
 from ingest.sec_filings import SecFilingsIngester
 from ingest.short_interest import ShortInterestIngester
+from ingest.universe import UniverseIngester
 from ingest.sec_xbrl import SecXbrlIngester
 
 log = get_logger(__name__)
@@ -47,6 +48,7 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "sec": (SecXbrlIngester.is_available, SecXbrlIngester),
     "sec_filings": (SecFilingsIngester.is_available, SecFilingsIngester),
     "short_interest": (ShortInterestIngester.is_available, ShortInterestIngester),
+    "universe": (UniverseIngester.is_available, UniverseIngester),
 }
 
 # Where non-observation rows go. An ingester returning a table name absent from this
@@ -57,6 +59,7 @@ TABLE_LOADERS: dict[str, Callable[[Any, list[dict]], int]] = {
     "filings": loader.upsert_filings,
     "events": loader.upsert_events,
     "securities": loader.upsert_securities,
+    "universe_membership": loader.upsert_universe_membership,
     # The account tables take a frame rather than records, so they are adapted here
     # instead of bending either side of the contract.
     "trades": lambda conn, rows: loader.upsert_trades(conn, trades_frame(rows)),

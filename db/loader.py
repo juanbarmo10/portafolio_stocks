@@ -57,6 +57,9 @@ TRADE_COLUMNS = [
 CASH_TRANSACTION_COLUMNS = [
     "tx_id", "conid", "cik", "ticker", "ts", "kind", "amount", "currency",
 ]
+MEMBERSHIP_COLUMNS = [
+    "universe", "ticker", "start_date", "end_date", "source", "first_seen",
+]
 SECURITY_COLUMNS = [
     "conid", "ticker", "cik", "name", "isin", "cusip", "figi", "asset_category",
     "sub_category", "listing_exchange", "issuer_country", "currency", "multiplier",
@@ -84,15 +87,21 @@ def _q(identifier: str) -> str:
 
 
 def _build_upsert_sql(
-    table: str, pk_cols: Sequence[str], columns: Sequence[str], with_ingested: bool
+    table: str,
+    pk_cols: Sequence[str],
+    columns: Sequence[str],
+    with_ingested: bool,
+    immutable: Sequence[str] = (),
 ) -> str:
     """Build an idempotent ``INSERT ... ON CONFLICT DO UPDATE`` for a table.
 
     Every non-key column is refreshed from ``excluded``, so re-ingesting a corrected
-    value updates in place instead of inserting a second row.
+    value updates in place instead of inserting a second row — except the ``immutable``
+    ones, which keep the value from the first insert. That is how a "first seen" date
+    stays the first one instead of becoming "last run".
     """
     all_cols = list(columns) + (["ingested_at"] if with_ingested else [])
-    updatable = [c for c in all_cols if c not in pk_cols]
+    updatable = [c for c in all_cols if c not in pk_cols and c not in immutable]
     if not updatable:
         # A table whose columns are all key columns: a conflict means the row is
         # already identical, so DO NOTHING is the idempotent outcome.
@@ -149,6 +158,7 @@ def _upsert(
     records: list[dict[str, Any]],
     with_ingested: bool,
     label: str,
+    immutable: Sequence[str] = (),
 ) -> int:
     """Execute the upsert in a single transaction and report the row count."""
     if not records:
@@ -158,7 +168,7 @@ def _upsert(
         ingested_at = _utc_now_iso()
         for record in records:
             record["ingested_at"] = ingested_at
-    sql = _build_upsert_sql(table, pk_cols, columns, with_ingested)
+    sql = _build_upsert_sql(table, pk_cols, columns, with_ingested, immutable)
     with conn:  # transaction: commit on success, rollback on error
         conn.executemany(sql, records)
     log.info("Upserted %d %s.", len(records), label)
@@ -320,6 +330,21 @@ def upsert_securities(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> i
     return _upsert(
         conn, "securities", ("conid",), SECURITY_COLUMNS,
         _to_records(rows, SECURITY_COLUMNS, numeric=("multiplier",)), True, "securities",
+    )
+
+
+def upsert_universe_membership(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
+    """Upsert index-membership intervals (section 9.5).
+
+    ``end_date`` updates in place when a member leaves — the interval is the same one, it
+    just stopped. ``first_seen`` does not: it records when this project first learned of
+    the interval, and overwriting it on every run would erase the only point-in-time fact
+    there is about the list itself.
+    """
+    return _upsert(
+        conn, "universe_membership", ("universe", "ticker", "start_date"),
+        MEMBERSHIP_COLUMNS, _to_records(rows, MEMBERSHIP_COLUMNS), True,
+        "membership intervals", immutable=("first_seen",),
     )
 
 
