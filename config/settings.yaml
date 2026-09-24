@@ -58,7 +58,9 @@ sources:
       # el 2023-08-29, y NO es un límite de point-in-time — output_type=1 devuelve lo mismo.
       # Sirve para leer el nivel 1 en vivo; no alcanza para validar el semáforo de régimen
       # contra 2008 o 2020 (fases 3-4). BAA10Y es el sustituto con histórico largo:
-      # misma idea (prima de crédito), grado de inversión en vez de HY, desde 1986.
+      # misma idea (prima de crédito), grado de inversión en vez de HY. La SERIE va desde
+      # 1986, pero su point-in-time (vintages de ALFRED) solo desde 2014 — medido el
+      # 2026-09-24; para 2008 no sirve con disciplina point-in-time.
       - BAA10Y        # Moody's Baa − tesoro 10a: prima de crédito con histórico largo
       - NFCI          # condiciones financieras Chicago Fed
       - VIXCLS        # VIX (volatilidad implícita a 30 días)
@@ -69,6 +71,15 @@ sources:
       - VXVCLS        # VIX3M — estructura de volatilidad (§8 fase 3)
       - DGS10         # tesoro 10 años
       - T10YIE        # inflación implícita 10 años
+      # Liquidez neta de la Fed = balance − cuenta del Tesoro − repos inversos (§8 fase 3).
+      # Las tres de la MISMA publicación semanal H.4.1: mismas unidades (millones), mismo
+      # corte (miércoles) y misma publicación (jueves). ⚠️ NO se usa RRPONTSYD, la de la
+      # fórmula popular: viene en MILES DE MILLONES frente a millones de las otras dos, y
+      # restarla tal cual da un error ×1000 invisible mientras los repos rondaban cero
+      # (hasta 2021) y enorme cuando llegaron a ~2,5 billones. Point-in-time desde 2011.
+      - WALCL         # activos totales de la Fed (millones USD, semanal)
+      - WTREGEN       # cuenta general del Tesoro en la Fed (millones USD, semanal)
+      - WLRRAL        # repos inversos, nivel del miércoles (millones USD, semanal)
 
   sec:
     base_url: https://data.sec.gov
@@ -320,9 +331,9 @@ sources:
 # Panel — qué se muestra en cada nivel del checklist (§2). Nada de esto se
 # hardcodea en el código: etiquetas, unidades y ventanas viven aquí (§10).
 #
-# OJO: aquí NO hay umbrales de semáforo. Clasificar el régimen es la fase 3, con
-# pesos iguales y fijos y voto visible por componente. Poner umbrales ahora sería
-# elegirlos mirando el gráfico, que es §9.7 literal.
+# Umbrales del semáforo: en panel.level2.regime, ESCRITOS ANTES de mirar ningún
+# resultado (2026-09-24) y no retocados después — elegirlos mirando el gráfico sería
+# §9.7 literal. Ver RESEARCH.md §2.27.
 # ---------------------------------------------------------------------------
 panel:
   # Nivel 3 — ¿sigue viva la tesis? (§2, fase 2)
@@ -349,6 +360,79 @@ panel:
 
   # Nivel 2 — estructura de mercado (§2, fase 3).
   level2:
+    # ── SEMÁFORO DE RÉGIMEN (§8 fase 3) ──────────────────────────────────────────────
+    # Escrito ANTES de ver ningún resultado y NO ajustado después (§9.7). Si la
+    # validación sale mal, se informa; no se retocan estos números para que salga bien.
+    #
+    # Cada componente vota +1 (risk-on), 0 (neutro), −1 (risk-off) o se abstiene (sin dato).
+    # Dos tipos de regla, para no inventar umbrales:
+    #   level  — contra un punto de referencia NATURAL, que no hay que elegir;
+    #   trend  — contra su propia media de `window` sesiones, cuando no hay punto natural.
+    # Agregado: pesos iguales y fijos, mayoría simple. Rojo si MÁS de la mitad de los que
+    # votan dice risk-off; verde si más de la mitad dice risk-on; ámbar en otro caso. Sin
+    # umbral que elegir.
+    #
+    # El semáforo BLOQUEA: en rojo no se compra aunque el nivel 3 sea perfecto (§2). En
+    # verde no significa "compra": significa "el entorno no lo impide".
+    regime:
+      window: 200                  # la misma ventana convencional de la amplitud
+      min_window_fraction: 0.95    # la lección del hueco del 2026-09-22 (§2.26)
+      # Zona muerta de las reglas de tendencia: dentro de ±k desviaciones típicas de su
+      # media, el componente se declara neutro. UN valor para todos: por componente serían
+      # ocho parámetros libres más (§9.7).
+      trend_dead_zone_sd: 0.25
+      max_staleness_days: 30       # dato más viejo que esto → el componente se abstiene
+      min_components: 4            # menos de la mitad votando → "insuficiente", sin veredicto
+      components:
+        - key: net_liquidity
+          label: Liquidez neta de la Fed
+          source: net_liquidity    # WALCL − WTREGEN − WLRRAL
+          kind: trend
+          off_when: below          # contrayéndose
+        - key: nfci
+          label: Condiciones financieras (NFCI)
+          series: NFCI
+          kind: level
+          off_when: above
+          reference: 0.0           # 0 = condiciones medias, por construcción del índice
+          dead_zone: 0.10
+        - key: credit
+          label: Prima de crédito Baa − 10a
+          series: BAA10Y           # no el HY: solo tiene ~3 años de historia
+          kind: trend
+          off_when: above          # ensanchándose
+        - key: dollar
+          label: Dólar amplio
+          series: DTWEXBGS
+          kind: trend
+          off_when: above          # fortaleciéndose: endurece las condiciones globales
+        - key: curve
+          label: Curva 10a − 2a
+          series: T10Y2Y
+          kind: level
+          off_when: below
+          reference: 0.0           # la inversión
+          dead_zone: 0.10
+        - key: breadth
+          label: Amplitud sectorial
+          source: sector_breadth   # la de empresas solo es fiable desde 2019 (§2.25)
+          kind: level
+          off_when: below
+          reference: 0.5           # la mayoría
+          dead_zone: 0.10          # 4 o 5 de 9 sectores = neutro
+        - key: equal_weight
+          label: Equiponderado frente a capitalización (RSP/SPY)
+          source: equal_weight
+          kind: trend
+          off_when: below          # estrechándose
+        - key: volatility
+          label: Estructura de volatilidad (VIX / VIX3M)
+          source: vix_term
+          kind: level
+          off_when: above
+          reference: 1.0           # la inversión de la curva de volatilidad
+          dead_zone: 0.05
+
     # Medidas de amplitud construidas con ETF. Sin sesgo de supervivencia por construcción:
     # el precio de un ETF ya incluye a los miembros que tenía en cada momento, también a los
     # que luego quebraron. Son las que entran en la VALIDACIÓN HISTÓRICA del semáforo; la

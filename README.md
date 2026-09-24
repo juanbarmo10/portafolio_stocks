@@ -317,6 +317,7 @@ transform/  funciones puras, sin red — entrada faltante -> None
               │
 app/        Streamlit multipágina (st.navigation)
               ├── 🏠 Hoy       nivel 1, macro point-in-time
+              ├── 📈 Mercado   nivel 2 y el semáforo de régimen, con el voto de cada señal
               ├── 🏢 Empresa   nivel 3, una empresa a fondo contra su propia tesis
               └── 🔬 Cartera   nivel 4, posiciones y reconciliación contra el NAV
 alerts/     Telegram, con deduplicación vía alerts_log
@@ -341,7 +342,7 @@ o a medias.
 | 0 | Andamiaje: esquema, adaptador de BD, loader idempotente, config, logging, CI | ✅ |
 | 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | ✅ |
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor, página por empresa | ✅ |
-| 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | en curso: VIX3M, interés corto, amplitud por empresas (en vivo) y con ETF (histórico, desde 1999), RSP/SPY y rotación hechos; faltan semáforo y página |
+| 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | ✅ construida; aceptación parcial: el semáforo acierta 5 de 6 correcciones desde 2012 con 0,8 % de falsas alarmas, pero confirma más que anticipa, y antes de 2012 no hay datos point-in-time para juzgarlo |
 | 4 | Alertas Telegram y validación estadística | pendiente |
 | 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | pendiente |
 

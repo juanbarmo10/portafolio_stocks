@@ -122,6 +122,18 @@ def reported_amount(value: float | None, *, unit: str = "USD") -> str:
     return f"{_spanish(f'{value:,.2f}')} {unit}"
 
 
+def number(value: float | None, *, decimals: int = 2) -> str:
+    """A plain figure in Spanish notation: ``14.21`` -> ``14,21``. Safe in both modes.
+
+    For index levels, ratios and spreads — anything that is neither money nor a share
+    count. Exists so no page formats a number with a bare f-string and ends up mixing
+    ``14.21`` next to ``24,8 %``.
+    """
+    if value is None or pd.isna(value):
+        return MISSING
+    return _spanish(f"{value:,.{decimals}f}")
+
+
 def quantity(value: float | None, *, decimals: int = 4) -> str:
     """Format a share count in Spanish notation. Safe in both modes — a count is not money.
 

@@ -274,6 +274,10 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
          "first_seen", "last_seen", "source"],
         "ticker",
     ),
+    "universe_membership": (
+        ["universe", "ticker", "start_date", "end_date", "source", "first_seen"],
+        "start_date",
+    ),
 }
 
 # Kept for the account tables specifically, which is what most callers want.

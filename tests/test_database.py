@@ -117,6 +117,7 @@ def test_every_readable_table_matches_the_loader_column_list():
         "events": loader.EVENT_COLUMNS,
         "corporate_actions": loader.CORPORATE_ACTION_COLUMNS,
         "securities": loader.SECURITY_COLUMNS,
+        "universe_membership": loader.MEMBERSHIP_COLUMNS,
     }
     assert set(READABLE_TABLES) == set(expected), "a readable table has no column check"
     for table, columns in expected.items():

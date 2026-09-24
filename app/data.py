@@ -32,13 +32,15 @@ def db_mtime() -> float:
 
 
 @st.cache_data(show_spinner=False)
-def observations(source: str, _mtime: float) -> pd.DataFrame:
+def observations(source: str, mtime: float) -> pd.DataFrame:
     """All observations from one source.
 
     Args:
         source: Source label ('fred', 'yfinance', ...).
-        _mtime: Database mtime. Part of the cache key so a fresh ingest invalidates it;
-            the leading underscore keeps Streamlit from hashing it as a data argument.
+        mtime: Database mtime. Part of the cache key, so a fresh ingest invalidates it.
+            It must NOT carry a leading underscore: Streamlit leaves underscored arguments
+            out of the key, which is exactly what they are for. Until 2026-09-24 it was
+            ``mtime``, and a running panel never showed a new ingest until restarted.
 
     Returns:
         Frame with ``[source, series_id, ts, ts_release, value]``; empty if the database
@@ -66,7 +68,7 @@ def last_ingest() -> dt.datetime | None:
 
 
 @st.cache_data(show_spinner=False)
-def _account_table(table: str, _mtime: float) -> pd.DataFrame:
+def _account_table(table: str, mtime: float) -> pd.DataFrame:
     """One IBKR account table, cache-invalidated by the database mtime."""
     path = db_path()
     if not path.exists():
@@ -91,7 +93,7 @@ def cash_transactions() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def _table(table: str, _mtime: float) -> pd.DataFrame:
+def _table(table: str, mtime: float) -> pd.DataFrame:
     """Any allowlisted table, cache-invalidated by the database mtime."""
     path = db_path()
     if not path.exists():
@@ -133,6 +135,16 @@ def securities() -> pd.DataFrame:
     return _table("securities", db_mtime())
 
 
+def universe_membership() -> pd.DataFrame:
+    """S&P 500 membership intervals, for breadth (section 9.5)."""
+    return _table("universe_membership", db_mtime())
+
+
+def fred_observations() -> pd.DataFrame:
+    """Every FRED series — the regime light reads several beyond the level-1 table."""
+    return observations("fred", db_mtime())
+
+
 def sec_observations() -> pd.DataFrame:
     """Audited XBRL facts for the tracked universe."""
     return observations("sec", db_mtime())
@@ -144,7 +156,7 @@ def account_observations() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def price_observations(tickers: tuple[str, ...], _mtime: float) -> pd.DataFrame:
+def price_observations(tickers: tuple[str, ...], mtime: float) -> pd.DataFrame:
     """Raw closes for the given tickers only.
 
     Reading every price series would pull ~200k rows to value a handful of positions, and

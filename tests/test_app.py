@@ -207,3 +207,37 @@ def test_a_portfolio_with_no_contradiction_raises_nothing(app_db):
 
     errors = " ".join(element.value for element in at.get("error"))
     assert "revisar" not in errors
+
+
+# --- The cache must notice a new ingest -------------------------------------------
+
+
+def test_a_new_ingest_reaches_a_running_panel(app_db):
+    """The cache key has to include the database mtime.
+
+    It used to be passed as ``_mtime``, and Streamlit leaves underscored arguments out of
+    the key — that is their purpose. A running panel kept serving the first read until it
+    was restarted, and every test missed it because each one clears the cache first.
+    """
+    conn = loader.init_db(app_db)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([{
+            "source": "fred", "series_id": "VIXCLS", "ts": "2026-09-01",
+            "ts_release": "2026-09-01", "value": 15.0,
+        }]))
+    finally:
+        conn.close()
+    first = app_data.observations("fred", 1.0)
+
+    conn = loader.init_db(app_db)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([{
+            "source": "fred", "series_id": "VIXCLS", "ts": "2026-09-02",
+            "ts_release": "2026-09-02", "value": 16.0,
+        }]))
+    finally:
+        conn.close()
+    second = app_data.observations("fred", 2.0)
+
+    assert len(first) == 1
+    assert len(second) == 2, "the cache served the old read after a new ingest"
