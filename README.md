@@ -218,7 +218,7 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 | Precios diarios OHLC y acciones corporativas | yfinance | sin clave |
 | Short interest | FINRA | API pública sin credenciales (quincenal; la fuente no publica fecha de difusión, así que se deriva — tarde a propósito) |
 | VIX y VIX3M | FRED (`VIXCLS`, `VXVCLS`) | misma clave que el resto de la macro |
-| Composición histórica del S&P 500 | [`fja05680/sp500`](https://github.com/fja05680/sp500) (MIT) | reconstrucción desde 1996; fiable desde 2001. Los precios de los miembros que salieron no son gratis, así que la amplitud muestra su **cobertura** y solo vale desde el 85 % (2019-09-23) |
+| Composición histórica del S&P 500 | [`fja05680/sp500`](https://github.com/fja05680/sp500) (MIT) | reconstrucción desde 1996; fiable desde 2001. Los precios de los miembros que salieron no son gratis, así que la amplitud muestra su **cobertura** y solo vale desde el 85 % (2019-12-09) |
 | Put/call ratio | — | **fuera de alcance**: CBOE no ofrece ruta pública y su `robots.txt` prohíbe la sección |
 | Cuenta real | IBKR Flex Web Service | token de solo lectura |
 
@@ -341,7 +341,7 @@ o a medias.
 | 0 | Andamiaje: esquema, adaptador de BD, loader idempotente, config, logging, CI | ✅ |
 | 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | ✅ |
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor, página por empresa | ✅ |
-| 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | en curso: VIX3M, interés corto y amplitud con cobertura hechos; faltan rotación, semáforo y la página |
+| 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | en curso: VIX3M, interés corto, amplitud por empresas (en vivo) y con ETF (histórico, desde 1999), RSP/SPY y rotación hechos; faltan semáforo y página |
 | 4 | Alertas Telegram y validación estadística | pendiente |
 | 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | pendiente |
 

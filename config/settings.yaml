@@ -24,7 +24,10 @@ universe:
   # 1) Referencias de mercado. NO son posiciones: alimentan los niveles 1 y 2.
   market_references:
     broad:    [SPY, RSP, QQQ, IWM]           # RSP/SPY = estrechez del rally (§2 nivel 2)
-    sectors:  [XLK, XLU, XLP, XLF, XLE, XLV, XLY, XLI]
+    # Los nueve SPDR sectoriales originales (dic. 1998). XLB añadido el 2026-09-23: sin él
+    # la amplitud sectorial dejaba fuera a materiales. XLRE (2015) y XLC (2018) NO van
+    # aquí a propósito: cambiarían el denominador con los años (panel.level2).
+    sectors:  [XLK, XLU, XLP, XLF, XLE, XLV, XLY, XLI, XLB]
     assets:   [TLT, GLD]
     # DXY no se toma de un feed de precios: entra por FRED como DTWEXBGS (ver sources.fred).
 
@@ -215,7 +218,11 @@ sources:
 
   # Stooq quedó descartado: robots.txt = `Disallow: /` y reto JS anti-bot (§4.2, §4.3).
   yfinance:
-    history_start: "2015-01-01"   # ventana completa en cada ejecución, ver nota abajo
+    # 1998-12 y no 2015 desde el 2026-09-23: los ETF sectoriales existen desde el
+    # 1998-12-22 y RSP desde 2003, y son la amplitud SIN sesgo de supervivencia que valida
+    # el semáforo contra 2000, 2008 y 2020 (RESEARCH.md §2.26). Cada ticker empieza cuando
+    # empieza: HIMS en 2019, UBER en 2019.
+    history_start: "1998-12-01"   # ventana completa en cada ejecución, ver nota abajo
     currency: USD
     # Yahoo devuelve OHLC, volumen y dividendos AJUSTADOS por split, retroactivamente.
     # El ingester reconstruye el crudo antes de guardar (§9.1). `auto_adjust=False` no
@@ -342,10 +349,33 @@ panel:
 
   # Nivel 2 — estructura de mercado (§2, fase 3).
   level2:
+    # Medidas de amplitud construidas con ETF. Sin sesgo de supervivencia por construcción:
+    # el precio de un ETF ya incluye a los miembros que tenía en cada momento, también a los
+    # que luego quebraron. Son las que entran en la VALIDACIÓN HISTÓRICA del semáforo; la
+    # amplitud por empresas (breadth, abajo) solo es fiable desde 2019 y queda para leer en
+    # vivo. Decidido por el usuario el 2026-09-23.
+    sector_breadth:
+      window: 200
+      min_window_fraction: 0.95   # ver breadth.min_window_fraction
+      # Conjunto FIJO de los nueve sectores originales, para que el denominador no cambie
+      # en 25 años de historia.
+      sectors: [XLB, XLE, XLF, XLI, XLK, XLP, XLU, XLV, XLY]
+    equal_weight:
+      equal: RSP                  # las 500 con el mismo peso (desde 2003-05-01)
+      cap: SPY                    # ponderado por capitalización
+    rotation:
+      defensive: [XLU, XLP]       # servicios públicos, consumo básico
+      cyclical: [XLK, XLY]        # tecnología, consumo discrecional
     breadth:
       window: 200                 # sesiones de la media: ~un año bursátil, la referencia clásica
+      # Fracción de la ventana que debe tener cierre real para que exista la media. Con el
+      # 100 %, UN día vacío en la fuente anulaba la media 200 sesiones: el 2026-09-23 la
+      # amplitud descansaba en 60 de 503 miembros y la cobertura decía 100 %. Descubierto
+      # en la primera ejecución real.
+      min_window_fraction: 0.95
       # Cobertura mínima para que una lectura de amplitud se presente como del índice: la
-      # fracción de miembros de ESE día con precio ese día. Por debajo, el valor existe pero
+      # fracción de miembros de ESE día sobre la que descansa el cálculo (con precio Y con
+      # media calculable). Por debajo, el valor existe pero
       # se marca. Elegido por el usuario el 2026-09-23. Medido: 84,2 % a mediados de 2019,
       # 86,1 % a principios de 2020 — con 0,85 la serie es utilizable desde ~finales de 2019.
       # ⚠️ La cobertura DECAE con el tiempo (yfinance borra a los que salen de bolsa), así

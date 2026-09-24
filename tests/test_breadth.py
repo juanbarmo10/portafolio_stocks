@@ -19,6 +19,9 @@ import pytest
 from transform.breadth import (
     BreadthReading,
     breadth_series,
+    defensive_rotation,
+    equal_weight_ratio,
+    sector_breadth,
     membership_mask,
     splits_by_ticker,
     usable_from,
@@ -238,3 +241,110 @@ def test_survivorship_still_breaks_it():
 
     assert usable_from([r("2019-10-01", True), r("2019-10-02", False),
                         r("2019-10-03", True)]) == "2019-10-03"
+
+
+# --- One missing day must not poison the next 200 -----------------------------------
+
+
+def test_one_missing_day_does_not_disable_the_average_for_200_sessions():
+    """Found on the first real run, and silent: with a strict 200-of-200 rule, the source
+    hole of 2026-09-22 disabled the average of every affected ticker for the next 200
+    sessions. The breadth reported for 2026-09-23 rested on 60 of 503 members."""
+    tickers = [f"T{i}" for i in range(20)]
+    closes = pd.DataFrame({t: rising() for t in tickers})
+    closes.iloc[230, 2:] = float("nan")
+
+    readings = breadth_series(always(*tickers), closes, window=200)
+
+    assert readings[231].computable == readings[229].computable == 20
+
+
+def test_coverage_is_what_the_reading_rests_on_not_who_has_a_price():
+    """Priced-but-not-computable members must lower coverage.
+
+    Defined as priced / members, coverage read 100 % on the day breadth rested on 60 of
+    503 — and the reading passed the threshold unflagged. Defined as computable / members,
+    the same fault is caught.
+    """
+    old = [f"O{i}" for i in range(10)]
+    young = [f"Y{i}" for i in range(10)]
+    closes = pd.DataFrame({t: rising() for t in old})
+    for t in young:                                   # listed 30 sessions ago
+        series = rising()
+        series.iloc[:-30] = float("nan")
+        closes[t] = series
+
+    reading = last(breadth_series(always(*old, *young), closes, window=200, threshold=0.85))
+
+    assert reading.priced == 20
+    assert reading.computable == 10
+    assert reading.coverage == pytest.approx(0.5)
+    assert reading.meets_threshold is False
+
+
+# --- ETF-built measures -------------------------------------------------------------
+
+
+SECTORS = ["S1", "S2", "S3"]
+
+
+def test_sector_breadth_counts_sectors_above_their_average():
+    closes = pd.DataFrame({"S1": rising(), "S2": rising(), "S3": falling()})
+    out = sector_breadth(closes, {}, SECTORS, window=200)
+    assert out["share"].iloc[-1] == pytest.approx(2 / 3)
+
+
+def test_sector_breadth_is_undefined_until_every_sector_is_computable():
+    """A fixed denominator: a reading over two of three sectors is a different measure."""
+    closes = pd.DataFrame({"S1": rising(), "S2": rising()})
+    young = rising()
+    young.iloc[:-30] = float("nan")
+    closes["S3"] = young
+
+    out = sector_breadth(closes, {}, SECTORS, window=200)
+    assert out["share"].iloc[-1] is None
+
+
+def test_equal_weight_ratio_is_equal_over_cap():
+    closes = pd.DataFrame({"RSP": rising(50), "SPY": rising(100)})
+    out = equal_weight_ratio(closes, {})
+    assert out["ratio"].iloc[0] == pytest.approx(0.5)
+
+
+def test_rotation_rises_when_defensives_beat_cyclicals():
+    closes = pd.DataFrame({"XLU": rising(), "XLP": rising(), "XLK": falling(), "XLY": falling()})
+    out = defensive_rotation(closes, {})
+    assert out["rotation"].iloc[0] == pytest.approx(100.0)
+    assert out["rotation"].iloc[-1] > 100.0
+
+
+def test_rotation_does_not_depend_on_any_etfs_share_price():
+    """Why the literal (XLU + XLP) / (XLK + XLY) of section 8 was not used.
+
+    A sum of share prices weights each ETF by its per-share price, which is arbitrary —
+    XLK trades at about three times XLP. With geometric means, multiplying one ETF's
+    price by any constant leaves the rebased series unchanged.
+    """
+    closes = pd.DataFrame({"XLU": rising(), "XLP": rising(80), "XLK": falling(),
+                           "XLY": rising(120)})
+    scaled = closes.assign(XLK=closes["XLK"] * 10)
+
+    pd.testing.assert_series_equal(
+        defensive_rotation(closes, {})["rotation"],
+        defensive_rotation(scaled, {})["rotation"],
+    )
+
+    def literal(frame):
+        raw = (frame["XLU"] + frame["XLP"]) / (frame["XLK"] + frame["XLY"])
+        return raw / raw.iloc[0]
+
+    assert not np.allclose(literal(closes), literal(scaled)), (
+        "the literal formula should have moved — otherwise this test proves nothing"
+    )
+
+
+def test_etf_measures_are_empty_without_their_tickers():
+    empty = pd.DataFrame({"X": rising()})
+    assert sector_breadth(empty, {}, SECTORS).empty
+    assert equal_weight_ratio(empty, {}).empty
+    assert defensive_rotation(empty, {}).empty

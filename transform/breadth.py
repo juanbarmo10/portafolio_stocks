@@ -23,20 +23,36 @@ same constant, and ``close / average`` is invariant to a constant. Splits *insid
 window — the ones that would distort a raw comparison — are exactly the ones this corrects.
 ``test_breadth.py`` pins that invariance as a test.
 
+**Two families of measures, for two jobs.** The constituent breadth above needs the index
+membership on each date, and free prices only cover enough of it from 2019. The ETF-built
+measures further down — sector breadth, equal-weight versus cap-weight, defensive rotation
+— need no membership list at all: an ETF's price already contains the members it held at
+each moment, including the ones that later collapsed. So they carry **no survivorship
+bias** and reach back to 1998. They are what validates the regime light against 2000, 2008
+and 2020; the constituent breadth reads the market live (decided 2026-09-23).
+
 Pure functions over stored frames: no network, no database handle (section 10).
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+import numpy as np
 import pandas as pd
 
 from transform.adjustments import adjustment_factor, as_date, as_frame
 
 DEFAULT_WINDOW = 200
 DEFAULT_THRESHOLD = 0.85
+# Share of the window that must hold a real close for the average to exist. Found on the
+# first real run: requiring all 200 meant ONE missing day at the source disabled the
+# average of every affected ticker for the next 200 sessions — silently. On 2026-09-23 the
+# reported breadth rested on 60 of 503 members while coverage read 100 %. An average of 199
+# real closes is still an average of real closes, not an invented value.
+DEFAULT_MIN_WINDOW_FRACTION = 0.95
 
 # A session whose priced count collapses below this share of the surrounding median is a
 # hole in the source, not survivorship (see source_holes).
@@ -56,7 +72,10 @@ class BreadthReading:
             is priced but not yet computable; that is not survivorship, just youth.
         above: Computable members closing above their average.
         breadth: ``above / computable``, or ``None`` with nothing computable.
-        coverage: ``priced / members``. How much of the index the reading rests on.
+        coverage: ``computable / members`` — how much of the index the reading actually
+            rests on. Not ``priced / members``: that version read 100 % on a day whose
+            breadth rested on 60 of 503 members (see ``DEFAULT_MIN_WINDOW_FRACTION``).
+            ``priced`` stays available as its own count, for the survivorship question.
         meets_threshold: Whether ``coverage`` reaches the configured minimum. Below it the
             reading exists but must not be presented as a statement about the index.
         source_hole: The source returned this session nearly empty while the sessions
@@ -73,6 +92,11 @@ class BreadthReading:
     coverage: float | None
     meets_threshold: bool
     source_hole: bool = False
+
+
+def _min_periods(window: int, fraction: float) -> int:
+    """Real closes the averaging window must hold. See ``DEFAULT_MIN_WINDOW_FRACTION``."""
+    return max(1, math.ceil(window * fraction))
 
 
 def membership_mask(
@@ -161,6 +185,7 @@ def breadth_series(
     window: int = DEFAULT_WINDOW,
     threshold: float = DEFAULT_THRESHOLD,
     start: Any = None,
+    min_window_fraction: float = DEFAULT_MIN_WINDOW_FRACTION,
 ) -> list[BreadthReading]:
     """Share of members above their ``window``-session average, date by date.
 
@@ -179,7 +204,7 @@ def breadth_series(
         return []
     closes = closes.sort_index()
     adjusted = adjusted_closes(closes, splits or {})
-    average = adjusted.rolling(window, min_periods=window).mean()
+    average = adjusted.rolling(window, min_periods=_min_periods(window, min_window_fraction)).mean()
 
     mask = membership_mask(intervals, closes.index, list(closes.columns))
     # Members with no price column at all still count as members: they are the gap.
@@ -206,7 +231,7 @@ def breadth_series(
         # (np.False_ fails an ``is False`` check and does not serialize to JSON).
         members, priced_n = int(row.members), int(row.priced)
         computable_n, above_n = int(row.computable), int(row.above)
-        coverage = priced_n / members if members else None
+        coverage = computable_n / members if members else None
         hole = bool(row.hole)
         readings.append(BreadthReading(
             date=day.date().isoformat(),
@@ -270,3 +295,115 @@ def usable_from(readings: Sequence[BreadthReading]) -> str | None:
         else:
             start = None
     return start
+
+
+# --- ETF-built measures: no membership list, no survivorship bias ------------------
+
+
+def sector_breadth(
+    closes: pd.DataFrame,
+    splits: Mapping[str, Mapping[Any, float]] | None,
+    sectors: Sequence[str],
+    *,
+    window: int = DEFAULT_WINDOW,
+    min_window_fraction: float = DEFAULT_MIN_WINDOW_FRACTION,
+) -> pd.DataFrame:
+    """Share of a FIXED set of sector ETFs trading above their own average.
+
+    The coarse cousin of :func:`breadth_series` — nine sectors instead of five hundred
+    companies — and the one with history: the nine original SPDR sectors exist since
+    1998-12-22. Its denominator is fixed on purpose. Adding real estate (2015) and
+    communications (2018) as they appeared would change what "all sectors" means half-way
+    through the series, and a jump in the reading would then be about the definition, not
+    the market.
+
+    Returns:
+        ``[date, above, computable, share]``. ``share`` is ``None`` until **every** sector
+        has a full window — a reading over six of nine sectors is a different measure.
+    """
+    columns = ["date", "above", "computable", "share"]
+    present = [s for s in sectors if s in closes.columns]
+    if closes is None or closes.empty or not present:
+        return pd.DataFrame(columns=columns)
+
+    adjusted = adjusted_closes(closes[present].sort_index(), splits or {})
+    average = adjusted.rolling(
+        window, min_periods=_min_periods(window, min_window_fraction)
+    ).mean()
+    computable = average.notna() & adjusted.notna()
+    above = computable & (adjusted > average)
+
+    n_computable = computable.sum(axis=1)
+    n_above = above.sum(axis=1)
+    complete = n_computable == len(sectors)          # missing sectors count as absent
+    share = (n_above / n_computable).where(complete)
+    return pd.DataFrame({
+        "date": [d.date().isoformat() for d in adjusted.index],
+        "above": n_above.astype(int).to_numpy(),
+        "computable": n_computable.astype(int).to_numpy(),
+        "share": [None if pd.isna(v) else float(v) for v in share],
+    }, columns=columns)
+
+
+def equal_weight_ratio(
+    closes: pd.DataFrame,
+    splits: Mapping[str, Mapping[Any, float]] | None,
+    *,
+    equal: str = "RSP",
+    cap: str = "SPY",
+) -> pd.DataFrame:
+    """Equal-weight index over cap-weight index: ``[date, ratio]``.
+
+    Same five hundred companies, different weights. When the ratio falls while the index
+    rises, the average company is lagging the giants: a narrow rally. Price ratio, not
+    total return — both pay dividends, and a price ratio is the conventional reading.
+    Only dates where both exist (RSP starts 2003-05-01).
+    """
+    columns = ["date", "ratio"]
+    if closes is None or closes.empty or {equal, cap} - set(closes.columns):
+        return pd.DataFrame(columns=columns)
+    adjusted = adjusted_closes(closes[[equal, cap]].sort_index(), splits or {}).dropna()
+    ratio = adjusted[equal] / adjusted[cap]
+    return pd.DataFrame({
+        "date": [d.date().isoformat() for d in ratio.index],
+        "ratio": ratio.astype(float).to_numpy(),
+    }, columns=columns)
+
+
+def defensive_rotation(
+    closes: pd.DataFrame,
+    splits: Mapping[str, Mapping[Any, float]] | None,
+    *,
+    defensive: Sequence[str] = ("XLU", "XLP"),
+    cyclical: Sequence[str] = ("XLK", "XLY"),
+) -> pd.DataFrame:
+    """Defensive sectors against cyclical ones, rebased to 100: ``[date, rotation]``.
+
+    Rising means utilities and staples are beating technology and discretionary — the
+    market pricing a slowdown.
+
+    **Deliberately not the literal (XLU + XLP) / (XLK + XLY)** written in section 8. A sum
+    of share prices weights each ETF by its per-share price, which is arbitrary: XLK trades
+    at roughly three times XLP, so it would dominate the sum for no economic reason, and a
+    split in any one of them would change the weighting overnight. The ratio of **geometric
+    means** is used instead, whose change is exactly the average defensive return minus the
+    average cyclical return. Multiplying any one ETF's price by a constant moves the raw
+    ratio by a constant, which the rebasing removes — ``test_breadth.py`` pins that.
+    """
+    columns = ["date", "rotation"]
+    needed = [*defensive, *cyclical]
+    if closes is None or closes.empty or set(needed) - set(closes.columns):
+        return pd.DataFrame(columns=columns)
+    adjusted = adjusted_closes(closes[needed].sort_index(), splits or {}).dropna()
+    if adjusted.empty:
+        return pd.DataFrame(columns=columns)
+
+    def geometric_mean(tickers: Sequence[str]) -> pd.Series:
+        return np.exp(np.log(adjusted[list(tickers)]).mean(axis=1))
+
+    raw = geometric_mean(defensive) / geometric_mean(cyclical)
+    rebased = raw / raw.iloc[0] * 100.0
+    return pd.DataFrame({
+        "date": [d.date().isoformat() for d in rebased.index],
+        "rotation": rebased.astype(float).to_numpy(),
+    }, columns=columns)
