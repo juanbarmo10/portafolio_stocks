@@ -17,6 +17,8 @@ import pandas as pd
 import pytest
 
 from transform.breadth import (
+    advance_decline,
+    net_new_highs,
     BreadthReading,
     breadth_series,
     defensive_rotation,
@@ -348,3 +350,33 @@ def test_etf_measures_are_empty_without_their_tickers():
     assert sector_breadth(empty, {}, SECTORS).empty
     assert equal_weight_ratio(empty, {}).empty
     assert defensive_rotation(empty, {}).empty
+
+
+# --- Advance-decline and new highs / lows (2026-09-25) ---------------------------------------
+
+
+def test_advancers_decliners_and_the_line():
+    closes = pd.DataFrame({"UP1": rising(), "UP2": rising(), "DOWN": falling()}, index=DAYS)
+    readings = breadth_series(always("UP1", "UP2", "DOWN"), closes, window=200)
+    assert (last(readings).advancers, last(readings).decliners) == (2, 1)
+    line = advance_decline(readings)
+    assert line["net"].iloc[-1] == 1
+    assert line["line"].iloc[-1] == line["net"].sum(), "the line is the running sum"
+
+
+def test_a_year_of_history_is_needed_for_a_new_high():
+    closes = pd.DataFrame({"UP": rising(), "DOWN": falling()}, index=DAYS)
+    readings = breadth_series(always("UP", "DOWN"), closes, window=200)
+    assert readings[100].new_highs == 0, "a stock with 100 sessions has no 52-week high"
+    assert (last(readings).new_highs, last(readings).new_lows) == (1, 1)
+    net = net_new_highs(readings)
+    assert net["net_share"].iloc[-1] == pytest.approx(0.0)
+
+
+def test_a_source_hole_adds_nothing_to_the_line():
+    closes = pd.DataFrame({t: rising() for t in [f"T{i}" for i in range(30)]}, index=DAYS)
+    closes.iloc[-5, :25] = np.nan                     # the source returns 5 of 30 that day
+    readings = breadth_series(always(*closes.columns), closes, window=200)
+    hole = readings[-5]
+    assert hole.source_hole and hole.advancers is None
+    assert readings[-5].date not in set(advance_decline(readings)["date"])

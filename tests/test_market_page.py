@@ -236,3 +236,28 @@ def test_every_chart_speaks_spanish(market_db):
     assert len(charts) >= 4
     for chart in charts:
         assert '"decimal": ","' in chart.proto.spec and "septiembre" in chart.proto.spec
+
+
+def test_advance_decline_diverging_from_the_index_is_said(market_db):
+    """SPY rises (healthy seed) while most members fall: the rally is narrow (§2). The
+    readings arrive the way the public copy carries them, as computed series."""
+    from transform.breadth import (DERIVED_SOURCE, breadth_series,
+                                   readings_to_observations)
+
+    days = DAYS
+    closes = pd.DataFrame({f"D{i}": np.linspace(100, 60, len(days)) for i in range(8)}
+                          | {"U0": np.linspace(100, 150, len(days))}, index=days)
+    intervals = [{"ticker": t, "start_date": "2019-01-01", "end_date": None}
+                 for t in closes.columns]
+    readings = breadth_series(intervals, closes, window=200)
+    seed(market_db, healthy=True)
+    conn = loader.init_db(market_db)
+    try:
+        loader.upsert_observations(conn, readings_to_observations(readings))
+    finally:
+        conn.close()
+    app = render()
+    text = " ".join(m.value for m in app.markdown)
+    assert "Avance-descenso" in text and "Divergen" in text
+    assert "Máximos − mínimos de 52 semanas" in text
+    assert DERIVED_SOURCE

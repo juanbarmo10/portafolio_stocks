@@ -26,6 +26,8 @@ from app.format import altair_chart, MISSING, number, pct, reported_amount
 from core.config import load_settings
 from transform import regime as rg
 from transform.breadth import (
+    advance_decline,
+    net_new_highs,
     DERIVED_SOURCE,
     breadth_series,
     defensive_rotation,
@@ -248,6 +250,51 @@ else:
             ).properties(height=220),
             width="stretch",
         )
+    # Advance-decline and new highs minus lows (phase 3, the two measures left).
+    ad = advance_decline(readings, start)
+    nh = net_new_highs(readings, start)
+    spy = view["closes"]["SPY"].dropna() if "SPY" in view["closes"] else pd.Series(dtype=float)
+    if len(ad) > 63 and len(spy) > 63:
+        ad_change = int(ad["line"].iloc[-1] - ad["line"].iloc[-64])
+        spy_change = float(spy.iloc[-1] / spy.iloc[-64] - 1)
+        diverging = (spy_change > 0) != (ad_change > 0)
+        st.markdown(
+            "**Avance-descenso, tres meses:** " + f"{ad_change:+,}".replace(",", ".")
+            + " (empresas que subieron menos las que bajaron, sumadas cada día) frente a "
+            f"SPY {pct(spy_change)}. "
+            + ("⚠️ **Divergen**: el índice y la mayoría de sus empresas van en direcciones "
+               "distintas." if diverging else "Van en la misma dirección.")
+        )
+    if not nh.empty:
+        newest = nh.iloc[-1]
+        st.markdown(f"**Máximos − mínimos de 52 semanas, {newest['date']}:** "
+                    f"{int(newest['highs'])} en máximos, {int(newest['lows'])} en mínimos "
+                    f"({pct(newest['net_share'])} neto de los miembros con precio).")
+    with st.expander("Las gráficas de avance-descenso y máximos − mínimos"):
+        if not ad.empty:
+            altair_chart(
+                alt.Chart(ad.assign(date=pd.to_datetime(ad["date"]))).mark_line(color=LINE)
+                .encode(x=alt.X("date:T", title=None),
+                        y=alt.Y("line:Q", title="línea A/D acumulada",
+                                scale=alt.Scale(zero=False)))
+                .properties(height=180),
+                width="stretch",
+            )
+        if not nh.empty:
+            smooth = nh.assign(date=pd.to_datetime(nh["date"]),
+                               net=nh["net_share"].astype(float).rolling(10).mean())
+            altair_chart(
+                alt.Chart(smooth.dropna(subset=["net"])).mark_area(color=LINE, opacity=0.6)
+                .encode(x=alt.X("date:T", title=None),
+                        y=alt.Y("net:Q", title="máximos − mínimos, % (media 10 sesiones)",
+                                axis=alt.Axis(format="%")))
+                .properties(height=160),
+                width="stretch",
+            )
+        st.caption("La línea A/D no se lee por su nivel (depende de dónde empieza) sino por "
+                   "su dirección frente al índice. Máximos − mínimos negativo con el índice "
+                   "cerca de máximos es el rally estrecho de §2. Mismo universo y cobertura "
+                   "que la amplitud de arriba; un día con hueco en la fuente no suma.")
     st.caption(
         "Sobre la composición real del S&P 500 de cada día (`fja05680/sp500`, MIT). Los "
         "precios de las empresas que ya salieron no son gratis, así que cada lectura lleva "

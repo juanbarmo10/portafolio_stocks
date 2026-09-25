@@ -58,6 +58,7 @@ DEFAULT_MIN_WINDOW_FRACTION = 0.95
 # hole in the source, not survivorship (see source_holes).
 HOLE_FLOOR = 0.5
 HOLE_WINDOW = 21
+HIGH_LOW_WINDOW = 252   # a trading year: the "52-week" high and low
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,13 @@ class BreadthReading:
     coverage: float | None
     meets_threshold: bool
     source_hole: bool = False
+    # Added 2026-09-25 (phase 3, the two measures left): members up and down on the day,
+    # and members at a 52-week (HIGH_LOW_WINDOW sessions) high or low. Counts among priced
+    # members; ``None`` on a source hole, and on readings stored before they existed.
+    advancers: int | None = None
+    decliners: int | None = None
+    new_highs: int | None = None
+    new_lows: int | None = None
 
 
 def _min_periods(window: int, fraction: float) -> int:
@@ -214,12 +222,27 @@ def breadth_series(
     priced = mask & adjusted.notna()
     computable = priced & average.notna()
     above = computable & (adjusted > average)
+    # Advance-decline: against the previous session, only for members priced on both.
+    change = adjusted - adjusted.shift(1)
+    advancing = priced & (change > 0)
+    declining = priced & (change < 0)
+    # New highs and lows: the close equals the extreme of its own trailing year, with the
+    # same completeness rule as the average (a stock listed last month is not at a
+    # "52-week" high).
+    extremes = dict(window=HIGH_LOW_WINDOW,
+                    min_periods=_min_periods(HIGH_LOW_WINDOW, min_window_fraction))
+    at_high = priced & (adjusted >= adjusted.rolling(**extremes).max())
+    at_low = priced & (adjusted <= adjusted.rolling(**extremes).min())
 
     counts = pd.DataFrame({
         "members": mask.sum(axis=1),
         "priced": priced.sum(axis=1),
         "computable": computable.sum(axis=1),
         "above": above.sum(axis=1),
+        "advancers": advancing.sum(axis=1),
+        "decliners": declining.sum(axis=1),
+        "new_highs": at_high.sum(axis=1),
+        "new_lows": at_low.sum(axis=1),
     }).astype(int)
     counts["hole"] = source_holes(counts["priced"])
     if start is not None:
@@ -245,6 +268,10 @@ def breadth_series(
             coverage=coverage,
             meets_threshold=bool(not hole and coverage is not None and coverage >= threshold),
             source_hole=hole,
+            advancers=None if hole else int(row.advancers),
+            decliners=None if hole else int(row.decliners),
+            new_highs=None if hole else int(row.new_highs),
+            new_lows=None if hole else int(row.new_lows),
         ))
     return readings
 
@@ -277,6 +304,36 @@ def splits_by_ticker(
             continue
         out.setdefault(row["ticker"], {})[as_date(row["ex_date"])] = float(row["ratio"])
     return out
+
+
+def advance_decline(readings: Sequence[BreadthReading], start: Any = None) -> pd.DataFrame:
+    """The advance-decline line: ``[date, net, line]``, ``line`` = cumulative advancers −
+    decliners from ``start`` (the first usable date).
+
+    Its level means nothing (it depends on where it starts); its **direction against the
+    index** does: an index at highs with a falling line is rising on fewer and fewer
+    companies. A hole day adds nothing — skipped, not counted as zero advances.
+    """
+    first = as_date(start) if start is not None else None
+    rows = [{"date": r.date, "net": r.advancers - r.decliners} for r in readings
+            if r.advancers is not None and r.decliners is not None and not r.source_hole
+            and (first is None or as_date(r.date) >= first)]
+    frame = pd.DataFrame(rows, columns=["date", "net"])
+    return frame.assign(line=frame["net"].cumsum())
+
+
+def net_new_highs(readings: Sequence[BreadthReading], start: Any = None) -> pd.DataFrame:
+    """``[date, highs, lows, net_share]`` — new 52-week highs minus lows, over priced members.
+
+    A share, not a count, so a day with fewer priced members is comparable. Positive: more
+    companies at yearly highs than at lows.
+    """
+    first = as_date(start) if start is not None else None
+    rows = [{"date": r.date, "highs": r.new_highs, "lows": r.new_lows,
+             "net_share": (r.new_highs - r.new_lows) / r.priced if r.priced else None}
+            for r in readings if r.new_highs is not None and r.new_lows is not None
+            and not r.source_hole and (first is None or as_date(r.date) >= first)]
+    return pd.DataFrame(rows, columns=["date", "highs", "lows", "net_share"])
 
 
 def usable_from(readings: Sequence[BreadthReading]) -> str | None:
@@ -418,7 +475,8 @@ def defensive_rotation(
 # showing on its own.
 DERIVED_SOURCE = "equitydash"
 _FIELDS = ("members", "priced", "computable", "above", "breadth", "coverage",
-           "meets_threshold", "source_hole")
+           "meets_threshold", "source_hole", "advancers", "decliners", "new_highs",
+           "new_lows")
 
 
 def readings_to_observations(readings: Sequence[BreadthReading], prefix: str = "SP500:breadth"
@@ -462,5 +520,7 @@ def readings_from_observations(observations: pd.DataFrame, prefix: str = "SP500:
             breadth=get("breadth", float), coverage=get("coverage", float),
             meets_threshold=bool(get("meets_threshold", float)),
             source_hole=bool(get("source_hole", float)),
+            advancers=get("advancers", int), decliners=get("decliners", int),
+            new_highs=get("new_highs", int), new_lows=get("new_lows", int),
         ))
     return out
