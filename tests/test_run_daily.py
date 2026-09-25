@@ -9,7 +9,7 @@ import run_daily
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
 
-def run(ingest_exit, alerts_exit, network=True):
+def run(ingest_exit, alerts_exit, network=True, sync_exit=0):
     calls = []
 
     def ingest(argv):
@@ -20,18 +20,24 @@ def run(ingest_exit, alerts_exit, network=True):
         calls.append("alerts")
         return alerts_exit
 
-    code = run_daily.main([], ingest=ingest, alerts=alerts,
+    def sync(argv):
+        calls.append("sync")
+        if isinstance(sync_exit, Exception):
+            raise sync_exit
+        return sync_exit
+
+    code = run_daily.main([], ingest=ingest, alerts=alerts, public_sync=sync,
                           network=lambda host, wait: network)
     return code, calls
 
 
 def test_ingest_then_alerts_and_zero_when_both_succeed():
-    assert run(0, 0) == (0, ["ingest", "alerts"])
+    assert run(0, 0) == (0, ["ingest", "alerts", "sync"])
 
 
 def test_alerts_still_run_when_the_ingest_fails():
     """A failed source must not silence tomorrow's CPI warning."""
-    assert run(1, 0) == (1, ["ingest", "alerts"])
+    assert run(1, 0) == (1, ["ingest", "alerts", "sync"])
 
 
 def test_a_failed_alert_run_reaches_the_exit_code():
@@ -73,3 +79,8 @@ def test_the_unit_template_runs_this_script_from_the_repo_venv():
     assert "/home/" not in unit, "no personal path in a tracked file"
     timer = (REPO / "deploy" / "equitydash-daily.timer").read_text(encoding="utf-8")
     assert "Persistent=true" in timer
+
+
+def test_the_public_copy_goes_last_and_its_failure_is_reported():
+    """The cloud being down must neither delay the alerts nor crash the run."""
+    assert run(0, 0, sync_exit=RuntimeError("neon down")) == (1, ["ingest", "alerts", "sync"])

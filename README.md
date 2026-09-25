@@ -124,10 +124,19 @@ La ficha de tesis de cada empresa incluye qué observación concreta, verificabl
 mataría la tesis. No es una convención: `thesis_log.invalidation` es `NOT NULL` en el esquema
 y la carga de configuración rechaza una ficha incompleta.
 
-### La vista pública no enseña ninguna cifra absoluta
+### La vista pública: el mercado sí, la cuenta no
 
-Un despliegue público de este panel muestra **pesos, porcentajes y una curva de patrimonio
-en base 100**; nunca un importe. Lo que se publica es el método, no el saldo.
+El despliegue público muestra **Hoy, Mercado y Empresa**. La página de Cartera no se
+publica, y **ningún dato de la cuenta sube a la nube**: la base pública es una copia
+filtrada de la local, construida por lista blanca (`db/public_sync.py`) y revisada por una
+segunda comprobación independiente antes de escribir. Nunca viajan las operaciones, las
+posiciones, el efectivo, la tasa de cambio local, el interés corto (cubre también lo que se
+tiene) ni las alertas; las empresas publicadas son solo las que están en estudio, nunca una
+posición sin ficha, y sin el texto de ninguna tesis.
+
+La página de Cartera sabe mostrarse en público **sin ninguna cifra absoluta** —pesos,
+porcentajes y una curva de patrimonio en base 100— y esa versión sigue probada, por si algún
+día se publica.
 
 Se descartó la alternativa obvia —escalar los importes por un factor secreto— por tres
 razones. Es **invertible**: las comisiones no escalan con el tamaño de la cartera (IBKR
@@ -301,6 +310,21 @@ El panel se abre con:
 streamlit run app/main.py                      # vista local, con importes
 PUBLIC_MODE=1 streamlit run app/main.py        # vista pública, sin ninguna cifra absoluta
 ```
+
+### Despliegue público
+
+La versión pública corre en **Streamlit Community Cloud** y lee una base **PostgreSQL**
+(Neon, plan gratuito) que alimenta la máquina local:
+
+1. Crea la base y pon su cadena de conexión en `config/.env` como `PUBLIC_DATABASE_URL`
+   (no `DATABASE_URL`, que cambiaría la base local).
+2. Primera carga: `python run_public_sync.py --full`. Después la sube sola la ejecución
+   diaria, tras la ingesta y las alertas (`--dry-run` enseña qué se enviaría).
+3. En Streamlit Cloud: app desde este repositorio, archivo `app/main.py`, Python 3.12, y en
+   *Secrets*: `DATABASE_URL = "..."` (la misma cadena) y `PUBLIC_MODE = "1"`.
+
+La copia pública no guarda los ~1,4 M de cierres de los miembros del S&P 500 —no caben en el
+plan gratuito—, sino la serie de amplitud ya calculada con su cobertura. Ocupa unos 30-40 MB.
 
 Re-ejecutar es seguro por construcción: toda escritura pasa por un
 `INSERT ... ON CONFLICT DO UPDATE`.

@@ -33,7 +33,7 @@ import pandas as pd
 MISSING = "—"
 """Rendered for an absent value. A hole stays visible; it never becomes a zero (section 12)."""
 
-PUBLIC_PAGES = frozenset({"Hoy", "Mercado", "Empresa", "Cartera"})
+PUBLIC_PAGES = frozenset({"Hoy", "Mercado", "Empresa"})
 """Page titles that may ship in a public deployment.
 
 An allow-list, not a deny-list: a page added later is private until someone decides
@@ -46,6 +46,10 @@ earns its place here when the page exists and someone has looked at what it rend
 "Mercado" re-entered that way on 2026-09-24, by the user's decision, after its public
 render was checked: market data only, and the short-interest block — which names
 positions — left out.
+
+"Cartera" left on 2026-09-24, by the user's decision when the public deployment was set
+up: it shows market and companies only, and no account data is uploaded to the cloud. Its
+relative-figures rendering stays in the code, and tested, for the day that changes.
 
 The fiscal page is absent deliberately and must stay absent — its configuration alone
 reveals the jurisdiction (section 11).

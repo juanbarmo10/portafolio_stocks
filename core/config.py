@@ -44,6 +44,9 @@ _SECRET_KEYS = (
     "IBKR_FLEX_QUERY_ID",
     "TELEGRAM_TOKEN",
     "TELEGRAM_CHAT_ID",
+    # Section 8 phase 5: the PUBLIC copy's database. Deliberately not DATABASE_URL, which
+    # would switch the whole local pipeline to it — the local base stays SQLite and full.
+    "PUBLIC_DATABASE_URL",
 )
 
 # Required theses fields (section 5.2). `invalidation` is listed here *and* enforced

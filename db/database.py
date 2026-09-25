@@ -142,6 +142,23 @@ def open_connection(sqlite_path: Path) -> sqlite3.Connection | _PgConnection:
 
 
 
+def connect_url(url: str) -> sqlite3.Connection | _PgConnection:
+    """Open a connection from an explicit URL, independently of ``DATABASE_URL``.
+
+    For the public sync, which reads the local database and writes another one in the same
+    run. ``sqlite:///path`` opens a SQLite file (tests); anything else goes to PostgreSQL.
+    """
+    if url.startswith("sqlite:///"):
+        path = Path(url[len("sqlite:///"):])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return sqlite3.connect(path)
+    try:
+        import psycopg  # noqa: PLC0415 — optional dependency, only for Postgres
+    except ImportError as exc:  # pragma: no cover - depends on extras
+        raise RuntimeError('psycopg is not installed: pip install -e ".[postgres]".') from exc
+    return _PgConnection(psycopg.connect(url))
+
+
 def table_columns(conn: Any, table: str) -> set[str]:
     """Column names of an existing table, empty when it does not exist.
 

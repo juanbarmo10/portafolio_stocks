@@ -287,3 +287,30 @@ def test_a_candidate_never_reaches_the_thesis_board(study_app):
     assert settings.tracked_companies == []
     assert th.board(settings.tracked_companies, pd.DataFrame(), None, None,
                     "2026-09-23") == []
+
+
+# --- The public deployment: no local config, the list comes from the public copy --------
+
+
+def test_the_public_copy_lists_its_published_companies_without_opinion(tmp_path, monkeypatch):
+    """In the cloud there is no settings.local.yaml. The page lists the ``companies`` the
+    public sync uploaded, all as under study: numbers, never a thesis."""
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", tmp_path / "absent.yaml")
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    config.load_settings.cache_clear()
+    db_path = tmp_path / "public_copy.db"
+    seed_database(db_path)
+    conn = loader.init_db(db_path)
+    try:
+        loader.upsert_companies(conn, [{"cik": CIK, "ticker": "MSFT", "name": "MICROSOFT",
+                                        "sector": None, "thesis_category": None,
+                                        "first_seen": "2026-09-24", "status": "active"}])
+    finally:
+        conn.close()
+    monkeypatch.setattr(app_data, "db_path", lambda: db_path)
+    st.cache_data.clear()
+
+    text = rendered_text(render())
+    assert "No hay ninguna empresa escrita" not in text
+    assert "Costes de cambio altos" not in text, "no thesis text in the public copy"
+    assert "Ingresos" in text or "ingresos" in text, "the audited numbers render"

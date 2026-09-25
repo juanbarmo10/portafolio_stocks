@@ -1,4 +1,4 @@
-"""Daily orchestration: ingest, then alerts (CLAUDE.md sections 3, 8 phase 5).
+"""Daily orchestration: ingest, alerts, then the public copy (CLAUDE.md sections 3, 8).
 
 What the systemd timer runs (``deploy/``). Two rules:
 
@@ -23,6 +23,7 @@ from typing import Callable
 
 import run_alerts
 import run_ingest
+import run_public_sync
 from core.config import load_settings
 from core.logging_setup import configure_logging, get_logger
 
@@ -58,6 +59,7 @@ def main(
     *,
     ingest: Callable[[list[str]], int] = run_ingest.main,
     alerts: Callable[[list[str]], int] = run_alerts.main,
+    public_sync: Callable[[list[str]], int] = run_public_sync.main,
     network: Callable[[str, float], bool] = wait_for_network,
 ) -> int:
     settings = load_settings()
@@ -72,8 +74,16 @@ def main(
 
     ingest_exit = ingest([])
     alerts_exit = alerts([])
-    log.info("Daily run finished: ingest=%d alerts=%d", ingest_exit, alerts_exit)
-    return 0 if ingest_exit == 0 and alerts_exit == 0 else 1
+    # Last, and only with its URL configured (it skips itself otherwise): the public copy
+    # must never delay the alerts, and a failed upload must not look like a failed ingest.
+    try:
+        sync_exit = public_sync([])
+    except Exception:  # noqa: BLE001 — the cloud being down is not the day's result
+        log.exception("Public sync failed.")
+        sync_exit = 1
+    log.info("Daily run finished: ingest=%d alerts=%d public_sync=%d",
+             ingest_exit, alerts_exit, sync_exit)
+    return 0 if ingest_exit == alerts_exit == sync_exit == 0 else 1
 
 
 if __name__ == "__main__":

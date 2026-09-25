@@ -26,9 +26,11 @@ from app.format import MISSING, number, pct, reported_amount
 from core.config import load_settings
 from transform import regime as rg
 from transform.breadth import (
+    DERIVED_SOURCE,
     breadth_series,
     defensive_rotation,
     equal_weight_ratio,
+    readings_from_observations,
     sector_breadth,
     splits_by_ticker,
     usable_from,
@@ -79,7 +81,10 @@ def constituent_view(mtime: float) -> list | None:
     """Breadth over the real S&P 500 membership of each day, with its coverage."""
     intervals = app_data.universe_membership()
     if intervals.empty:
-        return None
+        # The public copy holds the computed series, not the ~1.4 M member closes it comes
+        # from (run_public_sync.py). Same readings, coverage included.
+        return readings_from_observations(
+            app_data.observations(DERIVED_SOURCE, mtime)) or None
     tickers = sorted(set(intervals["ticker"]))
     prices = app_data.prices_for(tickers)
     if prices.empty:
@@ -209,7 +214,8 @@ if not history.empty:
 st.subheader("3 · Amplitud")
 readings = constituent_view(app_data.db_mtime())
 if not readings:
-    st.caption("Amplitud por empresas sin calcular: `python run_ingest.py --only universe`.")
+    st.caption("Amplitud por empresas sin calcular todavía." if public else
+               "Amplitud por empresas sin calcular: `python run_ingest.py --only universe`.")
 else:
     last = readings[-1]
     start = usable_from(readings)

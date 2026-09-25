@@ -407,3 +407,60 @@ def defensive_rotation(
         "date": [d.date().isoformat() for d in rebased.index],
         "rotation": rebased.astype(float).to_numpy(),
     }, columns=columns)
+
+
+# --- A computed series for a copy that cannot hold the inputs ---------------------------
+
+# The public copy of the database cannot hold the ~1.4 M member closes this series is built
+# from (the free cloud tier is ~0.5 GB). So the readings are computed where the closes are
+# and the *result* travels, as a derived series under its own source label. The fields are
+# all kept: a reading without its coverage is exactly the number section 9.5 forbids
+# showing on its own.
+DERIVED_SOURCE = "equitydash"
+_FIELDS = ("members", "priced", "computable", "above", "breadth", "coverage",
+           "meets_threshold", "source_hole")
+
+
+def readings_to_observations(readings: Sequence[BreadthReading], prefix: str = "SP500:breadth"
+                             ) -> pd.DataFrame:
+    """One observation per reading and field: ``{prefix}:{field}``, dated by the session.
+
+    ``ts_release`` is the session itself: computed from closes known at that close.
+    ``None`` fields are dropped, and so read back as ``None`` — never as 0.
+    """
+    rows = []
+    for r in readings:
+        for name in _FIELDS:
+            value = getattr(r, name)
+            if value is None:
+                continue
+            rows.append({"source": DERIVED_SOURCE, "series_id": f"{prefix}:{name}",
+                         "ts": f"{r.date}T00:00:00+00:00",
+                         "ts_release": f"{r.date}T00:00:00+00:00", "value": float(value)})
+    return pd.DataFrame(rows, columns=["source", "series_id", "ts", "ts_release", "value"])
+
+
+def readings_from_observations(observations: pd.DataFrame, prefix: str = "SP500:breadth"
+                               ) -> list[BreadthReading]:
+    """The inverse of :func:`readings_to_observations`."""
+    if observations is None or observations.empty:
+        return []
+    rows = observations[observations["series_id"].str.startswith(f"{prefix}:")]
+    if rows.empty:
+        return []
+    wide = rows.assign(field=rows["series_id"].str.rsplit(":", n=1).str[1],
+                       date=rows["ts"].str[:10]).pivot_table(
+        index="date", columns="field", values="value", aggfunc="last")
+    out = []
+    for date, row in wide.sort_index().iterrows():
+        def get(name, cast):
+            value = row.get(name)
+            return None if value is None or pd.isna(value) else cast(value)
+        out.append(BreadthReading(
+            date=str(date), members=get("members", int) or 0, priced=get("priced", int) or 0,
+            computable=get("computable", int) or 0, above=get("above", int) or 0,
+            breadth=get("breadth", float), coverage=get("coverage", float),
+            meets_threshold=bool(get("meets_threshold", float)),
+            source_hole=bool(get("source_hole", float)),
+        ))
+    return out

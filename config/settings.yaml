@@ -650,3 +650,11 @@ orchestration:
   # atrasada, la red suele tardar, y fallaría todo — incluido el aviso por Telegram.
   network_check_host: api.stlouisfed.org
   network_wait_s: 600
+
+# --- Copia pública (§8 fase 5; db/public_sync.py) --------------------------------------
+# Decidido por el usuario el 2026-09-24: lo público es mercado y empresas; a la nube no
+# sube NINGÚN dato de la cuenta. La URL de destino es PUBLIC_DATABASE_URL en config/.env.
+public_sync:
+  # Tras la primera carga completa (--full), cada día sube lo que tenga fecha de referencia
+  # O de publicación en estos últimos días — la segunda condición trae las reexpresiones.
+  lookback_days: 10

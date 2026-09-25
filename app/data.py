@@ -11,13 +11,20 @@ never show data older than the last ingest without saying so.
 from __future__ import annotations
 
 import datetime as dt
+import time
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from core.config import load_settings
-from db.database import open_connection, read_account_table, read_observations, read_table
+from db.database import (
+    database_url,
+    open_connection,
+    read_account_table,
+    read_observations,
+    read_table,
+)
 
 
 def db_path() -> Path:
@@ -25,8 +32,25 @@ def db_path() -> Path:
     return load_settings().db_path
 
 
+def is_postgres() -> bool:
+    """Whether the panel reads PostgreSQL (``DATABASE_URL``) — the public deployment."""
+    return database_url() is not None
+
+
+def database_ready() -> bool:
+    """Whether there is a database to read: the SQLite file, or a configured PostgreSQL."""
+    return is_postgres() or db_path().exists()
+
+
 def db_mtime() -> float:
-    """Modification time of the database, or 0.0 when it does not exist yet."""
+    """The cache version: a fresh ingest must invalidate every cached read.
+
+    SQLite: the file's modification time, or 0.0 when it does not exist yet. PostgreSQL has
+    no file; the public copy is synced once a day, so the current hour is fresh enough and
+    costs one round of queries per hour instead of one per click.
+    """
+    if is_postgres():
+        return float(int(time.time() // 3600) * 3600)
     path = db_path()
     return path.stat().st_mtime if path.exists() else 0.0
 
@@ -47,7 +71,7 @@ def observations(source: str, mtime: float) -> pd.DataFrame:
         has not been built yet.
     """
     path = db_path()
-    if not path.exists():
+    if not database_ready():
         return pd.DataFrame(columns=["source", "series_id", "ts", "ts_release", "value"])
     conn = open_connection(path)
     try:
@@ -63,15 +87,30 @@ def macro_observations() -> pd.DataFrame:
 
 def last_ingest() -> dt.datetime | None:
     """Timestamp of the last write to the database, as a local datetime."""
+    if is_postgres():
+        return _last_ingest_postgres(db_mtime())
     mtime = db_mtime()
     return dt.datetime.fromtimestamp(mtime) if mtime else None
+
+
+@st.cache_data(show_spinner=False)
+def _last_ingest_postgres(version: float) -> dt.datetime | None:
+    """The newest ``ingested_at`` — in PostgreSQL there is no file date to read."""
+    conn = open_connection(db_path())
+    try:
+        row = conn.execute("SELECT MAX(ingested_at) FROM observations").fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return None
+    return dt.datetime.fromisoformat(str(row[0])).astimezone()
 
 
 @st.cache_data(show_spinner=False)
 def _account_table(table: str, mtime: float) -> pd.DataFrame:
     """One IBKR account table, cache-invalidated by the database mtime."""
     path = db_path()
-    if not path.exists():
+    if not database_ready():
         from db.database import ACCOUNT_TABLES  # noqa: PLC0415 — only for the empty case
 
         return pd.DataFrame(columns=ACCOUNT_TABLES[table])
@@ -96,7 +135,7 @@ def cash_transactions() -> pd.DataFrame:
 def _table(table: str, mtime: float) -> pd.DataFrame:
     """Any allowlisted table, cache-invalidated by the database mtime."""
     path = db_path()
-    if not path.exists():
+    if not database_ready():
         from db.database import READABLE_TABLES  # noqa: PLC0415 — only for the empty case
 
         return pd.DataFrame(columns=READABLE_TABLES[table][0])
@@ -135,6 +174,11 @@ def securities() -> pd.DataFrame:
     return _table("securities", db_mtime())
 
 
+def companies() -> pd.DataFrame:
+    """The company registry (CIK ↔ current ticker)."""
+    return _table("companies", db_mtime())
+
+
 def universe_membership() -> pd.DataFrame:
     """S&P 500 membership intervals, for breadth (section 9.5)."""
     return _table("universe_membership", db_mtime())
@@ -164,7 +208,7 @@ def price_observations(tickers: tuple[str, ...], mtime: float) -> pd.DataFrame:
     """
     path = db_path()
     columns = ["source", "series_id", "ts", "ts_release", "value"]
-    if not path.exists() or not tickers:
+    if not database_ready() or not tickers:
         return pd.DataFrame(columns=columns)
     conn = open_connection(path)
     try:

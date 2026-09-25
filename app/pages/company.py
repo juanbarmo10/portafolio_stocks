@@ -42,6 +42,14 @@ public = settings.public_mode
 tracked = settings.tracked_companies
 watchlist = settings.watchlist_companies
 cards = [*tracked, *watchlist]
+if public and not cards:
+    # The public deployment has no settings.local.yaml. Its list is the ``companies`` table
+    # of the public copy, which run_public_sync.py fills with the researched companies only
+    # — never a position held without a card — and with no thesis text: numbers, not
+    # opinions. So every one of them shows as a company under study.
+    published = app_data.companies()
+    watchlist = [{"ticker": t, "cik": c} for t, c in zip(published["ticker"], published["cik"])]
+    cards = watchlist
 # Tickers with no written thesis. This set is what section 1 branches on, and it is the
 # only thing on the page that behaves differently — a candidate gets the same audited
 # numbers as anything else, because the numbers are what you study it with (section 5.1).

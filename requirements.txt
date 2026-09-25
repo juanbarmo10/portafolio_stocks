@@ -1,0 +1,3 @@
+# Para Streamlit Community Cloud (la versión pública). Instala el paquete con lo que la app
+# necesita: la interfaz y el conector de PostgreSQL. La ingesta no corre en la nube.
+.[app,postgres]

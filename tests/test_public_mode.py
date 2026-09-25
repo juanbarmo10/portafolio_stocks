@@ -233,6 +233,17 @@ def public_app(tmp_path, monkeypatch):
     st.cache_data.clear()
 
 
+def portfolio_page() -> AppTest:
+    """The portfolio page rendered on its own, outside the navigation."""
+    return AppTest.from_file(PORTFOLIO, default_timeout=60).run()
+
+
+def test_the_portfolio_page_is_not_published(public_app):
+    """Decided 2026-09-24: the public deployment shows market and companies only, and no
+    account data reaches the cloud. The page must not even be in the navigation."""
+    assert "Cartera" not in PUBLIC_PAGES
+
+
 def test_a_public_render_carries_no_currency_figure(public_app):
     """The backstop: walk every public page and fail on anything shaped like money."""
     app = AppTest.from_file(MAIN, default_timeout=60).run()
@@ -245,12 +256,12 @@ def test_a_public_render_carries_no_currency_figure(public_app):
     # The market page (public since 2026-09-24) is absent for the same reason: its one
     # dollar figure is the Fed's net liquidity, a published aggregate. Its account block —
     # short interest, which names held tickers — is guarded in tests/test_market_page.py.
-    pages = [MAIN, PORTFOLIO]
-    for page in pages:
-        if page != MAIN:
-            app.switch_page(page)
-            app.run()
-            assert not app.exception, [e.value for e in app.exception]
+    # The portfolio page is not in the public navigation since 2026-09-24 (the user's
+    # decision), but its public render is still scanned, opened directly: the code path
+    # exists, and the day it is published again it must already be safe.
+    for page, render in ((MAIN, lambda: app), (PORTFOLIO, portfolio_page)):
+        app = render()
+        assert not app.exception, [e.value for e in app.exception]
 
         text = _rendered_text(app)
         # Without this the scan can quietly become vacuous: an accessor that stops
@@ -263,9 +274,7 @@ def test_a_public_render_carries_no_currency_figure(public_app):
 
 def test_the_public_portfolio_page_states_the_rule_and_drops_the_operator_notes(public_app):
     """Publicly the page explains what it shows; the unblocking steps are for the operator."""
-    app = AppTest.from_file(MAIN, default_timeout=60).run()
-    app.switch_page(PORTFOLIO)
-    app.run()
+    app = portfolio_page()
     assert not app.exception, [e.value for e in app.exception]
 
     text = _rendered_text(app)
@@ -288,9 +297,7 @@ def private_app(tmp_path, monkeypatch):
 
 def test_the_portfolio_page_actually_renders_its_figures_publicly(public_app):
     """Guards the guard: the leak scan above is only meaningful if this page has content."""
-    app = AppTest.from_file(MAIN, default_timeout=60).run()
-    app.switch_page(PORTFOLIO)
-    app.run()
+    app = portfolio_page()
     assert not app.exception, [e.value for e in app.exception]
 
     text = _rendered_text(app)
@@ -301,9 +308,7 @@ def test_the_portfolio_page_actually_renders_its_figures_publicly(public_app):
 
 def test_the_same_page_shows_amounts_privately(private_app):
     """The two modes must actually differ, or the public one proves nothing."""
-    app = AppTest.from_file(MAIN, default_timeout=60).run()
-    app.switch_page(PORTFOLIO)
-    app.run()
+    app = portfolio_page()
     assert not app.exception, [e.value for e in app.exception]
 
     text = _rendered_text(app)
@@ -335,9 +340,7 @@ def _chart_data(chart) -> pd.DataFrame:
 
 def test_public_tables_only_carry_relative_columns(public_app):
     """A bare number in a table is invisible to the currency scan; the columns are not."""
-    app = AppTest.from_file(MAIN, default_timeout=60).run()
-    app.switch_page(PORTFOLIO)
-    app.run()
+    app = portfolio_page()
 
     seen = set()
     for element in app.get("dataframe"):
@@ -350,9 +353,7 @@ def test_public_tables_only_carry_relative_columns(public_app):
 
 def test_the_public_equity_curve_is_rebased_not_absolute(public_app):
     """The chart is the other thing the text scan cannot see."""
-    app = AppTest.from_file(MAIN, default_timeout=60).run()
-    app.switch_page(PORTFOLIO)
-    app.run()
+    app = portfolio_page()
 
     chart = (app.get("arrow_vega_lite_chart") or app.get("vega_lite_chart"))[0]
     values = _chart_data(chart)["value"]
@@ -362,9 +363,7 @@ def test_the_public_equity_curve_is_rebased_not_absolute(public_app):
 
 def test_the_private_equity_curve_keeps_the_real_nav(private_app):
     """Symmetry check: rebasing must be a public-mode decision, not a global one."""
-    app = AppTest.from_file(MAIN, default_timeout=60).run()
-    app.switch_page(PORTFOLIO)
-    app.run()
+    app = portfolio_page()
 
     chart = (app.get("arrow_vega_lite_chart") or app.get("vega_lite_chart"))[0]
     assert float(_chart_data(chart)["value"].iloc[0]) == 1100.00
