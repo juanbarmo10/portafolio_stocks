@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import Iterable
 
 # Context fields we want on every record; default to '-' when not provided.
 _CONTEXT_FIELDS = ("source", "series_id")
@@ -32,11 +33,42 @@ class _ContextFilter(logging.Filter):
         return True
 
 
-def configure_logging(level: str = "INFO") -> None:
+# Shorter values are not redacted: a two-character "secret" would black out half the log.
+_MIN_SECRET_LENGTH = 8
+REDACTED = "[REDACTED]"
+
+
+class _RedactingFormatter(logging.Formatter):
+    """Replace every configured secret in the *finished* line, traceback included.
+
+    Redacting at the formatter rather than at each call site is the point: a secret
+    reaches the log through channels nobody writes on purpose. ``requests`` puts the
+    query string — FRED's ``api_key`` among it — into the text of a ``ConnectionError``,
+    and :func:`ingest.base.retry` logs that text on every attempt. Scrubbing each ingester
+    would leave the next one to remember; this covers them all.
+    """
+
+    def __init__(self, fmt: str, secrets: Iterable[str]) -> None:
+        super().__init__(fmt)
+        self._secrets = sorted(
+            {str(s) for s in secrets if s and len(str(s)) >= _MIN_SECRET_LENGTH},
+            key=len, reverse=True,
+        )
+
+    def format(self, record: logging.LogRecord) -> str:
+        line = super().format(record)
+        for secret in self._secrets:
+            line = line.replace(secret, REDACTED)
+        return line
+
+
+def configure_logging(level: str = "INFO", secrets: Iterable[str] = ()) -> None:
     """Configure the root logger idempotently.
 
     Args:
         level: Log level name (e.g. 'DEBUG', 'INFO'). Case-insensitive.
+        secrets: Values that must never appear in a log line (API keys, tokens); every
+            occurrence is replaced by ``[REDACTED]``.
 
     Calling this more than once replaces existing handlers rather than stacking
     them, so repeated ingest runs do not duplicate log lines.
@@ -48,7 +80,7 @@ def configure_logging(level: str = "INFO") -> None:
         root.removeHandler(handler)
 
     handler = logging.StreamHandler(stream=sys.stderr)
-    handler.setFormatter(logging.Formatter(_FORMAT))
+    handler.setFormatter(_RedactingFormatter(_FORMAT, secrets))
     handler.addFilter(_ContextFilter())
     root.addHandler(handler)
 

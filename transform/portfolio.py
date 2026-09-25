@@ -116,13 +116,33 @@ def _latest_by_series(observations: pd.DataFrame, suffix: str) -> pd.DataFrame:
     return latest[["ticker", "value", "ts"]].reset_index(drop=True)
 
 
+def statement_date(observations: pd.DataFrame) -> str | None:
+    """The date of the most recent Flex statement, or ``None`` without account data.
+
+    Read from the daily NAV, which every statement carries even when nothing is held, and
+    otherwise from the positions themselves.
+    """
+    if observations is None or observations.empty:
+        return None
+    ids = observations["series_id"]
+    rows = observations[(ids == NAV_TOTAL) | ids.str.endswith(f":{POSITION_QTY}")]
+    return None if rows.empty else str(rows["ts"].max())
+
+
 def latest_positions(observations: pd.DataFrame) -> pd.DataFrame:
-    """Open positions as of the last statement: ``[ticker, quantity, cost_basis, ts]``.
+    """Positions open at the last statement: ``[ticker, quantity, cost_basis, ts]``.
 
     Positions live in ``observations`` rather than a table of their own so that a new field
     in the IBKR report never becomes a migration, and so their history comes for free
     (RESEARCH.md section 2.1).
+
+    ⚠️ **Open means present in the latest statement**, not "the last row of each series".
+    Flex reports the positions open at the statement's end and says nothing about the ones
+    closed: after a full sale there is simply no new row, and the old one — with its old
+    quantity — would stay the series' last word forever. Found 2026-09-24, before any sale
+    triggered it.
     """
+    columns = ["ticker", "quantity", "cost_basis", "ts"]
     quantities = _latest_by_series(observations, POSITION_QTY).rename(
         columns={"value": "quantity"}
     )
@@ -130,9 +150,12 @@ def latest_positions(observations: pd.DataFrame) -> pd.DataFrame:
         columns={"value": "cost_basis"}
     )[["ticker", "cost_basis"]]
     if quantities.empty:
-        return pd.DataFrame(columns=["ticker", "quantity", "cost_basis", "ts"])
+        return pd.DataFrame(columns=columns)
+    quantities = quantities[quantities["ts"] == statement_date(observations)]
+    if quantities.empty:
+        return pd.DataFrame(columns=columns)
     merged = quantities.merge(costs, on="ticker", how="left")
-    return merged[["ticker", "quantity", "cost_basis", "ts"]].sort_values("ticker")
+    return merged[columns].sort_values("ticker").reset_index(drop=True)
 
 
 def latest_prices(observations: pd.DataFrame) -> pd.DataFrame:

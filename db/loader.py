@@ -249,10 +249,14 @@ def upsert_observations(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
 
 
 def upsert_companies(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
-    """Upsert the company registry, keyed by CIK (section 9.3: the ticker is not a key)."""
+    """Upsert the company registry, keyed by CIK (section 9.3: the ticker is not a key).
+
+    The ticker and name update in place — they are the mutable attributes. ``first_seen``
+    keeps the first run's date.
+    """
     return _upsert(
         conn, "companies", ("cik",), COMPANY_COLUMNS,
-        _to_records(rows, COMPANY_COLUMNS), False, "companies",
+        _to_records(rows, COMPANY_COLUMNS), False, "companies", immutable=("first_seen",),
     )
 
 
@@ -379,6 +383,10 @@ def upsert_exit_ladder(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> 
     return _upsert(
         conn, "exit_ladder", ("rule_id",), EXIT_LADDER_COLUMNS,
         _to_records(rows, EXIT_LADDER_COLUMNS), False, "exit-ladder rules",
+        # When the rule was first written down is the point of the table: it proves the
+        # exit was decided before the purchase (section 2, level 4). A re-sync must not
+        # move it to "last run".
+        immutable=("created_at",),
     )
 
 

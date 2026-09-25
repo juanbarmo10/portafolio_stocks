@@ -253,8 +253,11 @@ Rellenar `config/.env` con las claves (FRED, SEC User-Agent, token Flex de IBKR,
 `config/settings.local.yaml` con las tesis y la cartera objetivo. Ambos están *gitignored*.
 
 Para el token de IBKR conviene **empezar por la cuenta paper**, que tiene su propio token y
-query id. La query debe incluir las secciones `AccountInformation`, `OpenPositions`, `Trades`,
-`CashTransactions` y `ChangeInDividendAccruals`.
+query id. Secciones obligatorias de la query: `Account Information`, `Open Positions`,
+`Trades`, `Cash Transactions`, `Change in Dividend Accruals`, `Net Asset Value (NAV) Summary
+in Base`, `Change in NAV`, `Corporate Actions` y `Financial Instrument Information`. Sin el
+NAV no hay contra qué reconciliar la cartera, y sin las acciones corporativas no se puede
+marcar una posición para revisión.
 
 ### Ejecución
 
@@ -264,10 +267,24 @@ python run_ingest.py                 # ejecuta la ingesta registrada
 python run_ingest.py --only fred     # solo una fuente
 ```
 
-Fuentes registradas: `fred`, `prices`, `ibkr`, `sec`, `sec_filings`. Una fuente sin sus
+Fuentes registradas: `fred`, `macro_calendar`, `prices`, `ibkr`, `sec`, `sec_filings`,
+`short_interest` y `universe`. Una fuente sin sus
 credenciales configuradas **se omite con aviso**, no rompe el pipeline; y una unidad rota
 dentro de una fuente (una serie, un ticker, una empresa) se reporta y devuelve código de
 salida ≠ 0 sin llevarse por delante a las demás.
+
+Después de la ingesta, las alertas y, cuando se quiera, la validación:
+
+```bash
+python run_alerts.py                 # evalúa las reglas y envía a Telegram lo nuevo
+python run_alerts.py --dry-run       # enseña qué dispararía, sin enviar ni registrar
+python run_alerts.py --test-message  # comprueba la configuración del bot
+python run_validation.py             # informe de validación del semáforo (reproducible)
+```
+
+Sin `TELEGRAM_TOKEN` y `TELEGRAM_CHAT_ID` las alertas se registran como no entregadas y
+salen, si siguen siendo ciertas, en cuanto el bot esté configurado. Una fuente que falla en
+la ingesta también llega como alerta: es como se entera uno de que el token de IBKR caducó.
 
 El panel se abre con:
 
@@ -347,7 +364,7 @@ o a medias.
 | 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | ✅ |
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor, página por empresa | ✅ |
 | 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | ✅ construida; aceptación parcial: el semáforo acierta 5 de 6 correcciones desde 2012 con 0,8 % de falsas alarmas, pero confirma más que anticipa, y antes de 2012 no hay datos point-in-time para juzgarlo |
-| 4 | Alertas Telegram y validación estadística | pendiente |
+| 4 | Alertas Telegram y validación estadística | ✅ construida; falta conectar el bot de Telegram. La validación no encontró ninguna señal significativa (abajo) |
 | 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | pendiente |
 
 El semáforo de régimen de la fase 3 usa **pesos iguales y fijos**, no optimizados sobre el
@@ -355,6 +372,24 @@ histórico, con el voto de cada componente visible. Bloquea decisiones; nunca es
 compra. Con suficientes indicadores siempre aparece una combinación que habría funcionado —
 por eso la fase 4 aplica corrección FDR de Benjamini-Hochberg sobre la batería completa de
 señales y documenta también **las que no funcionan**.
+
+### Resultado de la validación: ninguna señal pasa, y eso se publica
+
+La pregunta era la que importa para un freno: *¿comprar con el semáforo en rojo sale peor
+que comprar en cualquier otro momento?* Protocolo fijado antes de ejecutar: el veredicto y
+el voto de cada uno de los ocho componentes, rentabilidad total del S&P 500 a 30, 90 y 180
+días entrando la sesión siguiente, fechas muestreadas en una rejilla de ventanas disjuntas
+(para que un episodio de tres meses no cuente como sesenta observaciones), prueba por
+permutación y Benjamini-Hochberg a q = 0,10.
+
+**30 pruebas, 19 con muestra suficiente, ninguna significativa.** Y la dirección que domina
+es la contraria a la hipótesis: tras el verde se ganó menos que la media, y tras las señales
+de estrés (crédito, curva, volatilidad), más — la huella de la reversión a la media, que hace
+que el estrés se lea con más fuerza cerca de los suelos. El componente de equiponderado
+contra capitalización, que ya no discriminaba en 2012-2026, falla también fuera de muestra
+(2004-2012). No se cambió ninguna regla al ver el resultado: el semáforo sigue siendo un
+freno de disciplina, y ya no hay motivo para creer que añada rentabilidad.
+`python run_validation.py` reproduce el informe entero.
 
 ---
 

@@ -50,6 +50,17 @@ universe:
   #    # lo que es mecánico. Una regla que nombre una métrica que el panel no calcula
   #    # reporta "no evaluable" — nunca pasa en silencio, que parecería salud.
   #    invalidation_rule: { metric: cash_conversion, operator: "<", threshold: 0.6 }
+  #    # Reglas de salida (§2 nivel 4): se escriben ANTES de comprar. `trigger` y `action`
+  #    # son texto y obligatorios; `rule` es opcional y es lo que la alerta evalúa sola.
+  #    # Métricas de `rule`: las de invalidation_rule, más `price` (último cierre CRUDO:
+  #    # un split posterior invalida el umbral), `weight` (peso en la cartera, 0-1) y
+  #    # `return_pct` (valor / coste − 1). Cambiar el umbral re-arma la alerta.
+  #    exit_ladder:
+  #      - rule_id: AAPL-tp-1          # único en todo el archivo
+  #        kind: take_profit           # take_profit | thesis_invalidation | rebalance
+  #        trigger: "El peso pasa del 12 % de la cartera."
+  #        action: "Vender hasta volver al 8 %."
+  #        rule: { metric: weight, operator: ">", threshold: 0.12 }
 
 # Cartera objetivo: pesos por posición y por thesis_category, para que el drift
 # signifique algo (§13, entrada de usuario nº4). La cartera REAL nunca se escribe

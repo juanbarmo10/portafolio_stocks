@@ -278,6 +278,12 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
         ["universe", "ticker", "start_date", "end_date", "source", "first_seen"],
         "start_date",
     ),
+    "companies": (
+        ["cik", "ticker", "name", "sector", "thesis_category", "first_seen", "status"],
+        "cik",
+    ),
+    "exit_ladder": (["rule_id", "cik", "kind", "trigger", "action", "created_at"], "rule_id"),
+    "alerts_log": (["alert_id", "rule_id", "fired_at", "payload"], "fired_at"),
 }
 
 # Kept for the account tables specifically, which is what most callers want.

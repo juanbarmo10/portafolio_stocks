@@ -25,7 +25,6 @@ from app import data as app_data
 from app.format import MISSING, number, pct, reported_amount
 from core.config import load_settings
 from transform import regime as rg
-from transform.adjustments import split_adjusted
 from transform.breadth import (
     breadth_series,
     defensive_rotation,
@@ -52,8 +51,7 @@ public = settings.public_mode
 L2 = settings.raw["panel"]["level2"]
 R, B, SB = L2["regime"], L2["breadth"], L2["sector_breadth"]
 EW, ROT = L2["equal_weight"], L2["rotation"]
-ETFS = list(dict.fromkeys([*SB["sectors"], EW["equal"], EW["cap"],
-                           *ROT["defensive"], *ROT["cyclical"]]))
+ETFS = rg.regime_tickers(L2)
 
 st.title("📈 Mercado")
 st.caption("Nivel 2 — ¿está sano el mercado o es un rally estrecho? — y el semáforo que lo "
@@ -63,38 +61,16 @@ st.caption("Nivel 2 — ¿está sano el mercado o es un rally estrecho? — y el
 @st.cache_data(show_spinner="Calculando el semáforo…")
 def regime_view(mtime: float) -> dict | None:
     """Everything the light needs, cached until the database changes."""
-    fred = app_data.fred_observations()
-    prices = app_data.prices_for(ETFS)
-    if fred.empty or prices.empty:
+    built = rg.build(app_data.fred_observations(), app_data.prices_for(ETFS),
+                     app_data.corporate_actions(), L2)
+    if built is None:
         return None
-    actions = app_data.corporate_actions()
-    closes, splits = wide_closes(prices), splits_by_ticker(actions)
-    if EW["cap"] not in closes.columns:
-        return None
-    calendar = closes[EW["cap"]].dropna().loc["1999-01-01":].index
-    rules = rg.rules_from_config(R)
-    comps = rg.component_frames(
-        rules, fred, closes, splits, calendar, sectors=SB["sectors"],
-        equal=EW["equal"], cap=EW["cap"], breadth_window=SB["window"],
-        min_window_fraction=R["min_window_fraction"],
-    )
-    votes = {
-        r.key: rg.votes(comps[r.key], r, window=R["window"],
-                        min_window_fraction=R["min_window_fraction"],
-                        trend_dead_zone_sd=R["trend_dead_zone_sd"],
-                        max_staleness_days=R["max_staleness_days"])
-        for r in rules
-    }
-    frame = rg.regime_frame(votes, min_components=R["min_components"])
-    cap_rows = prices[prices["series_id"] == f"{EW['cap']}:close_raw"].assign(
-        ts=lambda d: d["ts"].str[:10])
-    spy = split_adjusted(cap_rows, actions, EW["cap"], "2099-01-01").set_index("ts")["value"]
-    spy.index = pd.to_datetime(spy.index)
     return {
-        "reading": rg.reading_at(calendar[-1], rules, comps, votes, frame),
-        "frame": frame[["verdict", "available"]],
-        "evaluation": rg.evaluate(frame, spy),
-        "closes": closes, "splits": splits,
+        "reading": rg.reading_at(built.calendar[-1], built.rules, built.components,
+                                 built.votes, built.frame),
+        "frame": built.frame[["verdict", "available"]],
+        "evaluation": rg.evaluate(built.frame, built.benchmark),
+        "closes": built.closes, "splits": built.splits,
     }
 
 

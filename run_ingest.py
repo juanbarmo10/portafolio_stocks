@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from core.config import Settings, load_settings
@@ -25,6 +26,7 @@ from core.logging_setup import configure_logging, get_logger
 from db import loader
 from ingest.base import Ingester
 from ingest.fred import FredIngester
+from ingest.macro_calendar import MacroCalendarIngester
 from ingest.ibkr_flex import (
     IbkrFlexIngester,
     cash_transactions_frame,
@@ -43,6 +45,7 @@ log = get_logger(__name__)
 # Grows with each phase.
 INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Ingester]]] = {
     "fred": (FredIngester.is_available, FredIngester),
+    "macro_calendar": (MacroCalendarIngester.is_available, MacroCalendarIngester),
     "prices": (PricesIngester.is_available, PricesIngester),
     "ibkr": (IbkrFlexIngester.is_available, IbkrFlexIngester),
     "sec": (SecXbrlIngester.is_available, SecXbrlIngester),
@@ -120,10 +123,29 @@ def available_ingesters(selected: dict[str, tuple], settings: Settings) -> dict[
     return built
 
 
+def notify_failures(conn: Any, settings: Settings, failures: list[str]) -> None:
+    """Send the failed sources to Telegram (section 8, phase 4: "any ingester failing").
+
+    This is how an expired IBKR Flex token reaches the user (section 4.1) instead of only
+    a log. Deduplicated per source per day; never allowed to mask the ingest's own exit
+    code, so a broken bot cannot turn a failed run into an exception somewhere else.
+    """
+    if not settings.raw.get("alerts", {}).get("ingest_failure", True):
+        return
+    from alerts.rules import dispatch, ingest_failure_alerts  # noqa: PLC0415
+    from alerts.telegram import TelegramSender  # noqa: PLC0415
+
+    try:
+        today = datetime.now(timezone.utc).date().isoformat()
+        dispatch(conn, ingest_failure_alerts(failures, today), TelegramSender(settings))
+    except Exception:  # noqa: BLE001 — the ingest result stands on its own
+        log.exception("Could not send the ingest-failure alert.")
+
+
 def run(args: argparse.Namespace) -> int:
     """Execute the pipeline. Returns a process exit code."""
     settings = load_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.secrets.values())
 
     log.info("equitydash ingest starting (db=%s, dry_run=%s)", settings.db_path, args.dry_run)
 
@@ -192,6 +214,7 @@ def run(args: argparse.Namespace) -> int:
 
         if failures:
             log.error("Ingest finished with %d failed source(s): %s", len(failures), failures)
+            notify_failures(conn, settings, failures)
             return 1
         log.info("Ingest finished successfully.")
         return 0

@@ -266,6 +266,34 @@ sources:
 
   # FINRA — interés corto consolidado (nivel 2, posicionamiento). Verificado 2026-09-23:
   # API REST pública, SIN credenciales, respuesta CSV.
+  # --- Calendario macro (§2 nivel 1, §8 fase 4) --------------------------------------
+  # "¿Hay CPI / PCE / NFP / FOMC en los próximos días?" es la primera pregunta del
+  # checklist, y la alerta "release de alto impacto en < 48 h" lee lo que se guarda aquí.
+  # Horas en hora de Nueva York; se guardan en UTC con el horario de verano resuelto.
+  macro_calendar:
+    horizon_days: 60
+    # FRED `release/dates` publica el calendario oficial de las agencias, fechas futuras
+    # incluidas. Verificado el 2026-09-24: los tres devuelven sus próximas fechas.
+    releases:
+      - {release_id: 10, label: "CPI (inflación)", time_et: "08:30"}
+      - {release_id: 54, label: "PCE (ingresos y gasto personal)", time_et: "08:30"}
+      - {release_id: 50, label: "Empleo (nóminas, NFP)", time_et: "08:30"}
+    # FRED NO tiene calendario de FOMC: la release 101 ("FOMC Press Release") responde
+    # todos los días del año, y la 326 solo trae las cuatro reuniones con proyecciones.
+    # Día de la DECISIÓN (el segundo de la reunión), copiado de la página de la Fed.
+    # Cuando la lista se acerque a su fin, la ingesta sale con código ≠ 0 pidiendo el año
+    # siguiente — no se queda callada sobre una reunión que nadie apuntó.
+    fomc:
+      source_url: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+      verified: "2026-09-24"
+      time_et: "14:00"
+      decision_dates: [
+        "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17",
+        "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-09",
+        "2027-01-27", "2027-03-17", "2027-04-28", "2027-06-09",
+        "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08",
+      ]
+
   finra:
     short_interest_url: https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest
     user_agent: "equitydash/0.1 (personal research)"
@@ -538,3 +566,43 @@ ingest:
     attempts: 4
     base_delay_s: 1.0
     max_delay_s: 30.0
+
+# --- Alertas (§2, §8 fase 4) ----------------------------------------------------------
+# Solo eventos ACCIONABLES según reglas escritas de antemano (§2): ninguna regla mira el
+# precio (§12 lo prohíbe). Cada alerta se envía una vez por evento — la clave nombra el
+# evento (una publicación, un filing, el primer día de un tramo en rojo), no el día en
+# que se vio —, y queda en `alerts_log`. Sin Telegram configurado se registran como no
+# entregadas y salen, si siguen siendo ciertas, en cuanto se configure el bot.
+# Se ejecutan con `python run_alerts.py` después de `run_ingest.py`.
+alerts:
+  rules:
+    - {kind: macro_release_soon, within_hours: 48}   # CPI/PCE/NFP/FOMC → no aportar hoy
+    - {kind: earnings_soon}           # ventana: panel.level3.earnings_window_days
+    # El semáforo pasa a rojo → compras bloqueadas. Un episodio rojo sigue vivo mientras
+    # haya rojo en las últimas `quiet_sessions` sesiones: el semáforo parpadea (43
+    # entradas en rojo desde 2012, muchas a pocos días), y un mensaje por entrada sería el
+    # goteo que §2 prohíbe. 20 sesiones ≈ un mes, la cadencia de consulta y de aporte de
+    # §2 — elegido por ese principio, no para minimizar mensajes (medido después: 10
+    # episodios en 14 años). No toca el veredicto, solo cuándo un rojo es noticia.
+    - {kind: regime_risk_off, quiet_sessions: 20}
+    - {kind: invalidation_crossed}    # invalidation_rule de una POSICIÓN cumplida
+    - {kind: review_overdue}          # review_date de una tesis vencida
+    - {kind: exit_ladder_triggered}   # regla de salida de una POSICIÓN alcanzada
+    # Solo enmiendas recientes: la historia completa está en la página de Empresa, y el
+    # 10-Q/A de TMUS de 2020 no es noticia.
+    - {kind: amended_filing, lookback_days: 30}
+  # No es una regla evaluada: la dispara run_ingest.py con su propia lista de fallos. Es
+  # la vía por la que llega a Telegram un token de IBKR caducado (§4.1).
+  ingest_failure: true
+
+# --- Validación estadística (§8 fase 4, §9.7) ------------------------------------------
+# Protocolo fijado ANTES de mirar ningún resultado (2026-09-24) y no retocado después;
+# el razonamiento está en validation/backtest.py y RESEARCH.md §2.28.
+validation:
+  horizons_days: [30, 90, 180]   # los de §8
+  fdr_alpha: 0.10                 # Benjamini-Hochberg sobre toda la batería (el de cryptodash)
+  min_group: 8                    # fechas mínimas por grupo; por debajo, "insuficiente"
+  permutations: 10000
+  seed: 0                         # misma ejecución, mismos números
+  offsets: 10                     # rejillas alternativas para la estabilidad del signo
+  out_of_sample_component: equal_weight   # RSP/SPY: solo precios, probable antes de 2012

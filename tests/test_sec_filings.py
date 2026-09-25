@@ -16,6 +16,7 @@ import datetime as dt
 import json
 import pathlib
 
+import pandas as pd
 import pytest
 
 from core.config import Settings, load_settings
@@ -25,7 +26,9 @@ from ingest.sec_filings import (
     estimate_next_earnings,
     event_rows,
     filing_rows,
+    normalize_ticker,
     restatement_filings,
+    ticker_map,
 )
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sec_submissions_msft.json"
@@ -223,7 +226,11 @@ def test_the_ingester_reads_the_cache_and_fills_both_tables(tmp_path):
     assert ingester.fetch().empty, "filings and events are not time series"
     tables = ingester.fetch_tables()
 
-    assert set(tables) == {"filings", "events"}
+    assert set(tables) == {"filings", "events", "companies"}
+    assert tables["companies"] == [{
+        "cik": CIK, "ticker": "MSFT", "name": "MICROSOFT CORP", "sector": None,
+        "thesis_category": None, "first_seen": dt.date.today().isoformat(), "status": "active",
+    }], "SIC is not GICS: sector stays empty without a written card"
     assert len(tables["filings"]) > 50
     assert ingester.partial_failures() == []
 
@@ -261,3 +268,81 @@ def test_no_tracked_company_produces_no_tables(tmp_path):
     ingester = SecFilingsIngester(settings)
     assert ingester.fetch().empty
     assert ingester.fetch_tables() == {}
+
+
+# --- Held positions (phase 4: the alerts look at what is held) ---------------------------
+
+# The documented shape of www.sec.gov/files/company_tickers.json, trimmed to three rows.
+TICKER_MAP = {
+    "0": {"cik_str": 789019, "ticker": "MSFT", "title": "MICROSOFT CORP"},
+    "1": {"cik_str": 1067983, "ticker": "BRK-B", "title": "BERKSHIRE HATHAWAY INC"},
+    "2": {"cik_str": 1067983, "ticker": "BRK-A", "title": "BERKSHIRE HATHAWAY INC"},
+}
+
+
+def test_the_ticker_map_pads_the_cik_and_normalises_the_class_separator():
+    mapping = ticker_map(TICKER_MAP)
+    assert mapping["MSFT"] == CIK
+    assert mapping[normalize_ticker("BRK B")] == "0001067983", "IBKR writes 'BRK B'"
+    assert mapping[normalize_ticker("BRK.B")] == "0001067983"
+
+
+def held_database(tmp_path, tickers):
+    from db import loader
+
+    conn = loader.init_db(tmp_path / "held.db")
+    loader.upsert_observations(conn, pd.DataFrame([
+        {"source": "ibkr", "series_id": f"{t}:position_qty", "ts": "2026-09-01",
+         "ts_release": "2026-09-01", "value": 1.0} for t in tickers
+    ]))
+    return conn
+
+
+def test_a_held_position_without_a_card_is_fetched_too(tmp_path):
+    """TMUS and UBER were held with no card, so they had no earnings calendar at all —
+    the one thing the phase-4 alert on positions needs."""
+    settings = settings_with(tmp_path, [], {"SEC_USER_AGENT": "Nombre correo@x.com"})
+    ingester = SecFilingsIngester(settings)
+    ingester._base_url = "http://127.0.0.1:1"
+    ingester._ticker_map_url = "http://127.0.0.1:1/map"
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "company_tickers.json").write_text(json.dumps(TICKER_MAP), encoding="utf-8")
+    (cache / f"submissions_CIK{CIK}.json").write_text(
+        FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    conn = held_database(tmp_path, ["MSFT", "SPY"])
+    try:
+        ingester.attach_database(conn)
+    finally:
+        conn.close()
+    ingester.fetch()
+
+    assert ingester._companies == [(CIK, "MSFT")]
+    assert ingester.fetch_tables()["events"], "the held company got its calendar"
+    assert ingester.partial_failures() == [], "an ETF without a CIK is not a failure"
+
+
+def test_a_held_position_already_written_down_is_not_fetched_twice(tmp_path):
+    settings = settings_with(tmp_path, [{"ticker": "MSFT", "cik": CIK}],
+                             {"SEC_USER_AGENT": "Nombre correo@x.com"})
+    ingester = SecFilingsIngester(settings)
+    conn = held_database(tmp_path, ["MSFT"])
+    try:
+        ingester.attach_database(conn)   # no map needed, so no network attempted
+    finally:
+        conn.close()
+    assert ingester._companies == [(CIK, "MSFT")]
+
+
+def test_without_the_ticker_map_the_run_says_so(tmp_path):
+    settings = settings_with(tmp_path, [], {"SEC_USER_AGENT": "Nombre correo@x.com"})
+    ingester = SecFilingsIngester(settings)
+    ingester._ticker_map_url = "http://127.0.0.1:1/map"
+    ingester._retry_kwargs = {"attempts": 1}
+    conn = held_database(tmp_path, ["MSFT"])
+    try:
+        ingester.attach_database(conn)
+    finally:
+        conn.close()
+    assert any("company_tickers" in f for f in ingester.partial_failures())

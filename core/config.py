@@ -191,7 +191,9 @@ def validate_theses(companies: list[dict[str, Any]]) -> None:
             listing the offending ticker and fields.
     """
     problems: list[str] = []
+    seen_rules: set[str] = set()
     for entry in companies:
+        problems.extend(_exit_ladder_problems(entry, seen_rules))
         missing = [
             f for f in THESIS_REQUIRED_FIELDS if not str(entry.get(f) or "").strip()
         ]
@@ -208,6 +210,42 @@ def validate_theses(companies: list[dict[str, Any]]) -> None:
             "without an invalidation criterion does not enter the universe):\n  "
             + "\n  ".join(problems)
         )
+
+
+EXIT_KINDS = ("take_profit", "thesis_invalidation", "rebalance")
+EXIT_REQUIRED_FIELDS = ("rule_id", "kind", "trigger", "action")
+
+
+def _exit_ladder_problems(entry: dict[str, Any], seen: set[str]) -> list[str]:
+    """What is wrong with a card's ``exit_ladder``, if anything (section 2, level 4).
+
+    Exit rules are written *before* buying, so they are held to the thesis card's standard:
+    the prose is mandatory, the structured ``rule`` optional. A duplicated ``rule_id`` is
+    rejected because it is the rule's key in ``exit_ladder`` and in the alert dedup — two
+    rules sharing it would silence one another.
+    """
+    ladder = entry.get("exit_ladder")
+    if ladder is None:
+        return []
+    label = entry.get("ticker") or entry.get("cik") or "<unnamed>"
+    if not isinstance(ladder, list):
+        return [f"{label}: exit_ladder must be a list"]
+    problems: list[str] = []
+    for rule in ladder:
+        if not isinstance(rule, dict):
+            problems.append(f"{label}: exit_ladder entries must be mappings")
+            continue
+        missing = [f for f in EXIT_REQUIRED_FIELDS if not str(rule.get(f) or "").strip()]
+        if missing:
+            problems.append(f"{label}: exit rule missing {missing}")
+            continue
+        if rule["kind"] not in EXIT_KINDS:
+            problems.append(f"{label}: exit rule {rule['rule_id']} has kind "
+                            f"{rule['kind']!r}; use one of {list(EXIT_KINDS)}")
+        if rule["rule_id"] in seen:
+            problems.append(f"{label}: duplicated exit rule_id {rule['rule_id']!r}")
+        seen.add(str(rule["rule_id"]))
+    return problems
 
 
 WATCHLIST_REQUIRED_FIELDS = ("ticker", "cik")

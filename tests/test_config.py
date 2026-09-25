@@ -228,3 +228,38 @@ def test_a_candidate_gets_its_prices_downloaded_too(tmp_path, monkeypatch):
 
     assert "HIMS" in PricesIngester.tickers_for(config.load_settings())
     config.load_settings.cache_clear()
+
+
+# --- Exit rules (section 2, level 4; phase 4) --------------------------------------------
+
+
+def _card(**extra):
+    card = {"ticker": "AAPL", "cik": "0000320193", "thesis": "t", "value_accrual": "v",
+            "key_metric": "k", "invalidation": "i", "review_date": "2027-01-01"}
+    return {**card, **extra}
+
+
+def test_an_exit_rule_needs_its_prose():
+    rule = {"rule_id": "a1", "kind": "take_profit", "trigger": "", "action": "vender"}
+    with pytest.raises(ValueError, match="exit rule missing"):
+        config.validate_theses([_card(exit_ladder=[rule])])
+
+
+def test_an_exit_rule_kind_is_one_of_three():
+    rule = {"rule_id": "a1", "kind": "stop_loss", "trigger": "t", "action": "a"}
+    with pytest.raises(ValueError, match="stop_loss"):
+        config.validate_theses([_card(exit_ladder=[rule])])
+
+
+def test_exit_rule_ids_are_unique_across_cards():
+    """The id keys the table and the alert dedup: two rules sharing it silence each other."""
+    rule = {"rule_id": "dup", "kind": "rebalance", "trigger": "t", "action": "a"}
+    other = _card(ticker="MSFT", cik="0000789019", exit_ladder=[rule])
+    with pytest.raises(ValueError, match="duplicated"):
+        config.validate_theses([_card(exit_ladder=[rule]), other])
+
+
+def test_a_complete_exit_rule_loads():
+    rule = {"rule_id": "a1", "kind": "take_profit", "trigger": "t", "action": "a",
+            "rule": {"metric": "weight", "operator": ">", "threshold": 0.12}}
+    config.validate_theses([_card(exit_ladder=[rule])])

@@ -67,6 +67,30 @@ def retry(
     raise RuntimeError("retry: exhausted attempts without returning")
 
 
+def held_tickers(conn: Any) -> list[str]:
+    """Tickers open in the latest IBKR statement, read from what the ingester stored.
+
+    For ingesters deciding *what* to fetch (:meth:`Ingester.attach_database`): what is held
+    is read from the account, never from config (section 5.1). A fresh database has no
+    rows, which is an empty list, not a failure.
+
+    "Latest statement" is dated by the daily NAV too, so a position sold in full — which
+    the next statement simply omits — stops counting (``transform.portfolio.latest_positions``
+    applies the same rule).
+    """
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT series_id FROM observations "
+            "WHERE source = 'ibkr' AND series_id LIKE '%:position_qty' AND ts = ("
+            "  SELECT MAX(ts) FROM observations WHERE source = 'ibkr' "
+            "  AND (series_id = 'NAV:total' OR series_id LIKE '%:position_qty'))"
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001 — no table yet means nothing held yet
+        log.debug("Could not read held positions: %s", exc)
+        return []
+    return sorted({str(row[0]).rsplit(":", 1)[0] for row in rows})
+
+
 def empty_observations() -> pd.DataFrame:
     """An empty frame with the observation contract, for the nothing-to-do path."""
     return pd.DataFrame(columns=OBSERVATION_COLUMNS)

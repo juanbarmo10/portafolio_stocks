@@ -17,6 +17,7 @@ import pathlib
 import pandas as pd
 import pytest
 
+from transform import portfolio
 from transform.portfolio import (
     average_cost,
     concentration,
@@ -331,3 +332,48 @@ def test_concentration_without_any_thesis_card_says_so(account):
     ])
     grouped = concentration(valuation(positions, prices), None)
     assert list(grouped["group"]) == ["sin clasificar"]
+
+
+# --- A position sold in full (found 2026-09-24, before a sale triggered it) --------------
+
+
+def _account(rows):
+    return pd.DataFrame([
+        {"source": "ibkr", "series_id": sid, "ts": ts, "ts_release": ts, "value": value}
+        for sid, ts, value in rows
+    ])
+
+
+def test_a_position_absent_from_the_latest_statement_is_closed():
+    """Flex lists what is open and says nothing about what was sold, so the sold one keeps
+    its old row as its last word."""
+    account = _account([
+        ("NAV:total", "2026-09-16", 300.0), ("NAV:total", "2026-10-01", 310.0),
+        ("TMUS:position_qty", "2026-09-16", 1.0), ("UBER:position_qty", "2026-09-16", 2.0),
+        ("UBER:position_qty", "2026-10-01", 2.0),
+    ])
+    assert list(portfolio.latest_positions(account)["ticker"]) == ["UBER"]
+
+
+def test_everything_sold_is_an_empty_portfolio_not_the_last_one():
+    """Dated by the NAV, which every statement carries even with nothing held."""
+    account = _account([
+        ("NAV:total", "2026-09-16", 300.0), ("NAV:total", "2026-10-01", 290.0),
+        ("TMUS:position_qty", "2026-09-16", 1.0),
+    ])
+    assert portfolio.latest_positions(account).empty
+
+
+def test_held_tickers_for_the_ingesters_follow_the_same_rule(tmp_path):
+    from db import loader
+    from ingest.base import held_tickers
+
+    conn = loader.init_db(tmp_path / "held.db")
+    try:
+        loader.upsert_observations(conn, _account([
+            ("NAV:total", "2026-10-01", 310.0),
+            ("TMUS:position_qty", "2026-09-16", 1.0), ("UBER:position_qty", "2026-10-01", 2.0),
+        ]))
+        assert held_tickers(conn) == ["UBER"]
+    finally:
+        conn.close()

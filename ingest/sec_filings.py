@@ -24,6 +24,12 @@ There is no free feed of *future* earnings dates, so this module builds one hone
 Estimated is never rendered as confirmed (section 12): ``is_estimated`` exists in the
 schema precisely so the difference survives all the way to the screen.
 
+**Held positions are fetched too**, even without a card in config. What is held is read
+from the account (section 5.1), and a position is exactly where an earnings date or an
+amended 10-Q matters most — the phase-4 alerts look at positions. The ticker is resolved to
+a CIK through the SEC's own ``company_tickers.json`` (section 4.2); a ticker that does not
+resolve (an ETF, typically) stays unresolved with a warning, never guessed (section 9.3).
+
 fetch() -> empty observations; nothing here is a time series.
 fetch_tables() -> {"filings": [...], "events": [...]}
 """
@@ -40,7 +46,7 @@ import requests
 
 from core.config import Settings
 from core.logging_setup import get_logger
-from ingest.base import Ingester, empty_observations, retry
+from ingest.base import Ingester, empty_observations, held_tickers, retry
 from ingest.sec_xbrl import SecRequestError
 
 log = get_logger(__name__)
@@ -60,6 +66,46 @@ FINANCIAL_FORMS = frozenset({"10-K", "10-Q", "20-F", "40-F", "6-K"})
 # 52 weeks. Preserves the weekday, which "+1 year" does not — and results land midweek.
 YEAR_OF_WEEKS = dt.timedelta(days=364)
 QUARTERS_PER_YEAR = 4
+
+
+def normalize_ticker(ticker: str) -> str:
+    """One spelling for a ticker across sources: the SEC writes ``BRK-B``, IBKR ``BRK B``."""
+    return str(ticker).strip().upper().replace(".", "-").replace(" ", "-")
+
+
+def ticker_map(payload: Mapping[str, Any]) -> dict[str, str]:
+    """``{TICKER: ten-digit CIK}`` from the SEC's ``company_tickers.json``.
+
+    The file maps *today's* tickers, which is exactly what a current holding carries.
+    It would be the wrong tool for a historical ticker (section 9.3): tickers are reused.
+    """
+    out: dict[str, str] = {}
+    for row in payload.values():
+        out.setdefault(normalize_ticker(row["ticker"]), str(int(row["cik_str"])).zfill(10))
+    return out
+
+
+def company_row(
+    submissions: Mapping[str, Any], cik: str, ticker: str, card: Mapping[str, Any] | None,
+    today: str,
+) -> dict[str, Any]:
+    """A ``companies`` row: the CIK with the ticker it is known by today.
+
+    The registry is what lets any later reader go from a held ticker to its CIK without
+    guessing (section 9.3). Sector and thesis category come only from a written card: the
+    SEC's SIC code is not GICS, and copying it into ``sector`` would pass one off as the
+    other.
+    """
+    card = card or {}
+    return {
+        "cik": cik,
+        "ticker": ticker,
+        "name": submissions.get("name"),
+        "sector": card.get("sector"),
+        "thesis_category": card.get("thesis_category"),
+        "first_seen": today,
+        "status": "active",
+    }
 
 
 def _archive_url(cik: str, accession: str, document: str) -> str | None:
@@ -233,6 +279,13 @@ class SecFilingsIngester(Ingester):
         from ingest.sec_xbrl import SecXbrlIngester  # noqa: PLC0415 — shared company list
 
         self._companies = SecXbrlIngester.companies_for(settings)
+        self._cards = {
+            str(card["cik"]).zfill(10): card
+            for card in settings.researched_companies if card.get("cik")
+        }
+        self._ticker_map_url = str(
+            cfg.get("ticker_map_url", "https://www.sec.gov/files/company_tickers.json")
+        )
         self._tables: dict[str, list[dict[str, Any]]] = {}
         self._failures: list[str] = []
 
@@ -245,13 +298,18 @@ class SecFilingsIngester(Ingester):
 
     def _download(self, cik: str) -> dict[str, Any]:
         """Submissions document, from cache when fresh, from EDGAR otherwise."""
-        path = self._cache_dir / f"submissions_CIK{cik}.json"
+        return self._cached_json(
+            self._cache_dir / f"submissions_CIK{cik}.json",
+            SUBMISSIONS_URL.format(base=self._base_url, cik=cik),
+            f"CIK {cik}",
+        )
+
+    def _cached_json(self, path: Path, url: str, label: str) -> dict[str, Any]:
+        """A SEC JSON document: fresh cache, else download, else the expired copy (warned)."""
         if path.exists():
             age = dt.datetime.now() - dt.datetime.fromtimestamp(path.stat().st_mtime)
             if age < self._cache_ttl:
                 return json.loads(path.read_text(encoding="utf-8"))
-
-        url = SUBMISSIONS_URL.format(base=self._base_url, cik=cik)
 
         def call() -> dict[str, Any]:
             response = requests.get(
@@ -271,19 +329,57 @@ class SecFilingsIngester(Ingester):
             payload = retry(call, **self._retry_kwargs)
         except Exception as exc:
             if path.exists():
-                self._failures.append(f"CIK {cik}: using expired cache ({exc})")
-                log.warning("CIK %s: download failed (%s); using the expired cache copy.",
-                            cik, exc, extra={"source": SOURCE})
+                self._failures.append(f"{label}: using expired cache ({exc})")
+                log.warning("%s: download failed (%s); using the expired cache copy.",
+                            label, exc, extra={"source": SOURCE})
                 return json.loads(path.read_text(encoding="utf-8"))
             raise
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
         return payload
 
+    def attach_database(self, conn: Any) -> None:
+        """Add the held positions that no card in config names (see the module docstring)."""
+        known = {normalize_ticker(ticker) for _, ticker in self._companies}
+        missing = [t for t in held_tickers(conn) if normalize_ticker(t) not in known]
+        if not missing:
+            return
+        try:
+            mapping = ticker_map(self._cached_json(
+                self._cache_dir / "company_tickers.json", self._ticker_map_url,
+                "company_tickers.json",
+            ))
+        except Exception as exc:
+            # Without the map the held positions get no calendar, and the earnings alert
+            # would go quiet on them. That must reach the exit code, not just the log.
+            log.exception("Could not load the SEC ticker map.", extra={"source": SOURCE})
+            self._failures.append(f"company_tickers.json: {exc}")
+            return
+        known_ciks = {cik for cik, _ in self._companies}
+        added, unresolved = [], []
+        for ticker in missing:
+            cik = mapping.get(normalize_ticker(ticker))
+            if cik is None:
+                unresolved.append(ticker)
+            elif cik not in known_ciks:
+                self._companies.append((cik, ticker))
+                known_ciks.add(cik)
+                added.append(ticker)
+        if added:
+            log.info("Adding %d held position(s) to the filings download: %s",
+                     len(added), added, extra={"source": SOURCE})
+        if unresolved:
+            # An ETF has no company CIK, and that is not a failure. Guessing one would be
+            # (section 9.3), so it is only said.
+            log.warning("Held ticker(s) without a SEC company CIK, left unresolved: %s",
+                        unresolved, extra={"source": SOURCE})
+
     def fetch(self) -> pd.DataFrame:
         """Collect filings and events. Nothing here is a time series, so no observations."""
         filings: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
+        companies: list[dict[str, Any]] = []
+        today = dt.date.today().isoformat()
 
         for cik, ticker in self._companies:
             try:
@@ -297,6 +393,7 @@ class SecFilingsIngester(Ingester):
             company_events = event_rows(submissions, cik, ticker, self._history)
             filings.extend(company_filings)
             events.extend(company_events)
+            companies.append(company_row(submissions, cik, ticker, self._cards.get(cik), today))
 
             restatements = restatement_filings(company_filings)
             if restatements:
@@ -317,7 +414,7 @@ class SecFilingsIngester(Ingester):
                 extra={"source": SOURCE},
             )
 
-        self._tables = {"filings": filings, "events": events}
+        self._tables = {"filings": filings, "events": events, "companies": companies}
         return empty_observations()
 
     def fetch_tables(self) -> dict[str, list[dict[str, Any]]]:

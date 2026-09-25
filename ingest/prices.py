@@ -44,7 +44,7 @@ import pandas as pd
 
 from core.config import Settings
 from core.logging_setup import get_logger
-from ingest.base import Ingester, empty_observations, retry
+from ingest.base import held_tickers, Ingester, empty_observations, retry
 
 log = get_logger(__name__)
 
@@ -248,15 +248,7 @@ class PricesIngester(Ingester):
         is written — section 5.3 flags that separately, it does not excuse leaving the
         position unpriced.
         """
-        try:
-            rows = conn.execute(
-                "SELECT DISTINCT series_id FROM observations "
-                "WHERE source = 'ibkr' AND series_id LIKE '%:position_qty'"
-            ).fetchall()
-        except Exception as exc:  # a fresh database has no rows, not a failure
-            log.debug("Could not read held positions: %s", exc)
-            return
-        held = [str(row[0]).rsplit(":", 1)[0] for row in rows]
+        held = held_tickers(conn)
         added = [ticker for ticker in held if ticker not in self._tickers]
         if added:
             self._tickers.extend(added)

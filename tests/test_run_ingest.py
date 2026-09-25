@@ -187,3 +187,34 @@ def test_partial_failure_loads_the_good_data_and_still_fails_the_run(isolated_db
         assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_a_failed_source_is_recorded_as_an_alert(isolated_db, monkeypatch):
+    """Phase 4: "any ingester failing" alerts. Without a bot it is recorded as undelivered,
+    so it still goes out on the first run that has one — and the exit code is unchanged."""
+    monkeypatch.setattr(run_ingest, "INGESTERS", {
+        "ibkr": _stub(error=RuntimeError("Flex token expired")),
+    })
+    assert run_ingest.main([]) == 1
+
+    import json
+
+    from db import loader
+    conn = loader.connect(isolated_db)
+    try:
+        rows = conn.execute("SELECT alert_id, payload FROM alerts_log").fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1 and rows[0][0].startswith("ingest_failure:ibkr:")
+    assert json.loads(rows[0][1])["delivered"] is False
+
+
+def test_a_broken_alert_path_does_not_mask_the_ingest_result(isolated_db, monkeypatch):
+    import alerts.rules
+
+    def explode(*a, **k):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(alerts.rules, "dispatch", explode)
+    monkeypatch.setattr(run_ingest, "INGESTERS", {"x": _stub(error=RuntimeError("boom"))})
+    assert run_ingest.main([]) == 1

@@ -37,7 +37,8 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from transform.breadth import equal_weight_ratio, sector_breadth
+from transform.adjustments import split_adjusted, total_return_index
+from transform.breadth import equal_weight_ratio, sector_breadth, splits_by_ticker, wide_closes
 
 RISK_ON = "risk_on"
 NEUTRAL = "neutral"
@@ -105,6 +106,91 @@ class RegimeReading:
     neutral: int
     available: int
     votes: list[Vote]
+
+
+@dataclass(frozen=True)
+class RegimeBuild:
+    """Everything the light is made of, assembled once for every reader.
+
+    The market page, the risk-off alert and the validation battery all need the same
+    verdict. Assembling it in three places would let them drift apart silently — a page
+    saying red while the alert stays quiet is worse than either being wrong alone.
+    """
+
+    rules: list[Rule]
+    components: dict[str, pd.DataFrame]
+    votes: dict[str, pd.DataFrame]
+    frame: pd.DataFrame
+    calendar: pd.DatetimeIndex
+    closes: pd.DataFrame
+    splits: dict[str, Any]
+    benchmark: pd.Series            # cap-weighted index, split-adjusted: price only
+    benchmark_total: pd.Series      # the same with dividends added on their dates (§9.1)
+
+
+def regime_tickers(level2: Mapping[str, Any]) -> list[str]:
+    """The ETFs the light reads, from the level-2 config."""
+    sb, ew, rot = level2["sector_breadth"], level2["equal_weight"], level2["rotation"]
+    return list(dict.fromkeys([*sb["sectors"], ew["equal"], ew["cap"],
+                               *rot["defensive"], *rot["cyclical"]]))
+
+
+def build(
+    fred: pd.DataFrame,
+    prices: pd.DataFrame,
+    actions: pd.DataFrame,
+    level2: Mapping[str, Any],
+    *,
+    start: str = "1999-01-01",
+) -> RegimeBuild | None:
+    """Assemble the light from stored rows. ``None`` when the inputs are not there yet.
+
+    Args:
+        fred: FRED observations ``[series_id, ts, ts_release, value]``.
+        prices: Stored raw closes of :func:`regime_tickers` (``source='yfinance'``).
+        actions: Rows of ``corporate_actions``.
+        level2: ``panel.level2`` from config.
+        start: First session on the calendar.
+    """
+    if fred.empty or prices.empty:
+        return None
+    cfg, sb, ew = level2["regime"], level2["sector_breadth"], level2["equal_weight"]
+    closes, splits = wide_closes(prices), splits_by_ticker(actions)
+    if ew["cap"] not in closes.columns:
+        return None
+    calendar = closes[ew["cap"]].dropna().loc[start:].index
+    rules = rules_from_config(cfg)
+    comps = component_frames(
+        rules, fred, closes, splits, calendar, sectors=sb["sectors"],
+        equal=ew["equal"], cap=ew["cap"], breadth_window=sb["window"],
+        min_window_fraction=cfg["min_window_fraction"],
+    )
+    all_votes = {
+        r.key: votes(comps[r.key], r, window=cfg["window"],
+                     min_window_fraction=cfg["min_window_fraction"],
+                     trend_dead_zone_sd=cfg["trend_dead_zone_sd"],
+                     max_staleness_days=cfg["max_staleness_days"])
+        for r in rules
+    }
+    frame = regime_frame(all_votes, min_components=cfg["min_components"])
+
+    cap_rows = prices[prices["series_id"] == f"{ew['cap']}:close_raw"].assign(
+        ts=lambda d: d["ts"].str[:10])
+    # A far cut-off applies every split. Harmless for returns, which only ever divide two
+    # bars of the same series; the as-of discipline matters for levels (section 9.1).
+    far = "2099-01-01"
+
+    def indexed(frame_: pd.DataFrame) -> pd.Series:
+        series = frame_.set_index("ts")["value"].astype(float)
+        series.index = pd.to_datetime(series.index)
+        return series
+
+    return RegimeBuild(
+        rules=rules, components=comps, votes=all_votes, frame=frame, calendar=calendar,
+        closes=closes, splits=splits,
+        benchmark=indexed(split_adjusted(cap_rows, actions, ew["cap"], far)),
+        benchmark_total=indexed(total_return_index(cap_rows, actions, ew["cap"], far)),
+    )
 
 
 # --- Building each component as it was known on each date ---------------------------
