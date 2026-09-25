@@ -331,3 +331,46 @@ def test_the_page_says_at_what_price(company_app):
     assert metrics["Capitalización (USD)"] != "—"
     assert any("Tasa de descuento" in pd.DataFrame(d.value).columns for d in app.dataframe), \
         "the reverse DCF grid is on the page"
+
+
+# --- Short interest (2026-09-25) -------------------------------------------------------------
+
+
+def seed_short_interest(db_path, *, published: str = "2026-09-10") -> None:
+    conn = loader.init_db(db_path)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            {"source": "finra", "series_id": "MSFT:short_interest", "ts": "2026-08-29",
+             "ts_release": published, "value": 60_000_000.0},
+            {"source": "finra", "series_id": "MSFT:days_to_cover", "ts": "2026-08-29",
+             "ts_release": published, "value": 2.5},
+        ]))
+    finally:
+        conn.close()
+
+
+def test_short_interest_is_a_fact_of_the_company(company_app):
+    seed_short_interest(company_app)
+    metrics = {m.label: m.value for m in render().metric}
+    assert metrics["Acciones en corto"] == "60,00 M"
+    assert metrics["Días para cubrir"] == "2,50"
+    assert metrics["De las acciones diluidas"].endswith("%"), "over the valuation's count"
+
+
+def test_short_interest_not_yet_published_is_not_shown(company_app):
+    """The derived publication date is the point-in-time key, as for everything else."""
+    seed_short_interest(company_app, published="2099-01-01")
+    assert "Acciones en corto" not in {m.label for m in render().metric}
+
+
+# --- Quarter by quarter and the balance sheet (2026-09-25) ------------------------------------
+
+
+def test_the_page_lays_out_the_quarters_and_the_balance_sheet(company_app):
+    app = render()
+    assert "Trimestre a trimestre" in rendered_text(app)
+    grid = next(pd.DataFrame(d.value) for d in app.dataframe
+                if "Crecimiento interanual" in pd.DataFrame(d.value).index)
+    assert len(grid.columns) == 8 and list(grid.columns) == sorted(grid.columns)
+    metrics = {m.label: m.value for m in app.metric}
+    assert metrics["Caja neta (USD)"] != "—"

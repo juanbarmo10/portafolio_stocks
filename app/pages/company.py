@@ -44,6 +44,7 @@ from transform import fundamentals as fun
 from transform import portfolio as port
 from transform import thesis as th
 from transform import price_action as pa
+from transform import quarterly as qt
 from transform import valuation as val
 from transform.adjustments import split_adjusted, total_return_index
 from transform import value_accrual as va
@@ -341,6 +342,69 @@ if not revenue_series.empty:
         width="stretch",
     )
 
+# Quarter by quarter (§15.1.3): the TTM flattens the trend and the operating leverage,
+# which is what an analyst reads first.
+table = qt.quarter_table(observations, cik, as_of_iso, quarters=8)
+if not table.empty:
+    st.markdown("**Trimestre a trimestre**")
+    lines = [
+        ("Ingresos", "revenue", compact_amount),
+        ("Crecimiento interanual", "revenue_growth", pct),
+        ("Margen bruto", "gross_margin", pct),
+        ("I+D / ingresos", "rd_share", pct),
+        ("Marketing / ingresos", "marketing_share", pct),
+        ("Margen operativo", "operating_margin", pct),
+        ("Margen neto", "net_margin", pct),
+        ("Margen FCF", "fcf_margin", pct),
+        ("SBC / ingresos", "sbc_share", pct),
+    ]
+    # A line no quarter has (HIMS files its R&D under its own tag, outside companyfacts)
+    # is left out instead of shown as a row of dashes.
+    shown = [(label, key, fmt) for label, key, fmt in lines if table[key].notna().any()]
+    # Metrics as rows, quarters as columns, each cell formatted by its row's formatter.
+    grid = pd.DataFrame(
+        [[fmt(None if pd.isna(v) else float(v)) for v in table[key]]
+         for _, key, fmt in shown],
+        index=[label for label, _, _ in shown], columns=list(table["quarter_end"]),
+    )
+    st.dataframe(grid, width="stretch")
+    missing = [label for label, key, _ in lines if table[key].isna().all()]
+    st.caption(
+        "Cada columna es un trimestre tal como se conocía a la fecha elegida; los Q4 y los "
+        "trimestres escondidos en acumulados se derivan (§9.12, §9.14). El crecimiento es "
+        "**interanual** — contra el mismo trimestre del año anterior, no contra el anterior, "
+        "que mezclaría la estacionalidad. Margen bruto solo si la empresa presenta "
+        "`GrossProfit`: restar el coste de ventas no da lo mismo en todas."
+        + (f" No presentadas en XBRL estándar: {', '.join(missing)}." if missing else "")
+    )
+
+sheet = qt.balance(observations, cik, as_of_iso)
+if sheet.assets is not None:
+    st.markdown(f"**Balance** · al {sheet.balance_date}")
+    row = st.columns(4)
+    row[0].metric("Caja e inversiones a corto (USD)", compact_amount(sheet.liquidity),
+                  help=f"Efectivo {reported_amount(sheet.cash)}; inversiones a corto "
+                       f"{reported_amount(sheet.short_term_investments)}.")
+    row[1].metric("Deuda (USD)", compact_amount(sheet.debt),
+                  help=f"A corto {reported_amount(sheet.debt_current)}; a largo "
+                       f"{reported_amount(sheet.long_term_debt)}, convertibles incluidos: "
+                       "un convertible es deuda y, si convierte, dilución futura.")
+    row[2].metric("Caja neta (USD)", compact_amount(sheet.net_cash),
+                  help="Caja e inversiones menos deuda. Negativa = más deuda que caja.")
+    row[3].metric("Patrimonio (USD)", compact_amount(sheet.equity),
+                  help=f"Activos {reported_amount(sheet.assets)} − pasivos "
+                       f"{reported_amount(sheet.liabilities)}.")
+    row = st.columns(4)
+    row[0].metric("Deuda / patrimonio", number(fun.ratio(sheet.debt, sheet.equity))
+                  if sheet.equity and sheet.equity > 0 else MISSING,
+                  help="Sin definir con patrimonio negativo o nulo.")
+    row[1].metric("Cobertura de intereses", number(sheet.interest_coverage, decimals=1),
+                  help="Beneficio operativo TTM / gasto por intereses TTM: cuántas veces "
+                       "cubre el negocio lo que paga por su deuda. Vacía si no presenta "
+                       "intereses o pierde dinero.")
+    st.caption("Solo cifras del último balance presentado: una partida que no aparece en él "
+               "queda vacía en vez de arrastrar la de un balance anterior.")
+
 # --- 3. Valuation ---------------------------------------------------------------------
 
 VAL = settings.raw.get("panel", {}).get("valuation", {})
@@ -554,6 +618,54 @@ else:
                "posición abierta justo antes de resultados (§2: 5 días de margen)."
                if typical is not None else "")
         )
+
+# Short interest (§15.1.7): a fact about the company, so it lives here and not only in the
+# private market block. The public copy carries no FINRA rows (db/public_sync.py: the
+# series cover the held tickers too), so publicly the block simply does not appear.
+finra = app_data.observations("finra", app_data.db_mtime())
+short = macro_latest(finra, f"{ticker}:short_interest", pd.Timestamp(as_of_iso)) \
+    if not finra.empty else None
+if short is not None and short.value is not None:
+    st.markdown("**Interés corto**")
+    cover = macro_latest(finra, f"{ticker}:days_to_cover", pd.Timestamp(as_of_iso))
+    revised = macro_latest(finra, f"{ticker}:short_interest:revised", pd.Timestamp(as_of_iso))
+    shares_now = now.shares if now is not None else None
+    row = st.columns(4)
+    row[0].metric("Acciones en corto", compact_amount(short.value))
+    row[1].metric("De las acciones diluidas", pct(short.value / shares_now)
+                  if shares_now else MISSING,
+                  help="Sobre el recuento diluido de la valoración, no sobre el *float*: "
+                       "la SEC no publica el float en sus datos estructurados.")
+    row[2].metric("Días para cubrir", number(cover.value),
+                  help="Acciones en corto / volumen medio diario: cuántas sesiones haría "
+                       "falta para recomprarlas todas.")
+    row[3].metric("Liquidación", short.ts or MISSING)
+    history = finra[finra["series_id"] == f"{ticker}:short_interest"]
+    history = history[history["ts_release"].astype(str).str[:10] <= as_of_iso]
+    if shares_now and len(history) > 4:
+        frame = pd.DataFrame({"date": pd.to_datetime(history["ts"].astype(str).str[:10]),
+                              "corto": history["value"].astype(float) / shares_now})
+        frame = frame[frame["date"] >= pd.Timestamp(as_of_iso) - pd.DateOffset(years=2)]
+        altair_chart(
+            alt.Chart(frame).mark_line(strokeWidth=1.5, color=SERIES_COLORS[0]).encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("corto:Q", title="En corto, % de las diluidas de hoy",
+                        axis=alt.Axis(format="%")),
+                tooltip=[alt.Tooltip("date:T", title="Liquidación"),
+                         alt.Tooltip("corto:Q", title="En corto", format=".1%")],
+            ).properties(height=160),
+            width="stretch",
+        )
+    st.caption(
+        "FINRA, dos veces al mes. Publicado (fecha **derivada**, tarde a propósito): "
+        f"{short.ts_release or MISSING}. "
+        + ("⚠️ FINRA revisó esta cifra después de publicarla. " if revised.value else "")
+        + "Mucho interés corto no es una señal de venta ni de compra: dice que hay "
+          "inversores apostando dinero a que la tesis contraria es la buena — conviene saber "
+          "cuál es. La historia usa el recuento de hoy como denominador."
+    )
+elif not public:
+    st.caption("Sin interés corto de esta empresa (`python run_ingest.py --only short_interest`).")
 
 # --- 5. Value accrual -----------------------------------------------------------------
 

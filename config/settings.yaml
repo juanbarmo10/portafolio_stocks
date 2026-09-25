@@ -225,12 +225,47 @@ sources:
         # operativos como deuda es una decisión discutible, y `invested_capital()` ya se
         # declara una aproximación tosca.
         tags: [LongTermDebtNoncurrent, LongTermDebt, ConvertibleDebtNoncurrent]
+      # --- Tabla trimestral y balance (§15.1.3, 2026-09-25). Verificados contra los
+      # companyfacts de MSFT, HIMS y AT&T antes de escribirlos, no de memoria.
+      # Margen bruto SOLO de `GrossProfit`: no se deriva restando el coste de ventas, porque
+      # hay empresas (AT&T) cuyo coste de ventas excluye la amortización y el "bruto" que
+      # saldría no sería comparable. Sin GrossProfit presentado, el margen bruto es None.
+      gross_profit:
+        kind: duration
+        unit: USD
+        tags: [GrossProfit]
+      research_development:       # HIMS lo presenta con etiqueta propia: fuera de companyfacts
+        kind: duration
+        unit: USD
+        tags: [ResearchAndDevelopmentExpense, ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost]
+      marketing:                  # MSFT: SellingAndMarketing; HIMS: MarketingExpense
+        kind: duration
+        unit: USD
+        tags: [SellingAndMarketingExpense, MarketingExpense, MarketingAndAdvertisingExpense]
+      general_admin:
+        kind: duration
+        unit: USD
+        tags: [GeneralAndAdministrativeExpense]
+      # SG&A NO es sinónimo de G&A: incluye las ventas (y a veces el marketing). Ponerlo
+      # como alternativa haría que la misma fila cambiara de contenido al cambiar la
+      # etiqueta — HIMS presentó SG&A hasta 2022 y G&A después.
+      selling_general_admin:
+        kind: duration
+        unit: USD
+        tags: [SellingGeneralAndAdministrativeExpense]
+      interest_expense:           # MSFT pasa de InterestExpense a ...Nonoperating en 2023
+        kind: duration
+        unit: USD
+        tags: [InterestExpense, InterestExpenseNonoperating, InterestExpenseDebt]
+      debt_current:
+        kind: instant
+        unit: USD
+        tags: [LongTermDebtCurrent, DebtCurrent, ConvertibleNotesPayableCurrent]
+      short_term_investments:
+        kind: instant
+        unit: USD
+        tags: [ShortTermInvestments, MarketableSecuritiesCurrent, AvailableForSaleSecuritiesDebtSecuritiesCurrent]
 
-    # Clasificación de la duración de un hecho, en días. companyfacts mezcla trimestres
-    # (3 meses) con acumulados YTD (6 y 9) y con el año (12) en el MISMO concepto, y
-    # todos comparten `end`. Meter un YTD en la serie trimestral sería un error enorme y
-    # perfectamente plausible a la vista. Lo que no cae en ninguna ventana se descarta y
-    # se cuenta — nunca en silencio.
     # Clasificación de duraciones. `companyfacts` mezcla hechos de 3, 6, 9 y 12 meses bajo
     # el mismo concepto y compartiendo `end`; sin separarlos, un acumulado YTD entraría en
     # la serie trimestral y la serie resultante sería plausible y falsa (§2.11).

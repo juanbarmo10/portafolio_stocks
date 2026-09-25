@@ -382,9 +382,10 @@ app/        Streamlit multipágina (st.navigation)
               ├── 📈 Mercado   nivel 2 y el semáforo de régimen, con el voto de cada señal
               ├── 🔎 Cribado   trimestral: qué empresas del S&P 500 merecen una ficha
               │                (captura de valor y precio; solo local)
-              ├── 🏢 Empresa   nivel 3: fundamentales, valoración (múltiplos, DCF
-              │                inverso), el precio frente al mercado y su reacción a
-              │                resultados, y captura de valor, contra su propia tesis
+              ├── 🏢 Empresa   nivel 3: fundamentales trimestre a trimestre y balance,
+              │                valoración (múltiplos, DCF inverso), el precio frente al
+              │                mercado y su reacción a resultados, y captura de valor,
+              │                contra su propia tesis
               ├── 🔬 Cartera   nivel 4: posiciones, reconciliación contra el NAV y
               │                rentabilidad sin aportes frente al S&P 500 (solo local)
               ├── 📋 Desplegar nivel 4: puertas antes de comprar, el tramo y el coste

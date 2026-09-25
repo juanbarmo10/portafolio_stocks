@@ -689,3 +689,135 @@ def performance(
     curves = pd.DataFrame({"date": series.index, "account": account_index.to_numpy() * 100,
                            "benchmark": bench_index.to_numpy() * 100})
     return summary, curves
+
+
+# --- Money-weighted return, attribution and the cost of cash (§15.1.5, 2026-09-25) -----
+
+
+@dataclass(frozen=True)
+class MoneyWeighted:
+    """The internal rate of return of the account's own cash flows.
+
+    Where the time-weighted return (:class:`Performance`) measures the decisions, this one
+    measures **the investor's experience**: a deposit that arrived just before a fall weighs
+    more than one that arrived after it. The two differ exactly by the timing of the money.
+
+    Attributes:
+        annual_rate: The IRR, annualized (``(1 + r)^(365/days)`` convention).
+        period_return: The same rate over the window's length — the figure to read when the
+            window is shorter than a year, because annualizing a few months magnifies noise.
+        days: Length of the window.
+    """
+
+    annual_rate: float
+    period_return: float
+    days: int
+
+
+def money_weighted_return(nav: pd.DataFrame, flows: pd.Series) -> MoneyWeighted | None:
+    """IRR of: −first NAV, −each deposit (+ each withdrawal), +last NAV.
+
+    Solved by bisection on the annual rate in [−99 %, +1000 %]; ``None`` with fewer than
+    two NAV points, a window under 30 days, or no sign change to bracket.
+    """
+    if nav is None or len(nav) < 2:
+        return None
+    series = pd.Series(nav["value"].astype(float).to_numpy(),
+                       index=pd.to_datetime(nav["ts"].astype(str).str[:10])).sort_index()
+    start, end = series.index[0], series.index[-1]
+    days = (end - start).days
+    if days < 30:
+        return None
+    cash_flows = [(0.0, -float(series.iloc[0]))]
+    if flows is not None and not flows.empty:
+        for day, amount in flows.items():
+            day = pd.Timestamp(day)
+            if start < day <= end and amount:
+                cash_flows.append(((day - start).days / 365.0, -float(amount)))
+    cash_flows.append((days / 365.0, float(series.iloc[-1])))
+
+    def npv(rate: float) -> float:
+        return sum(cf / (1 + rate) ** t for t, cf in cash_flows)
+
+    low, high = -0.99, 10.0
+    if npv(low) * npv(high) > 0:
+        return None
+    for _ in range(200):
+        mid = (low + high) / 2
+        if npv(low) * npv(mid) <= 0:
+            high = mid
+        else:
+            low = mid
+    rate = (low + high) / 2
+    return MoneyWeighted(annual_rate=rate, period_return=(1 + rate) ** (days / 365.0) - 1,
+                         days=days)
+
+
+def position_attribution(trades: pd.DataFrame, cash_transactions: pd.DataFrame,
+                         valued: pd.DataFrame) -> pd.DataFrame:
+    """What each ticker added to the account, in dollars, since the statement starts.
+
+    ``[ticker, bought, sold, commissions, income, market_value, pnl, share, complete]``:
+    ``pnl = market value today + sales − purchases + commissions (negative) + dividends net
+    of withholding``. ``share`` is its part of the summed PnL (only when that sum is positive,
+    otherwise a share reads backwards). ``complete`` is False when the ticker sold more than
+    the window shows it bought: its purchase is older than the statement and its PnL would
+    be inflated, so it is flagged instead of trusted (the FIFO rule of this module).
+    """
+    columns = ["ticker", "bought", "sold", "commissions", "income", "market_value", "pnl",
+               "share", "complete"]
+    if trades is None or trades.empty:
+        return pd.DataFrame(columns=columns)
+    frame = trades.assign(value=trades["quantity"].astype(float) * trades["price"].astype(float),
+                          side=trades["side"].str.lower())
+    rows = []
+    income = {}
+    if cash_transactions is not None and not cash_transactions.empty:
+        paid = cash_transactions[cash_transactions["kind"].isin(["dividend", "withholding_tax"])]
+        income = paid.groupby("ticker")["amount"].sum().to_dict()
+    held = (valued.set_index("ticker")["market_value"].to_dict()
+            if valued is not None and not valued.empty else {})
+    for ticker, group in frame.groupby("ticker"):
+        buys, sells = group[group["side"] == "buy"], group[group["side"] == "sell"]
+        bought, sold = float(buys["value"].sum()), float(sells["value"].sum())
+        commissions = float(pd.to_numeric(group["commission"], errors="coerce").fillna(0).sum())
+        value = held.get(ticker)
+        value = 0.0 if value is None else float(value)
+        if pd.isna(value):
+            value = None
+        net_income = float(income.get(ticker, 0.0))
+        rows.append({
+            "ticker": ticker, "bought": bought, "sold": sold, "commissions": commissions,
+            "income": net_income, "market_value": value,
+            "pnl": None if value is None else value + sold - bought + commissions + net_income,
+            "complete": float(sells["quantity"].sum()) <= float(buys["quantity"].sum()) + 1e-9,
+        })
+    out = pd.DataFrame(rows, columns=[c for c in columns if c != "share"])
+    total = out["pnl"].dropna().sum()
+    out["share"] = out["pnl"] / total if total > 0 else None
+    return out[columns].sort_values("pnl", ascending=False, na_position="last") \
+        .reset_index(drop=True)
+
+
+def cash_drag(nav_total: pd.DataFrame, nav_cash: pd.DataFrame,
+              benchmark: pd.Series) -> float | None:
+    """Approximate return given up by the cash, against the benchmark, over the window.
+
+    ``Σ w_cash(t−1) × r_benchmark(t)``: each day, the part of the account in cash times what
+    the benchmark did that day — what that cash would have added had it been invested in
+    it. An arithmetic sum of daily contributions, so an approximation (it ignores
+    compounding), labelled as such. Positive = the cash cost return (the market rose);
+    negative = the cash protected it. ``None`` without the three series.
+    """
+    if nav_total is None or nav_cash is None or len(nav_total) < 2 or benchmark is None \
+            or benchmark.dropna().empty:
+        return None
+    total = pd.Series(nav_total["value"].astype(float).to_numpy(),
+                      index=pd.to_datetime(nav_total["ts"].astype(str).str[:10])).sort_index()
+    cash = pd.Series(nav_cash["value"].astype(float).to_numpy(),
+                     index=pd.to_datetime(nav_cash["ts"].astype(str).str[:10])).sort_index()
+    weight = (cash / total.where(total > 0)).reindex(total.index)
+    bench = benchmark.dropna().sort_index().reindex(total.index, method="ffill")
+    daily = bench.pct_change()
+    contributions = (weight.shift(1) * daily).dropna()
+    return float(contributions.sum()) if len(contributions) else None

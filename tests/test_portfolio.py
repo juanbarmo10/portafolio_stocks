@@ -456,3 +456,55 @@ def test_the_reconciliation_sentence_uses_spanish_notation():
     """The sentence used English notation ("1,234.50") until 2026-09-25."""
     assert portfolio._es(1234.5) == "1.234,50"
     assert portfolio._es(-0.004, sign=True) == "-0,00"
+
+
+# --- Money-weighted return, attribution and the cost of cash (2026-09-25) -----------------
+
+
+def test_the_irr_of_a_single_deposit_is_its_return():
+    """100 in, 110 out a year later: 10 %, and no deposit in between to weigh."""
+    nav = pd.DataFrame({"ts": ["2025-01-01", "2026-01-01"], "value": [100.0, 110.0]})
+    result = portfolio.money_weighted_return(nav, pd.Series(dtype=float))
+    assert result.annual_rate == pytest.approx(0.10, abs=1e-6)
+    assert result.period_return == pytest.approx(0.10, abs=1e-6)
+
+
+def test_the_irr_weighs_money_that_arrived_before_the_fall():
+    """Same start and end NAV gain, but the second path deposits just before losing: the
+    investor's experience (IRR) is worse than a path with no deposit."""
+    nav = pd.DataFrame({"ts": ["2025-01-01", "2026-01-01"], "value": [100.0, 150.0]})
+    with_deposit = portfolio.money_weighted_return(
+        nav, pd.Series({pd.Timestamp("2025-02-01"): 60.0}))
+    assert with_deposit.period_return < 0, "150 out of 160 put in: a loss"
+
+
+def test_attribution_counts_closed_positions_and_income():
+    trades = pd.DataFrame([
+        {"ticker": "AAA", "side": "buy", "quantity": 2.0, "price": 10.0, "commission": -0.35},
+        {"ticker": "AAA", "side": "sell", "quantity": 2.0, "price": 15.0, "commission": -0.35},
+        {"ticker": "BBB", "side": "buy", "quantity": 1.0, "price": 50.0, "commission": -0.35},
+    ])
+    cash = pd.DataFrame([
+        {"ticker": "BBB", "kind": "dividend", "amount": 1.0},
+        {"ticker": "BBB", "kind": "withholding_tax", "amount": -0.3},
+    ])
+    valued = pd.DataFrame({"ticker": ["BBB"], "market_value": [45.0]})
+    out = portfolio.position_attribution(trades, cash, valued).set_index("ticker")
+    assert out.loc["AAA", "pnl"] == pytest.approx(30 - 20 - 0.70), "closed, still counted"
+    assert out.loc["BBB", "pnl"] == pytest.approx(45 - 50 - 0.35 + 0.7)
+    assert out["complete"].all()
+
+
+def test_a_sale_older_than_the_window_is_flagged_not_trusted():
+    trades = pd.DataFrame([
+        {"ticker": "OLD", "side": "sell", "quantity": 1.0, "price": 10.0, "commission": 0.0}])
+    out = portfolio.position_attribution(trades, pd.DataFrame(), pd.DataFrame())
+    assert not out.loc[0, "complete"]
+
+
+def test_cash_costs_what_the_index_did_on_its_share():
+    """Half the account in cash while the index rises 10 % in one day: ~5 % given up."""
+    total = pd.DataFrame({"ts": ["2026-01-05", "2026-01-06"], "value": [100.0, 105.0]})
+    cash = pd.DataFrame({"ts": ["2026-01-05", "2026-01-06"], "value": [50.0, 50.0]})
+    bench = pd.Series([100.0, 110.0], index=pd.to_datetime(["2026-01-05", "2026-01-06"]))
+    assert portfolio.cash_drag(total, cash, bench) == pytest.approx(0.05)

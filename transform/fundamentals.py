@@ -144,12 +144,30 @@ def known(
     return visible.sort_values("ts")[columns].reset_index(drop=True)
 
 
+BALANCE_REFERENCE = "assets"
+
+
 def latest_instant(
     observations: pd.DataFrame, cik: str, metric: str, as_of: Any
 ) -> float | None:
-    """Most recent balance-sheet value filed on or before ``as_of``."""
+    """The balance-sheet value on the **latest balance sheet** filed by ``as_of``.
+
+    The latest balance sheet is the newest date ``assets`` was filed for — every balance
+    sheet has total assets. A line whose last value is older was not on it: HIMS last
+    tagged ``DebtCurrent`` in 2020, and "the most recent value" would have put a
+    five-year-old figure next to today's, in the EV and the invested capital, without an
+    error. Such a line is ``None``, which every caller already reads as "not there".
+    Found 2026-09-25 (RESEARCH.md §2.39). Without any ``assets``, the metric's own latest.
+    """
     rows = known(observations, cik, metric, "", as_of)
-    return None if rows.empty else float(rows["value"].iloc[-1])
+    if rows.empty:
+        return None
+    if metric != BALANCE_REFERENCE:
+        reference = known(observations, cik, BALANCE_REFERENCE, "", as_of)
+        if not reference.empty and \
+                str(rows["ts"].iloc[-1])[:10] < str(reference["ts"].iloc[-1])[:10]:
+            return None
+    return float(rows["value"].iloc[-1])
 
 
 # --- The fourth quarter nobody files ------------------------------------------

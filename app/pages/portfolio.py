@@ -18,7 +18,14 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import altair_chart, PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE, money, pct, rebase_100
+from app.format import (
+    MISSING,
+    PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE,
+    altair_chart,
+    money,
+    pct,
+    rebase_100,
+)
 from core.config import load_settings
 from transform import corporate_actions as reorg
 from transform import portfolio
@@ -411,6 +418,57 @@ else:
             f"{money(perf.nav_end, public=False)}. Es la comparación honesta con "
             "«comprar el índice». Una ventana de un año dice poco sobre la habilidad."
         )
+
+    # Money-weighted return and where the gap comes from (§15.1.5).
+    mwr = portfolio.money_weighted_return(nav, portfolio.external_flows(cash))
+    cash_cost = portfolio.cash_drag(nav, portfolio.nav_series(account, portfolio.NAV_CASH),
+                                    benchmark)
+    cols = st.columns(3)
+    cols[0].metric("TIR (ponderada por el dinero)",
+                   pct(mwr.period_return) if mwr else MISSING,
+                   help="La tasa interna de retorno de tus propios flujos: cuenta cuándo "
+                        "entró cada aporte. Sobre la ventana, sin anualizar"
+                        + (f"; anualizada, {pct(mwr.annual_rate)}." if mwr else "."))
+    cols[1].metric("Coste del efectivo frente a SPY", pct(cash_cost),
+                   help="Aproximado: cada día, la parte de la cuenta en efectivo por lo que "
+                        "hizo SPY ese día, sumado. Lo que el efectivo dejó de ganar (o evitó "
+                        "perder) frente a tenerlo en el índice.")
+    rest = None if cash_cost is None else perf.excess + cash_cost
+    cols[2].metric("Resto de la diferencia", pct(rest),
+                   help="La diferencia con SPY sin la parte del efectivo: lo que explican las "
+                        "acciones elegidas y cuándo se compraron y vendieron. Aproximado.")
+    st.caption(
+        "La rentabilidad sin aportes mide las decisiones; la TIR, tu experiencia — un "
+        "aporte que llegó justo antes de una caída pesa más. La diferencia con el índice se "
+        "parte en dos: el efectivo sin invertir y la selección."
+    )
+
+    if not public:
+        attribution = portfolio.position_attribution(trades, cash, valued)
+        if not attribution.empty:
+            st.markdown("**Qué aportó cada posición**")
+            st.dataframe(pd.DataFrame({
+                "Posición": attribution["ticker"],
+                "Comprado": attribution["bought"],
+                "Vendido": attribution["sold"],
+                "Valor hoy": attribution["market_value"],
+                "Dividendos netos": attribution["income"],
+                "Comisiones": attribution["commissions"],
+                "Resultado": attribution["pnl"],
+                "Parte del total": attribution["share"],
+                "Historia completa": attribution["complete"],
+            }), hide_index=True, width="stretch", column_config={
+                **{c: st.column_config.NumberColumn(format="localized")
+                   for c in ("Comprado", "Vendido", "Valor hoy", "Dividendos netos",
+                             "Comisiones", "Resultado")},
+                "Parte del total": st.column_config.NumberColumn(format="percent"),
+                "Historia completa": st.column_config.CheckboxColumn(
+                    help="Sin marcar: vendió más de lo que el extracto muestra comprado — "
+                         "la compra es anterior a la ventana y su resultado saldría inflado."),
+            })
+            st.caption("Resultado = valor hoy + ventas − compras + comisiones + dividendos "
+                       "netos de retención, en USD, desde que empieza el extracto. Incluye lo "
+                       "ya vendido: una posición cerrada también sumó o restó.")
 
 # --- 6. Income, costs and realized PnL ------------------------------------------------
 
