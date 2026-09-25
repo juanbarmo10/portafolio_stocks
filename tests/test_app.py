@@ -66,7 +66,7 @@ def test_today_page_renders_the_level_1_table(app_db):
         conn.close()
 
     at = _run()
-    table = at.dataframe[0].value
+    table = next(d.value for d in at.dataframe if "Serie" in d.value.columns)
     assert "Curva 10a − 2a" in set(table["Serie"])
     # Spanish notation, like the rest of the panel (it read 0.390 until 2026-09-25).
     assert table.loc[table["Serie"] == "Curva 10a − 2a", "Valor"].iloc[0] == "0,390"
@@ -84,7 +84,7 @@ def test_a_series_with_no_data_is_a_visible_hole(app_db):
         conn.close()
 
     at = _run()
-    table = at.dataframe[0].value
+    table = next(d.value for d in at.dataframe if "Serie" in d.value.columns)
     missing = table[table["Serie"] == "VIX"]
     assert len(missing) == 1, "the series vanished instead of showing as a hole"
     assert missing["Valor"].iloc[0] == "—", "a hole is shown as a hole, never as a zero"
@@ -283,7 +283,8 @@ def test_the_landing_page_says_what_is_coming(app_db):
     at = _run()
     text = " ".join(m.value for m in at.markdown)
     assert "sin construir" not in text.lower()
-    upcoming = pd.DataFrame(at.dataframe[-1].value)
+    upcoming = next(pd.DataFrame(d.value) for d in at.dataframe
+                    if "Qué" in pd.DataFrame(d.value).columns)
     assert "CPI (inflación)" in set(upcoming["Qué"])
     assert "Resultados de ZZHELD" in set(upcoming["Qué"]), "a held company's results"
 
@@ -296,6 +297,17 @@ def test_publicly_the_landing_page_names_no_position(app_db, monkeypatch):
     monkeypatch.setenv("PUBLIC_MODE", "1")
     config.load_settings.cache_clear()
     at = _run()
-    upcoming = pd.DataFrame(at.dataframe[-1].value)
+    upcoming = next(pd.DataFrame(d.value) for d in at.dataframe
+                    if "Qué" in pd.DataFrame(d.value).columns)
     assert "CPI (inflación)" in set(upcoming["Qué"])
     assert not any("ZZHELD" in str(v) for v in upcoming.to_numpy().ravel())
+
+
+def test_the_landing_page_leads_with_what_can_change_todays_decision(app_db):
+    """§15.2: the four readings that matter as tiles, the eleven series one click away."""
+    _seed_upcoming(app_db)
+    at = _run()
+    headers = [h.value for h in at.subheader]
+    assert headers.index("Lo que viene — 14 días") < headers.index("1 · ¿Hay apetito por riesgo?")
+    assert any(m.label == "Curva 10a − 2a" for m in at.metric)
+    assert at.expander, "the full macro table is folded, not gone"

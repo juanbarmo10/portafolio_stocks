@@ -274,35 +274,53 @@ if not sb.empty:
 # --- 4. Narrowness and rotation ---------------------------------------------------------------
 
 st.subheader("4 · Estrechez y rotación")
-left, right = st.columns(2)
 ew = equal_weight_ratio(closes, splits, equal=EW["equal"], cap=EW["cap"])
 rot = defensive_rotation(closes, splits, defensive=ROT["defensive"], cyclical=ROT["cyclical"])
-with left:
-    st.markdown(f"**{EW['equal']} / {EW['cap']}** — equiponderado frente a capitalización")
-    if not ew.empty:
-        altair_chart(
-            alt.Chart(ew.assign(date=pd.to_datetime(ew["date"]))).mark_line(color=LINE)
-            .encode(x=alt.X("date:T", title=None),
-                    y=alt.Y("ratio:Q", title="cociente", scale=alt.Scale(zero=False)))
-            .properties(height=200),
-            width="stretch",
-        )
-    st.caption("Cae = la empresa media se queda atrás frente a las gigantes. Se lee por su "
-               "dirección, no por su nivel.")
-with right:
-    st.markdown("**Rotación defensiva** — " + " + ".join(ROT["defensive"]) + " frente a "
-                + " + ".join(ROT["cyclical"]))
-    if not rot.empty:
-        altair_chart(
-            alt.Chart(rot.assign(date=pd.to_datetime(rot["date"]))).mark_line(color=LINE)
-            .encode(x=alt.X("date:T", title=None),
-                    y=alt.Y("rotation:Q", title="base 100", scale=alt.Scale(zero=False)))
-            .properties(height=200),
-            width="stretch",
-        )
-    st.caption("Sube = los defensivos baten a los cíclicos: el mercado descuenta "
-               "desaceleración. Medias geométricas, no suma de precios: el precio de cada ETF "
-               "no pondera.")
+
+
+def three_month_change(frame: pd.DataFrame, column: str) -> float | None:
+    """Change over the last 63 sessions: these two are read by their direction (§15.2)."""
+    values = frame[column].dropna() if not frame.empty else pd.Series(dtype=float)
+    return None if len(values) < 64 else float(values.iloc[-1] / values.iloc[-64] - 1)
+
+
+ew_change, rot_change = three_month_change(ew, "ratio"), three_month_change(rot, "rotation")
+st.markdown(
+    f"**{EW['equal']}/{EW['cap']}** {pct(ew_change)} en tres meses "
+    + ("(la empresa media se queda atrás de las gigantes)" if ew_change is not None
+       and ew_change < 0 else "(la empresa media acompaña)" if ew_change is not None else "")
+    + f" · **rotación defensiva** {pct(rot_change)} "
+    + ("(los defensivos ganan: se descuenta desaceleración)" if rot_change is not None
+       and rot_change > 0 else "(los cíclicos ganan)" if rot_change is not None else "")
+)
+with st.expander("Las dos gráficas"):
+    left, right = st.columns(2)
+    with left:
+        st.markdown(f"**{EW['equal']} / {EW['cap']}** — equiponderado frente a capitalización")
+        if not ew.empty:
+            altair_chart(
+                alt.Chart(ew.assign(date=pd.to_datetime(ew["date"]))).mark_line(color=LINE)
+                .encode(x=alt.X("date:T", title=None),
+                        y=alt.Y("ratio:Q", title="cociente", scale=alt.Scale(zero=False)))
+                .properties(height=200),
+                width="stretch",
+            )
+        st.caption("Cae = la empresa media se queda atrás frente a las gigantes. Se lee por su "
+                   "dirección, no por su nivel.")
+    with right:
+        st.markdown("**Rotación defensiva** — " + " + ".join(ROT["defensive"]) + " frente a "
+                    + " + ".join(ROT["cyclical"]))
+        if not rot.empty:
+            altair_chart(
+                alt.Chart(rot.assign(date=pd.to_datetime(rot["date"]))).mark_line(color=LINE)
+                .encode(x=alt.X("date:T", title=None),
+                        y=alt.Y("rotation:Q", title="base 100", scale=alt.Scale(zero=False)))
+                .properties(height=200),
+                width="stretch",
+            )
+        st.caption("Sube = los defensivos baten a los cíclicos: el mercado descuenta "
+                   "desaceleración. Medias geométricas, no suma de precios: el precio de cada ETF "
+                   "no pondera.")
 
 # --- 5. Volatility ----------------------------------------------------------------------------
 
