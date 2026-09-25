@@ -76,6 +76,17 @@ contributions:
   monthly_amount_usd: null
   currency: USD
 
+# Diario de decisiones (📓 Diario). Una entrada por decisión; la operación la pone IBKR,
+# aquí solo lo que únicamente tú sabes. Escríbela ANTES de ejecutar si puedes.
+journal: []
+#  - date: 2026-10-01
+#    ticker: XXXX
+#    why: "Por qué, en una o dos frases."
+#    expectation: "Qué espero que pase, y en qué plazo."
+#    premortem: "Si sale mal, habrá sido porque…"
+#    review_after: 2027-04-01
+#    review: ""          # al revisarla: ¿fue buena DECISIÓN con lo que sabía entonces?
+
 # Coste de pasar pesos a IBKR (📋 Desplegar capital). Por cada depósito del extracto, los
 # COP que costó: el extracto sabe los USD abonados, no los pesos pagados. Con 3+ depósitos
 # de distinto tamaño el panel separa el coste fijo del proporcional; una tarifa conocida
