@@ -76,6 +76,15 @@ contributions:
   monthly_amount_usd: null
   currency: USD
 
+# Coste de pasar pesos a IBKR (📋 Desplegar capital). Por cada depósito del extracto, los
+# COP que costó: el extracto sabe los USD abonados, no los pesos pagados. Con 3+ depósitos
+# de distinto tamaño el panel separa el coste fijo del proporcional; una tarifa conocida
+# (fixed_fee_usd, proportional_cost = 0.01 para 1 %) manda sobre ese ajuste.
+funding:
+  deposits: []                            # ej. - {date: 2025-09-22, cop_paid: 500000, bought_on: 2025-09-19}
+  fixed_fee_usd: null
+  proportional_cost: null
+
 # Comisiones IBKR (§13, entrada de usuario nº2). VERIFICAR en la cuenta, no asumir:
 # la entidad contratante y el esquema (tiered/fixed) cambian el coste por operación.
 broker:

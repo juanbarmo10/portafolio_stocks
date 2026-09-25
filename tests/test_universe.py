@@ -267,3 +267,39 @@ def test_a_hole_is_never_filled(tmp_path, monkeypatch):
     """A forward-filled close is an estimate presented as data (section 12)."""
     _ingester, frame, days = run_with_hole(tmp_path, monkeypatch, hole_at=15)
     assert days[15].date().isoformat() not in set(frame["ts"].str[:10])
+
+
+# --- Weekly by the user's decision (2026-09-25) ---------------------------------------------
+
+
+def _ingester_with_last_run(tmp_path, days_ago):
+    from core.config import load_settings
+    from db import loader
+    from ingest.universe import UniverseIngester
+
+    conn = loader.init_db(tmp_path / "u.db")
+    stamp = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days_ago)).isoformat()
+    conn.execute("INSERT INTO universe_membership VALUES ('sp500','A','2020-01-01',NULL,'x',"
+                 "'2020-01-01', ?)", (stamp,))
+    conn.commit()
+    ingester = UniverseIngester(load_settings())
+    return ingester, conn
+
+
+def test_the_universe_is_skipped_until_a_week_has_passed(tmp_path):
+    ingester, conn = _ingester_with_last_run(tmp_path, days_ago=2)
+    ingester.attach_database(conn)
+    conn.close()
+    assert ingester.fetch().empty, "not due: nothing downloaded"
+    assert ingester.fetch_tables() == {} and ingester.partial_failures() == []
+
+
+def test_the_universe_is_due_after_a_week_or_when_forced(tmp_path):
+    ingester, conn = _ingester_with_last_run(tmp_path, days_ago=8)
+    ingester.attach_database(conn)
+    assert ingester._skip_reason is None
+    forced, _ = _ingester_with_last_run(tmp_path / "f", days_ago=1)
+    forced.force = True
+    forced.attach_database(conn)
+    conn.close()
+    assert forced._skip_reason is None

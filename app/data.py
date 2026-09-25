@@ -217,6 +217,34 @@ def price_observations(tickers: tuple[str, ...], mtime: float) -> pd.DataFrame:
         conn.close()
 
 
+@st.cache_data(show_spinner=False)
+def recent_closes(tickers: tuple[str, ...], since: str, mtime: float) -> pd.DataFrame:
+    """Raw closes from ``since`` on — the last price of ~500 members without their history."""
+    columns = ["source", "series_id", "ts", "ts_release", "value"]
+    if not database_ready() or not tickers:
+        return pd.DataFrame(columns=columns)
+    conn = open_connection(db_path())
+    try:
+        return read_observations(conn, series_ids=[f"{t}:close_raw" for t in tickers],
+                                 since=since)
+    finally:
+        conn.close()
+
+
+@st.cache_data(show_spinner=False)
+def source_last_ingest(source: str, mtime: float) -> str | None:
+    """Date (ISO) of the last ingest of one source; ``None`` if it never ran."""
+    if not database_ready():
+        return None
+    conn = open_connection(db_path())
+    try:
+        row = conn.execute("SELECT MAX(ingested_at) FROM observations WHERE source = ?",
+                           (source,)).fetchone()
+    finally:
+        conn.close()
+    return str(row[0])[:10] if row and row[0] else None
+
+
 def prices_for(tickers: list[str]) -> pd.DataFrame:
     """Raw closes for the held tickers, cache-invalidated by the database mtime."""
     return price_observations(tuple(sorted(tickers)), db_mtime())

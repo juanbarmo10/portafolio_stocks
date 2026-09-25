@@ -35,6 +35,7 @@ from ingest.ibkr_flex import (
 )
 from ingest.prices import PricesIngester
 from ingest.sec_filings import SecFilingsIngester
+from ingest.screen import ScreenIngester
 from ingest.short_interest import ShortInterestIngester
 from ingest.universe import UniverseIngester
 from ingest.sec_xbrl import SecXbrlIngester
@@ -55,6 +56,8 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "universe": (UniverseIngester.is_available, UniverseIngester),
     # Local only: its config lives in settings.local.yaml (section 11).
     "local_fx": (LocalFxIngester.is_available, LocalFxIngester),
+    # Quarterly; last, so the universe and the registry it reads are already fresh.
+    "screen": (ScreenIngester.is_available, ScreenIngester),
 }
 
 # Where non-observation rows go. An ingester returning a table name absent from this
@@ -88,6 +91,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         metavar="NAME",
         help="Run only the named ingesters (default: all registered).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run ingesters that are not due today (the weekly universe).",
     )
     return parser.parse_args(argv)
 
@@ -124,6 +132,13 @@ def available_ingesters(selected: dict[str, tuple], settings: Settings) -> dict[
             continue
         built[name] = construct(settings)
     return built
+
+
+def force_all(ingesters: dict[str, Ingester]) -> None:
+    """Mark every ingester that has a schedule as due now (``--force``)."""
+    for ingester in ingesters.values():
+        if hasattr(ingester, "force"):
+            ingester.force = True
 
 
 def notify_failures(conn: Any, settings: Settings, failures: list[str]) -> None:
@@ -166,6 +181,8 @@ def run(args: argparse.Namespace) -> int:
             return 0
 
         ingesters = available_ingesters(selected, settings)
+        if getattr(args, "force", False):
+            force_all(ingesters)
 
         if args.dry_run:
             log.info(

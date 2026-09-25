@@ -40,8 +40,10 @@ PAGES_DIR = Path(__file__).parent / "pages"
 pages = [
     st.Page(PAGES_DIR / "today.py", title="Hoy", icon="🏠", default=True),
     st.Page(PAGES_DIR / "market.py", title="Mercado", icon="📈"),
+    st.Page(PAGES_DIR / "screen.py", title="Cribado", icon="🔎"),
     st.Page(PAGES_DIR / "company.py", title="Empresa", icon="🏢"),
     st.Page(PAGES_DIR / "portfolio.py", title="Cartera", icon="🔬"),
+    st.Page(PAGES_DIR / "deploy.py", title="Desplegar capital", icon="📋"),
     st.Page(PAGES_DIR / "fiscal.py", title="Fiscal", icon="🧾"),
 ]
 

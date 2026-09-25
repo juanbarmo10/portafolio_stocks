@@ -283,9 +283,11 @@ sources:
     # ahí es un defecto conocido de la fuente, y fallar cada día por él sería gritar lobo.
     hole_retry_pause_s: 5
     hole_alert_sessions: 5
+    # SEMANAL por decisión del usuario (2026-09-25): ~1,4 M de filas y ~5 min al día para una
+    # serie que la amplitud sectorial sigue con correlación 0,91. Toca si la última ejecución
+    # tiene 7 días o más; `python run_ingest.py --only universe --force` la lanza ya.
+    run_every_days: 7
 
-  # FINRA — interés corto consolidado (nivel 2, posicionamiento). Verificado 2026-09-23:
-  # API REST pública, SIN credenciales, respuesta CSV.
   # --- Calendario macro (§2 nivel 1, §8 fase 4) --------------------------------------
   # "¿Hay CPI / PCE / NFP / FOMC en los próximos días?" es la primera pregunta del
   # checklist, y la alerta "release de alto impacto en < 48 h" lee lo que se guarda aquí.
@@ -314,6 +316,8 @@ sources:
         "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08",
       ]
 
+  # FINRA — interés corto consolidado (nivel 2, posicionamiento). Verificado 2026-09-23:
+  # API REST pública, SIN credenciales, respuesta CSV.
   finra:
     short_interest_url: https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest
     user_agent: "equitydash/0.1 (personal research)"
@@ -671,3 +675,22 @@ public_sync:
   # Tras la primera carga completa (--full), cada día sube lo que tenga fecha de referencia
   # O de publicación en estos últimos días — la segunda condición trae las reexpresiones.
   lookback_days: 10
+
+# --- Cribado trimestral (CLAUDE.md §15.1; ingest/screen.py, app/pages/screen.py) --------
+# Decidido por el usuario el 2026-09-25: TRIMESTRAL, sobre un universo fijo (S&P 500 actual +
+# empresas estudiadas + posiciones), con cifras anuales auditadas de la SEC (API `frames`).
+# No es un screener de "earnings plays" (§12): una vez al trimestre, para encontrar
+# candidatos que después se estudian a fondo en la página de Empresa.
+screen:
+  run_every_days: 90
+  metrics: [revenue, operating_income, net_income, operating_cash_flow, capex, sbc,
+            diluted_shares, cash, long_term_debt, equity]
+  # Sin `buybacks`: la recompra bruta engaña si el SBC la anula (§2); la dilución es la
+  # medida neta y ya está.
+  # Filtros por defecto de la página (editables allí). Son PUNTOS DE PARTIDA de lectura, no
+  # reglas de inversión, y no se optimizaron contra nada.
+  defaults:
+    max_dilution: 0.02          # recuento diluido interanual
+    max_sbc_over_revenue: 0.05
+    min_fcf_margin: 0.0
+    min_market_cap: 2000000000   # 2 mil M; escrito entero: PyYAML lee `2.0e9` como texto

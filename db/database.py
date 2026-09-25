@@ -224,6 +224,7 @@ def read_observations(
     conn: Any,
     series_ids: Sequence[str] | None = None,
     source: str | None = None,
+    since: str | None = None,
 ) -> "pd.DataFrame":
     """Read observations into a DataFrame, optionally filtered by series or source.
 
@@ -235,6 +236,8 @@ def read_observations(
         conn: Open connection from :func:`open_connection`.
         series_ids: Restrict to these series. ``None`` means every series.
         source: Restrict to one source label ('fred', 'yfinance', ...).
+        since: Restrict to ``ts >= since`` (ISO text) — the last closes of ~500 members
+            without reading their whole history.
 
     Returns:
         Frame with columns ``[source, series_id, ts, ts_release, value]``. Empty (but
@@ -252,6 +255,9 @@ def read_observations(
     if source:
         clauses.append("source = ?")
         params.append(source)
+    if since:
+        clauses.append("ts >= ?")
+        params.append(since)
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
 

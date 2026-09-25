@@ -226,6 +226,7 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 |---|---|---|
 | Macro (CPI, PCE, NFP, fed funds, dólar, curva, spread HY, NFCI, VIX) | FRED | REST, clave gratuita |
 | Fundamentales auditados | SEC EDGAR XBRL | `data.sec.gov`, sin clave |
+| Cribado trimestral del S&P 500 | SEC XBRL `frames` | un concepto para todas las empresas de un año: ~40 peticiones en vez de 500. Sin fecha de presentación, así que solo sirve para el cribado de hoy, nunca para un backtest |
 | Fechas de presentación y enmiendas | SEC submissions | `data.sec.gov`, sin clave |
 | Mapa ticker↔CIK | SEC `company_tickers.json` | sin clave |
 | Precios diarios OHLC y acciones corporativas | yfinance | sin clave |
@@ -278,10 +279,12 @@ marcar una posición para revisión.
 python run_ingest.py --dry-run       # crea/verifica la base de datos, sin llamadas de red
 python run_ingest.py                 # ejecuta la ingesta registrada
 python run_ingest.py --only fred     # solo una fuente
+python run_ingest.py --force         # también lo que no toca hoy (amplitud, cribado)
 ```
 
 Fuentes registradas: `fred`, `macro_calendar`, `prices`, `ibkr`, `sec`, `sec_filings`,
-`short_interest` y `universe`. Una fuente sin sus
+`short_interest`, `universe` (semanal) y `screen` (trimestral). Las dos últimas se saltan
+solas mientras no les toca: los datos que traen no cambian más deprisa. Una fuente sin sus
 credenciales configuradas **se omite con aviso**, no rompe el pipeline; y una unidad rota
 dentro de una fuente (una serie, un ticker, una empresa) se reporta y devuelve código de
 salida ≠ 0 sin llevarse por delante a las demás.
@@ -377,10 +380,15 @@ transform/  funciones puras, sin red — entrada faltante -> None
 app/        Streamlit multipágina (st.navigation)
               ├── 🏠 Hoy       nivel 1 point-in-time + resumen del checklist y lo que viene
               ├── 📈 Mercado   nivel 2 y el semáforo de régimen, con el voto de cada señal
+              ├── 🔎 Cribado   trimestral: qué empresas del S&P 500 merecen una ficha
+              │                (captura de valor y precio; solo local)
               ├── 🏢 Empresa   nivel 3: fundamentales, valoración (múltiplos, DCF
-              │                inverso) y captura de valor, contra su propia tesis
+              │                inverso), el precio frente al mercado y su reacción a
+              │                resultados, y captura de valor, contra su propia tesis
               ├── 🔬 Cartera   nivel 4: posiciones, reconciliación contra el NAV y
               │                rentabilidad sin aportes frente al S&P 500 (solo local)
+              ├── 📋 Desplegar nivel 4: puertas antes de comprar, el tramo y el coste
+              │                medido de llevar el dinero al bróker (solo local)
               └── 🧾 Fiscal    la cuenta en moneda local, todo ESTIMADO (solo local)
 fiscal/     lotes y ventas en moneda local, parte del activo / parte de la divisa
 alerts/     Telegram, con deduplicación vía alerts_log

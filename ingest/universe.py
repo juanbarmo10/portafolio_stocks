@@ -199,6 +199,12 @@ class UniverseIngester(Ingester):
         }
         self._tables: dict[str, list[dict[str, Any]]] = {}
         self._failures: list[str] = []
+        # Weekly by the user's decision (2026-09-25): ~1,4 M rows and ~5 min a day for a series
+        # the sector breadth tracks at 0,91 correlation. Due when the last run is older than
+        # this; `run_ingest.py --force` runs it anyway.
+        self._every_days = int(cfg.get("run_every_days", 7))
+        self.force = False
+        self._skip_reason: str | None = None
         self.unpriced: list[str] = []
 
     @staticmethod
@@ -262,8 +268,29 @@ class UniverseIngester(Ingester):
         finally:
             yf_log.setLevel(previous)
 
+    def attach_database(self, conn: Any) -> None:
+        """Decide whether the weekly run is due, from when the membership was last written."""
+        if self.force or self._every_days <= 0:
+            return
+        try:
+            row = conn.execute("SELECT MAX(ingested_at) FROM universe_membership").fetchone()
+        except Exception as exc:  # noqa: BLE001 — no table yet: the first run is due
+            log.debug("No membership table yet: %s", exc)
+            return
+        if not row or not row[0]:
+            return
+        last = dt.datetime.fromisoformat(str(row[0]))
+        age = dt.datetime.now(dt.timezone.utc) - last
+        if age < dt.timedelta(days=self._every_days):
+            self._skip_reason = (f"last run {age.days} day(s) ago, due every "
+                                 f"{self._every_days}; `--force` to run it now")
+
     def fetch(self) -> pd.DataFrame:
         """Membership intervals (for ``fetch_tables``) and the members' raw closes."""
+        if self._skip_reason:
+            log.info("Universe skipped: %s.", self._skip_reason, extra={"source": SOURCE})
+            self._tables, self._failures = {}, []
+            return empty_observations()
         self._failures = []
         self.unpriced = []
         today = dt.date.today().isoformat()

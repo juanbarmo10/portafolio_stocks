@@ -43,7 +43,9 @@ from core.config import load_settings
 from transform import fundamentals as fun
 from transform import portfolio as port
 from transform import thesis as th
+from transform import price_action as pa
 from transform import valuation as val
+from transform.adjustments import split_adjusted, total_return_index
 from transform import value_accrual as va
 from transform.macro import latest as macro_latest
 
@@ -458,10 +460,105 @@ else:
                      " y, si escribes `panel.level3.hurdle_rate`, se marca la tuya") + "."
     )
 
-# --- 4. Value accrual -----------------------------------------------------------------
+# --- 4. The price ------------------------------------------------------------------------
+
+
+@st.cache_data(show_spinner="Cargando precios…")
+def price_view(tickers: tuple[str, ...], as_of_iso: str, mtime: float) -> dict:
+    """Split-adjusted close and total-return index per ticker, up to ``as_of``."""
+    rows = app_data.prices_for(list(tickers))
+    actions = app_data.corporate_actions()
+    out = {}
+    for t in tickers:
+        own = rows[rows["series_id"] == f"{t}:close_raw"].assign(ts=lambda d: d["ts"].str[:10])
+        out[t] = {"price": pa.as_series(split_adjusted(own, actions, t, as_of_iso)),
+                  "tr": pa.as_series(total_return_index(own, actions, t, as_of_iso))}
+    return out
+
 
 st.divider()
-st.subheader("4 · ¿Cómo llega eso al accionista?")
+st.subheader("4 · El precio")
+# The benchmark is SPY; a card may name its sector ETF too (`benchmark: XLV`), since a
+# stock that beats the index while its whole sector did better has not done much.
+benchmarks = ["SPY"] + ([str(card["benchmark"])] if card.get("benchmark") else [])
+views = price_view((ticker, *benchmarks), as_of_iso, app_data.db_mtime())
+stock = views[ticker]
+if stock["price"].empty:
+    st.info("Sin precios de esta empresa todavía (`python run_ingest.py --only prices`).")
+else:
+    years_shown = st.select_slider("Ventana", options=[1, 3, 5], value=1,
+                                   format_func=lambda y: f"{y} año{'s' if y > 1 else ''}")
+    start = pd.Timestamp(as_of_iso) - pd.DateOffset(years=years_shown)
+    price = stock["price"][stock["price"].index >= start]
+    altair_chart(
+        alt.Chart(pd.DataFrame({"date": price.index, "precio": price.to_numpy()}))
+        .mark_line(strokeWidth=1.5, color=SERIES_COLORS[0])
+        .encode(x=alt.X("date:T", title=None),
+                y=alt.Y("precio:Q", title="USD, ajustado por splits",
+                        scale=alt.Scale(zero=False)),
+                tooltip=[alt.Tooltip("date:T", title="Fecha"),
+                         alt.Tooltip("precio:Q", title="Cierre", format=",.2f")])
+        .properties(height=240),
+        width="stretch",
+    )
+    compare = pd.concat(
+        {name: pa.rebased(views[name]["tr"], start) for name in (ticker, *benchmarks)},
+        axis=1).dropna(how="all")
+    long = compare.reset_index(names="date").melt("date", var_name="Serie", value_name="valor")
+    altair_chart(
+        alt.Chart(long.dropna()).mark_line(strokeWidth=2).encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y("valor:Q", title="Base 100, con dividendos", scale=alt.Scale(zero=False)),
+            color=alt.Color("Serie:N", legend=alt.Legend(orient="top", title=None),
+                            scale=alt.Scale(domain=[ticker, *benchmarks],
+                                            range=["#2a78d6", "#eb6834", "#3a9d5d"])),
+        ).properties(height=220),
+        width="stretch",
+    )
+    b = pa.behaviour(stock["tr"], views["SPY"]["tr"], as_of_iso, days=365)
+    row = st.columns(4)
+    row[0].metric("Rentabilidad 1 año", pct(b.total_return), help="Con dividendos.")
+    row[1].metric("SPY 1 año", pct(b.benchmark_return))
+    row[2].metric("Diferencia", pct(b.excess))
+    row[3].metric("Beta frente a SPY", number(b.beta),
+                  help="Cuánto amplifica los movimientos del mercado (1 = igual que el "
+                       "índice). Un año de rendimientos diarios.")
+    row = st.columns(4)
+    row[0].metric("Volatilidad anual", pct(b.volatility),
+                  help="Desviación típica de los rendimientos diarios, anualizada. SPY "
+                       "ronda el 15-20 %.")
+    row[1].metric("Caída desde el máximo", pct(b.drawdown_now),
+                  help="Del cierre más alto del último año al de hoy.")
+    row[2].metric("Peor caída del año", pct(b.max_drawdown))
+
+    events = app_data.events()
+    confirmed = events[(events["category"] == "earnings") & (events["cik"] == cik)
+                       & (events["is_estimated"].fillna(0).astype(int) == 0)
+                       & (events["ts"].str[:10] <= as_of_iso)] if not events.empty else events
+    reactions = pa.earnings_reactions(stock["tr"], views["SPY"]["tr"],
+                                      list(confirmed["ts"]) if not confirmed.empty else [])
+    if not reactions.empty:
+        st.markdown("**Reacción a los resultados**")
+        st.dataframe(pd.DataFrame({
+            "Resultados": reactions["date"],
+            "Movimiento": reactions["move"].map(pct),
+            "SPY": reactions["benchmark_move"].map(pct),
+            "Por encima de SPY": reactions["excess"].map(pct),
+        }).head(8), hide_index=True, width="stretch")
+        typical = pa.typical_reaction(reactions)
+        st.caption(
+            "Del cierre anterior al 8-K de resultados (item 2.02) al cierre siguiente: la "
+            "SEC no dice si se presentó antes de la apertura o tras el cierre, y esa ventana "
+            "recoge la reacción en los dos casos. "
+            + (f"**Movimiento típico: ±{pct(typical)}** sobre SPY — es lo que se juega una "
+               "posición abierta justo antes de resultados (§2: 5 días de margen)."
+               if typical is not None else "")
+        )
+
+# --- 5. Value accrual -----------------------------------------------------------------
+
+st.divider()
+st.subheader("5 · ¿Cómo llega eso al accionista?")
 st.caption(
     "El concepto rector (§2): una empresa puede crecer 30% al año y destruir valor por "
     "acción si diluye 35%. Esta sección es el análogo de la vista de unlocks."
@@ -541,7 +638,7 @@ if len(shares) >= 2:
 # --- 4. Filings and calendar ----------------------------------------------------------
 
 st.divider()
-st.subheader("5 · Presentaciones y calendario")
+st.subheader("6 · Presentaciones y calendario")
 
 company_filings = filings[filings["cik"] == cik] if not filings.empty else pd.DataFrame()
 company_events = events[events["cik"] == cik] if not events.empty else pd.DataFrame()
@@ -602,7 +699,7 @@ with filings_column:
 
 if not public:
     st.divider()
-    st.subheader("6 · Tu posición")
+    st.subheader("7 · Tu posición")
 
     account = app_data.account_observations()
     positions = port.latest_positions(account)
