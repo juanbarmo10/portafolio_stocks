@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS companies (
 );
 CREATE INDEX IF NOT EXISTS idx_companies_ticker ON companies(ticker);
 
+-- Reorganizations IBKR reported and the panel could not classify (section 9.2). Until
+-- 2026-09-25 they only reached the log and Telegram; the portfolio page could not flag the
+-- position. Account data: never in the public copy.
+CREATE TABLE IF NOT EXISTS unmapped_actions (
+    action_id   TEXT PRIMARY KEY,           -- 'ibkr:<transactionID>'
+    ticker      TEXT,
+    conid       TEXT,
+    ex_date     TEXT,
+    code        TEXT,                       -- the reorg code IBKR used
+    description TEXT,                       -- IBKR's own text, verbatim
+    source      TEXT NOT NULL,
+    first_seen  TEXT,
+    ingested_at TEXT NOT NULL
+);
+
 -- SEC filing history: source of ts_release and of the amendment flag (sections 4.4, 9.6).
 CREATE TABLE IF NOT EXISTS filings (
     accession   TEXT PRIMARY KEY,

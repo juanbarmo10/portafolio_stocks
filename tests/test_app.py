@@ -311,3 +311,31 @@ def test_the_landing_page_leads_with_what_can_change_todays_decision(app_db):
     assert headers.index("Lo que viene — 14 días") < headers.index("1 · ¿Hay apetito por riesgo?")
     assert any(m.label == "Curva 10a − 2a" for m in at.metric)
     assert at.expander, "the full macro table is folded, not gone"
+
+
+def test_an_unclassified_reorganization_reaches_the_portfolio_page(app_db):
+    """Until 2026-09-25 an IBKR reorg the panel could not classify only reached the log and
+    Telegram; the position looked normal on the page."""
+    conn = loader.init_db(app_db)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            {"source": "ibkr", "series_id": "XLF:position_qty", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 4.0},
+            {"source": "ibkr", "series_id": "XLF:position_cost_basis", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 160.0},
+            {"source": "yfinance", "series_id": "XLF:close_raw", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 45.0},
+            {"source": "ibkr", "series_id": "NAV:stock", "ts": "2026-09-15",
+             "ts_release": "2026-09-15", "value": 180.0},
+        ]))
+        loader.upsert_unmapped_actions(conn, [
+            {"action_id": "ibkr:9", "ticker": "XLF", "conid": "1", "ex_date": "2026-09-01",
+             "code": "STOCKDIV", "description": "XLF STOCK DIVIDEND", "source": "ibkr",
+             "first_seen": "2026-09-02"}])
+    finally:
+        conn.close()
+    at = AppTest.from_file(MAIN, default_timeout=60).run()
+    at.switch_page(PORTFOLIO)
+    at.run()
+    errors = " ".join(element.value for element in at.get("error"))
+    assert "XLF — revisar" in errors and "STOCKDIV" in errors

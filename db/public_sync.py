@@ -55,6 +55,7 @@ def researched_institutions(settings: Settings) -> set[str]:
     return {str(i["code"]) for i in settings.source("bcb").get("institutions", [])
             if str(i.get("ticker")) in researched}
 PRIVATE_TABLES = frozenset({"trades", "cash_transactions", "securities", "alerts_log",
+                            "unmapped_actions",
                             "exit_ladder", "thesis_log", "universe_membership"})
 TABLES = ("companies", "filings", "events", "corporate_actions")
 

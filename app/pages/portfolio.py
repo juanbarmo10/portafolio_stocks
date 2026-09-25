@@ -173,7 +173,15 @@ if not public:
 # Section 9.2: an unrecognized or contradicted corporate action puts the quantity and the
 # cost base of that position in doubt, so it is raised here — next to the other reasons a
 # number below might not mean what it says — and never resolved automatically.
+unmapped = app_data.unmapped_actions()
+unmapped_labels = [
+    f"{row['ticker']} el {row['ex_date'] or '¿fecha?'}: código «{row['code']}»"
+    + (f" — «{row['description']}»" if row.get("description") else "")
+    + f" (visto desde el {row['first_seen']})"
+    for row in (unmapped.to_dict("records") if not unmapped.empty else [])
+]
 for review in reorg.review_positions(app_data.corporate_actions(), positions,
+                                     unmapped=unmapped_labels,
                                      since=reorg.held_since(open_lots, positions)):
     st.error(
         f"**{review.ticker} — revisar.** "

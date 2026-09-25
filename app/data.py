@@ -131,6 +131,11 @@ def cash_transactions() -> pd.DataFrame:
     return _account_table("cash_transactions", db_mtime())
 
 
+def unmapped_actions() -> pd.DataFrame:
+    """Reorganizations IBKR reported and the panel could not classify (section 9.2)."""
+    return _account_table("unmapped_actions", db_mtime())
+
+
 @st.cache_data(show_spinner=False)
 def _table(table: str, mtime: float) -> pd.DataFrame:
     """Any allowlisted table, cache-invalidated by the database mtime."""

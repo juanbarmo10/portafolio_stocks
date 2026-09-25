@@ -71,6 +71,7 @@ TABLE_LOADERS: dict[str, Callable[[Any, list[dict]], int]] = {
     "filings": loader.upsert_filings,
     "events": loader.upsert_events,
     "securities": loader.upsert_securities,
+    "unmapped_actions": loader.upsert_unmapped_actions,
     "universe_membership": loader.upsert_universe_membership,
     # The account tables take a frame rather than records, so they are adapted here
     # instead of bending either side of the contract.

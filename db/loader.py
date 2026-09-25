@@ -61,6 +61,8 @@ CASH_TRANSACTION_COLUMNS = [
 MEMBERSHIP_COLUMNS = [
     "universe", "ticker", "start_date", "end_date", "source", "first_seen",
 ]
+UNMAPPED_ACTION_COLUMNS = ["action_id", "ticker", "conid", "ex_date", "code", "description",
+                           "source", "first_seen"]
 SECURITY_COLUMNS = [
     "conid", "ticker", "cik", "name", "isin", "cusip", "figi", "asset_category",
     "sub_category", "listing_exchange", "issuer_country", "currency", "multiplier",
@@ -322,6 +324,19 @@ def upsert_cash_transactions(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
     return _upsert(
         conn, "cash_transactions", ("tx_id",), CASH_TRANSACTION_COLUMNS, records,
         True, "cash transactions",
+    )
+
+
+def upsert_unmapped_actions(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
+    """Upsert the reorganizations IBKR reported and the panel could not classify (§9.2).
+
+    ``first_seen`` keeps the first day: it says how long a position has been waiting for
+    someone to look at it.
+    """
+    return _upsert(
+        conn, "unmapped_actions", ("action_id",), UNMAPPED_ACTION_COLUMNS,
+        _to_records(rows, UNMAPPED_ACTION_COLUMNS), True, "unmapped actions",
+        immutable=("first_seen",),
     )
 
 

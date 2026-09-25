@@ -293,6 +293,11 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
          "source"],
         "ex_date",
     ),
+    "unmapped_actions": (
+        ["action_id", "ticker", "conid", "ex_date", "code", "description", "source",
+         "first_seen"],
+        "action_id",
+    ),
     "securities": (
         ["conid", "ticker", "cik", "name", "isin", "cusip", "figi", "asset_category",
          "sub_category", "listing_exchange", "issuer_country", "currency", "multiplier",
@@ -315,7 +320,7 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
 # Kept for the account tables specifically, which is what most callers want.
 ACCOUNT_TABLES: dict[str, list[str]] = {
     name: columns for name, (columns, _order) in READABLE_TABLES.items()
-    if name in ("trades", "cash_transactions")
+    if name in ("trades", "cash_transactions", "unmapped_actions")
 }
 
 

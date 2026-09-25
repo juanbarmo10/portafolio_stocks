@@ -117,6 +117,7 @@ def test_every_readable_table_matches_the_loader_column_list():
         "events": loader.EVENT_COLUMNS,
         "corporate_actions": loader.CORPORATE_ACTION_COLUMNS,
         "securities": loader.SECURITY_COLUMNS,
+        "unmapped_actions": loader.UNMAPPED_ACTION_COLUMNS,
         "universe_membership": loader.MEMBERSHIP_COLUMNS,
         "companies": loader.COMPANY_COLUMNS,
         "exit_ladder": loader.EXIT_LADDER_COLUMNS,

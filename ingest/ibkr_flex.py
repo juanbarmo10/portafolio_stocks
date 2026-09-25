@@ -497,6 +497,30 @@ def corporate_action_rows(
     return rows, failures
 
 
+def unmapped_action_rows(statement: Any, today: str) -> list[dict[str, Any]]:
+    """The reorganizations :func:`corporate_action_rows` refused to classify, as rows of
+    ``unmapped_actions`` — so the portfolio page can flag the position, not only the log.
+
+    IBKR's own description travels verbatim; the kind is never guessed (section 9.2).
+    """
+    rows = []
+    for action in statement.CorporateActions or ():
+        code = getattr(action.type, "name", "")
+        if code in CORPORATE_ACTION_KINDS:
+            continue
+        rows.append({
+            "action_id": f"ibkr:{action.transactionID or action.actionID}",
+            "ticker": action.symbol,
+            "conid": None if getattr(action, "conid", None) is None else str(action.conid),
+            "ex_date": _iso_date(action.dateTime or action.reportDate),
+            "code": code or repr(action.type),
+            "description": getattr(action, "description", None),
+            "source": SOURCE,
+            "first_seen": today,
+        })
+    return rows
+
+
 def verify_against_funds(
     statement: Any,
     trades: Sequence[Mapping[str, Any]],
@@ -800,6 +824,7 @@ class IbkrFlexIngester(Ingester):
             "cash_transactions": cash,
             "corporate_actions": actions,
             "securities": securities,
+            "unmapped_actions": unmapped_action_rows(statement, dt.date.today().isoformat()),
         }
         self._failures = [
             *trade_failures, *cash_failures, *action_failures, *security_failures,

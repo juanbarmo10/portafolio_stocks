@@ -665,3 +665,22 @@ def test_the_companies_registry_resolves_what_config_does_not(tmp_path):
         conn.close()
     assert ingester._resolve_cik("TMUS") == "0001283699"
     assert ingester._resolve_cik("NOPE") is None, "never a guess"
+
+
+def test_an_unmapped_reorg_is_kept_as_a_row_for_the_portfolio_page():
+    """Reported AND stored: the page can flag the position, not only the log."""
+    from ingest.ibkr_flex import unmapped_action_rows
+
+    action = types.SimpleNamespace(
+        transactionID=12, actionID=None, type=types.SimpleNamespace(name="STOCKDIV"),
+        symbol="XLF", dateTime=dt.date(2026, 3, 2), reportDate=dt.date(2026, 3, 2),
+        amount=None, currency="USD", conid=756733, description="XLF STOCK DIVIDEND")
+    mapped = types.SimpleNamespace(
+        transactionID=11, actionID=None, type=types.SimpleNamespace(name="FORWARDSPLIT"),
+        symbol="AAPL", dateTime=dt.date(2026, 3, 2), reportDate=dt.date(2026, 3, 2),
+        amount=None, currency="USD", conid=265598, description="split")
+    rows = unmapped_action_rows(types.SimpleNamespace(CorporateActions=[action, mapped]),
+                                "2026-03-03")
+    assert [r["ticker"] for r in rows] == ["XLF"], "a mapped action is not unmapped"
+    assert rows[0]["code"] == "STOCKDIV" and rows[0]["first_seen"] == "2026-03-03"
+    assert rows[0]["conid"] == "756733"
