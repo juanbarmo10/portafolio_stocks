@@ -398,7 +398,7 @@ o a medias.
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor, página por empresa | ✅ |
 | 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | ✅ construida; aceptación parcial: el semáforo acierta 5 de 6 correcciones desde mediados de 2011 con 0,8 % de falsas alarmas, pero confirma más que anticipa, y antes no hay datos point-in-time para juzgarlo |
 | 4 | Alertas Telegram y validación estadística | ✅ La validación no encontró ninguna señal que prediga rentabilidad; el freno sí protege y apenas cuesta (abajo) |
-| 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | en curso: ejecución diaria local ✅, capa fiscal local ✅; falta PostgreSQL y el despliegue |
+| 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | ✅ ejecución diaria local, capa fiscal local, copia pública en PostgreSQL y [versión pública](https://portafoliostocks.streamlit.app/) |
 
 El semáforo de régimen de la fase 3 usa **pesos iguales y fijos**, no optimizados sobre el
 histórico, con el voto de cada componente visible. Bloquea decisiones; nunca es un gatillo de

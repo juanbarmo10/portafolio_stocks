@@ -18,7 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import PUBLIC_NOTE, money, pct, rebase_100
+from app.format import PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE, money, pct, rebase_100
 from core.config import load_settings
 from transform import corporate_actions as reorg
 from transform import portfolio

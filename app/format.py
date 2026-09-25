@@ -56,10 +56,19 @@ reveals the jurisdiction (section 11).
 """
 
 PUBLIC_NOTE = (
+    "**Vista pública.** Mercado y empresas, con datos de fuentes públicas (FRED, SEC, "
+    "precios de cierre). La cuenta real no se publica: ni posiciones, ni operaciones, ni "
+    "importes."
+)
+"""Shown wherever the public deployment is rendered. Since 2026-09-24 the public copy holds
+no account data at all, so the note says that rather than describing relative figures."""
+
+PORTFOLIO_PUBLIC_NOTE = (
     "**Vista pública.** Todas las cifras de cartera son **relativas**: índice base 100, "
     "pesos y porcentajes. Los importes absolutos no se publican — y no están escalados "
     "por un factor, que es lo mismo que publicarlos para quien sepa mirar."
 )
+"""The portfolio page's own public note, for the day that page is published again."""
 
 
 def _spanish(text: str) -> str:

@@ -205,3 +205,19 @@ def page_text(app: AppTest) -> str:
     for frame in app.dataframe:
         chunks.append(pd.DataFrame(frame.value).to_string())
     return "\n".join(chunks)
+
+
+def test_the_verdict_strip_has_data_and_width(market_db):
+    """Found on the public deployment: the strip rendered its legend over nothing. Its
+    field did not exist (a named index) and its bands had no end. Altair checks neither."""
+    import pyarrow as pa
+
+    seed(market_db, healthy=True)
+    app = render()
+    charts = list(app.get("arrow_vega_lite_chart")) + list(app.get("vega_lite_chart"))
+    strips = [c for c in charts
+              if '"x2"' in c.proto.spec and '"Veredicto"' in c.proto.spec]
+    assert strips, "the verdict strip is not on the page"
+    data = pa.ipc.open_stream(strips[0].proto.datasets[0].data.data).read_pandas()
+    assert {"date", "end", "Veredicto"} <= set(data.columns)
+    assert len(data) > 0 and (pd.to_datetime(data["end"]) > pd.to_datetime(data["date"])).all()

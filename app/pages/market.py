@@ -143,7 +143,12 @@ for vote in reading.votes:
         "Dato del": vote.value_date or MISSING,
         "Por qué": vote.detail,
     })
-st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+st.dataframe(
+    pd.DataFrame(rows), hide_index=True, width="stretch",
+    # "5,45 billones USD" does not fit the default width and was cut to "5,45 bill".
+    column_config={name: st.column_config.TextColumn(width="medium")
+                   for name in ("Valor", "Comparado con")},
+)
 st.caption(
     "Reglas **escritas antes de mirar ningún resultado** y no retocadas después (§9.7). "
     "Nivel contra una referencia natural (NFCI 0 = condiciones medias; curva y "
@@ -191,13 +196,20 @@ st.caption(
     "rentabilidad (RESEARCH.md §2.29-2.30)."
 )
 
-history = view["frame"].reset_index().rename(columns={"index": "date"})
+# The index is named, so renaming a column called "index" did nothing and "date" never
+# existed; Altair does not check fields, and the strip drew nothing. Name it explicitly.
+history = view["frame"].rename_axis("date").reset_index()
 history["Veredicto"] = history["verdict"].map(VERDICT_SHORT)
+# Each session's band runs to the next session. A rect with only its start on a time axis
+# has no width, and the strip rendered as a legend over an empty chart (seen on the public
+# deployment, 2026-09-24).
+history["end"] = history["date"].shift(-1).fillna(history["date"].iloc[-1] + pd.Timedelta(days=1))
 history = history[history["verdict"] != rg.INSUFFICIENT]
 if not history.empty:
     st.altair_chart(
         alt.Chart(history).mark_rect().encode(
             x=alt.X("date:T", title=None),
+            x2="end:T",
             color=alt.Color(
                 "Veredicto:N",
                 scale=alt.Scale(domain=[VERDICT_SHORT[k] for k in VERDICT_COLORS],
