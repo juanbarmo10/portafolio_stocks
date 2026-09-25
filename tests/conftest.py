@@ -32,3 +32,28 @@ def isolate_config(monkeypatch, tmp_path):
     config.load_settings.cache_clear()
     yield
     config.load_settings.cache_clear()
+
+
+_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Refuse any connection that leaves the machine.
+
+    Found on 2026-09-24: a FRED test stubbed one request function, a new code path used
+    another, and the suite reached the real API — and passed or failed depending on the
+    network. Loopback stays allowed: several tests point at ``127.0.0.1:1`` precisely to
+    get a refused connection.
+    """
+    import socket
+
+    real_connect = socket.socket.connect
+
+    def guarded(sock, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if isinstance(host, str) and host not in _LOCAL_HOSTS and not host.startswith("/"):
+            raise RuntimeError(f"test tried to reach the network: {address!r}")
+        return real_connect(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded)

@@ -80,6 +80,25 @@ sources:
       - WALCL         # activos totales de la Fed (millones USD, semanal)
       - WTREGEN       # cuenta general del Tesoro en la Fed (millones USD, semanal)
       - WLRRAL        # repos inversos, nivel del miércoles (millones USD, semanal)
+    # Historia ANTERIOR al archivo de vintages (ALFRED), con fecha de publicación DERIVADA.
+    # Solo para series que NO se revisan, verificado y no supuesto (RESEARCH.md §2.30): el
+    # 2026-09-24, la primera publicación coincide con el valor actual en 4.012 de 4.012
+    # días de VIXCLS y en 3.123 de 3.124 de VXVCLS (la otra, 0,01 puntos). Así el dato de
+    # hoy de una fecha pasada ES el publicado, y lo único desconocido es CUÁNDO se publicó:
+    # fecha de referencia + el MÁXIMO rezago medido (3 días hábiles; mediana 0), para que
+    # la fecha derivada se equivoque tarde (§9.4). Con esto VIX y VIX3M llegan a 2007-12,
+    # y la estructura de volatilidad del semáforo puede votar en 2008.
+    # ⚠️ NUNCA añadir aquí una serie que se revise (NFCI, dólar amplio, balance de la Fed):
+    # su valor de hoy para 2008 no es el que se conocía en 2008.
+    #
+    # DFF entra con una salvedad, dicha aquí: CASI no se revisa — 18 de 7.759 días difieren,
+    # máx. 0,09 pp, solo 4 por encima de 0,05 (medido 2026-09-24). No vota en el semáforo;
+    # se usa para remunerar el efectivo retenido en el estudio del freno (RESEARCH §2.30),
+    # donde el interés cobrado no es una señal. Rezago máximo medido: 7 días hábiles.
+    pre_vintage_backfill:
+      VIXCLS: 3
+      VXVCLS: 3
+      DFF: 7
 
   sec:
     base_url: https://data.sec.gov
@@ -606,3 +625,19 @@ validation:
   seed: 0                         # misma ejecución, mismos números
   offsets: 10                     # rejillas alternativas para la estabilidad del signo
   out_of_sample_component: equal_weight   # RSP/SPY: solo precios, probable antes de 2012
+
+# --- Estudio del freno de aportes (RESEARCH.md §2.30) -----------------------------------
+# Escrito ANTES de ejecutarlo (2026-09-24) y no retocado después. Pregunta: ¿qué variante
+# del freno protege más y cuesta menos a quien aporta cada mes? "Mejora" = protege al
+# menos como V0 (caída máxima posterior a 90 días) Y cuesta menos (mediana de riqueza
+# relativa en el aporte mensual) en LAS DOS mitades. Nada de producción cambia por esto.
+brake_study:
+  variants: [V0_actual, V1_sin_rsp, V2_tendencia, V3_ambos]
+  trend_window: 200                # V2: la media clásica de la literatura, no ajustada
+  horizons_days: [30, 90, 180]
+  protection_horizon: 90           # el que decide la comparación
+  halves:                          # la muestra con veredicto, partida por la mitad
+    - ["2012-04-13", "2019-06-30"]
+    - ["2019-07-01", "2026-09-23"]
+  long_period: ["1999-12-01", "2012-04-12"]   # solo V2: fuera de muestra para todo
+  min_months_to_end: 36            # una simulación de aporte dura al menos 3 años

@@ -27,6 +27,8 @@ log = get_logger(__name__)
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="equitydash signal validation")
     parser.add_argument("--out", help="Also write the Markdown report to this file.")
+    parser.add_argument("--brake", action="store_true",
+                        help="Run the brake study (RESEARCH.md §2.30) instead of the battery.")
     args = parser.parse_args(argv)
 
     settings = load_settings()
@@ -47,6 +49,24 @@ def main(argv: list[str] | None = None) -> int:
     if built is None:
         log.error("No data for the regime light: run `python run_ingest.py --only fred prices`.")
         return 1
+
+    if args.brake:
+        from transform.regime import asof  # noqa: PLC0415
+        from validation.brake import report_study, run_study  # noqa: PLC0415
+
+        conn = open_connection(settings.db_path)
+        try:
+            dff = read_observations(conn, series_ids=["DFF"])
+        finally:
+            conn.close()
+        cash_rate = asof(dff, "DFF", built.benchmark_total.dropna().index)["value"]
+        text = report_study(run_study(built, cash_rate, settings.raw["brake_study"]),
+                            date.today().isoformat())
+        print(text)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as handle:
+                handle.write(text + "\n")
+        return 0
 
     battery = run_battery(built, cfg)
     judged = built.frame.index[built.frame["verdict"] != rg.INSUFFICIENT]

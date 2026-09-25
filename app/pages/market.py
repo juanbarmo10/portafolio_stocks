@@ -169,12 +169,21 @@ if not episodes.empty:
     st.dataframe(episodes, hide_index=True, width="stretch")
 st.caption(
     "**Lectura honesta:** casi nunca da falsa alarma, y se pone en rojo en la mayoría de "
-    "las correcciones desde 2012 — pero **confirma, no anticipa**: llega tarde, y en las "
-    "correcciones pasa más tiempo en ámbar que en rojo. Antes de 2012 no hay veredicto: con "
-    "datos point-in-time solo votan los dos componentes construidos con ETF. En esta "
-    "muestra, **NFCI no votó risk-off nunca** y **RSP/SPY no distingue** calma de "
-    "corrección; no se han cambiado tras verlo — sería ajustar las reglas al pasado. Es una "
-    "descripción, no una prueba: la validación estadística es la fase 4 (RESEARCH.md §2.27)."
+    "las correcciones desde mediados de 2011 — pero **confirma, no anticipa**: llega tarde, "
+    "y en las correcciones pasa más tiempo en ámbar que en rojo. Antes de junio de 2011 no "
+    "hay veredicto: con datos point-in-time solo votan tres componentes (los dos hechos con "
+    "ETF y la volatilidad, cuya historia antes de 2014 lleva fecha de publicación derivada) "
+    "y el mínimo es cuatro. En esta muestra, **NFCI no votó risk-off nunca** y **RSP/SPY no "
+    "distingue** calma de corrección; no se han cambiado tras verlo — sería ajustar las "
+    "reglas al pasado."
+)
+st.caption(
+    "**Lo que dijo la prueba estadística (fase 4).** El rojo **no** anticipa peor "
+    "rentabilidad: ninguna señal del semáforo pasa la corrección por comparaciones "
+    "múltiples, y tras el verde se ganó algo *menos* que la media. Lo que sí hace es "
+    "activarse antes de caídas más hondas en el mes siguiente, y a quien aporta cada mes le "
+    "ha costado prácticamente nada. Es un freno de disciplina, no una fuente de "
+    "rentabilidad (RESEARCH.md §2.29-2.30)."
 )
 
 history = view["frame"].reset_index().rename(columns={"index": "date"})
@@ -301,7 +310,9 @@ if vix.value is not None and vix3m.value:
     cols[2].metric("VIX / VIX3M", number(ratio, decimals=3),
                    help="Por debajo de 1 es lo normal. Por encima, el miedo a corto plazo "
                         "supera al de largo: estrés presente.")
-st.caption(f"Datos del {vix.ts or MISSING}. Point-in-time del VIX3M solo desde 2014.")
+st.caption(f"Datos del {vix.ts or MISSING}. VIX3M desde 2007-12 y VIX desde 2000; antes de 2014 "
+           "y de 2010 respectivamente, la fecha de publicación es derivada (+3 días hábiles, "
+           "el máximo medido): la serie no se revisa, solo se desconoce cuándo salió.")
 
 # --- 6. Short interest (private) ----------------------------------------------------------------
 

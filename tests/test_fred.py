@@ -14,7 +14,7 @@ import pytest
 import requests
 
 from db.loader import OBSERVATION_COLUMNS
-from ingest.fred import FredIngester, parse_initial_releases
+from ingest.fred import FredIngester, derive_pre_vintage, parse_initial_releases
 
 FIXTURE = Path(__file__).parent / "fixtures" / "fred_cpiaucsl_output4.json"
 
@@ -310,6 +310,9 @@ def test_one_broken_series_does_not_cost_the_others(monkeypatch):
     ingester = _ingester(monkeypatch)
     monkeypatch.setattr(ingester, "_series", ["CPIAUCSL", "BROKEN", "DFF"])
     monkeypatch.setattr(ingester, "_first_vintage", lambda code: "2000-01-01")
+    # DFF is configured for the pre-vintage backfill, which has its own request; left on,
+    # this test reached the real FRED API. The backfill has its own test below.
+    monkeypatch.setattr(ingester, "_pre_vintage", {})
 
     def fake_get(code, start, end):
         if code == "BROKEN":
@@ -323,3 +326,56 @@ def test_one_broken_series_does_not_cost_the_others(monkeypatch):
 
     assert set(df["series_id"]) == {"CPIAUCSL", "DFF"}, "healthy series were lost"
     assert ingester.partial_failures() == ["BROKEN"], "the failure must be reported"
+
+
+# --- Before the vintage archive: derived publication dates (RESEARCH.md §2.30) -----------
+
+
+def test_pre_vintage_rows_get_the_maximum_lag_in_business_days():
+    """Friday + 3 business days is Wednesday: the weekend does not count, and the date
+    errs late — a late date only makes the panel cautious, an early one is look-ahead."""
+    obs = [{"date": "2008-10-10", "value": "69.95"}, {"date": "2008-10-13", "value": "54.99"}]
+    out = derive_pre_vintage(obs, "VIXCLS", before="2010-11-22", lag_business_days=3)
+    assert out["ts_release"].tolist() == ["2008-10-15T00:00:00+00:00",
+                                          "2008-10-16T00:00:00+00:00"]
+    assert out["ts"].iloc[0] == "2008-10-10T00:00:00+00:00"
+
+
+def test_pre_vintage_rows_stop_where_real_vintages_start():
+    obs = [{"date": "2010-11-19", "value": "18.0"}, {"date": "2010-11-22", "value": "19.0"}]
+    out = derive_pre_vintage(obs, "VIXCLS", before="2010-11-22", lag_business_days=3)
+    assert out["ts"].tolist() == ["2010-11-19T00:00:00+00:00"], "no overlap with real vintages"
+
+
+def test_pre_vintage_drops_the_missing_sentinel():
+    obs = [{"date": "2008-12-25", "value": "."}]
+    assert derive_pre_vintage(obs, "VIXCLS", "2010-11-22", 3).empty
+
+
+def test_only_unrevised_series_are_configured_for_backfill():
+    """A revised series (NFCI, the dollar) back-filled with today's values would put
+    later knowledge into 2008. The list is short on purpose and checked here; DFF is in
+    it with its measured, immaterial revisions written next to it in the config."""
+    from core.config import load_settings
+
+    configured = load_settings().source("fred").get("pre_vintage_backfill") or {}
+    assert set(configured) <= {"VIXCLS", "VXVCLS", "DFF"}
+
+
+def test_a_failed_backfill_keeps_the_series_and_is_reported(monkeypatch):
+    """The archived history is good data; losing the older, derived stretch must not cost
+    it — and must reach the exit code."""
+    ingester = _ingester(monkeypatch)
+    monkeypatch.setattr(ingester, "_series", ["VIXCLS"])
+    monkeypatch.setattr(ingester, "_pre_vintage", {"VIXCLS": 3})
+    monkeypatch.setattr(ingester, "_first_vintage", lambda code: "2010-11-22")
+    monkeypatch.setattr(ingester, "_get", lambda code, start, end: _Resp(200, {"observations": [
+        {"date": "2010-11-22", "realtime_start": "2010-11-23", "value": "20.0"}]}))
+
+    def broken(code, before):
+        raise RuntimeError("backfill down")
+
+    monkeypatch.setattr(ingester, "_backfill", broken)
+    df = ingester.fetch()
+    assert list(df["series_id"]) == ["VIXCLS"]
+    assert ingester.partial_failures() == ["VIXCLS (pre-vintage)"]

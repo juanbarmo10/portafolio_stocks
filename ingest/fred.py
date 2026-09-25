@@ -35,6 +35,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -106,6 +107,42 @@ def parse_initial_releases(observations: list[dict], code: str) -> pd.DataFrame:
     })
 
 
+def derive_pre_vintage(
+    observations: list[dict], code: str, before: str, lag_business_days: int
+) -> pd.DataFrame:
+    """Rows for the dates **before** ALFRED's archive, with a DERIVED publication date.
+
+    Only for series that are never revised — verified, not assumed (RESEARCH.md §2.30):
+    for those, today's value of a past date *is* the value first published, and the only
+    unknown is **when** it was published. That is derived as the reference date plus
+    ``lag_business_days``, the **maximum** lag measured over the archived period, so the
+    derived date errs late (a late date only makes the panel cautious; an early one is
+    look-ahead, section 9.4).
+
+    Args:
+        observations: ``{"date", "value"}`` dicts of the series' current values.
+        code: FRED series code.
+        before: First reference date covered by real vintages; only earlier dates are kept.
+        lag_business_days: Publication lag to add, in business days.
+
+    Returns:
+        Long DataFrame in the loader contract. Missing-value sentinels are dropped.
+    """
+    rows = [o for o in observations
+            if o.get("value") not in (None, _MISSING) and str(o["date"]) < before]
+    if not rows:
+        return empty_observations()
+    dates = np.array([str(o["date"]) for o in rows], dtype="datetime64[D]")
+    released = np.busday_offset(dates, lag_business_days, roll="forward")
+    return pd.DataFrame({
+        "source": "fred",
+        "series_id": code,
+        "ts": [f"{d}T00:00:00+00:00" for d in dates.astype(str)],
+        "ts_release": [f"{d}T00:00:00+00:00" for d in released.astype(str)],
+        "value": [float(o["value"]) for o in rows],
+    })
+
+
 class FredIngester(Ingester):
     """Fetch the configured FRED macro series with point-in-time release dates."""
 
@@ -124,6 +161,11 @@ class FredIngester(Ingester):
         self._timeout = cfg.get("request_timeout_s", 20)
         self._observation_start = str(cfg.get("observation_start", "2000-01-01"))
         self._series: list[str] = list(cfg.get("series", []))
+        # Series allowed to extend before ALFRED's archive, with their measured maximum
+        # publication lag. Only non-revised series belong here (see derive_pre_vintage).
+        self._pre_vintage: dict[str, int] = {
+            str(code): int(lag) for code, lag in (cfg.get("pre_vintage_backfill") or {}).items()
+        }
 
         retry_cfg = settings.raw.get("ingest", {}).get("retry", {})
         self._retry_kwargs = {
@@ -304,8 +346,41 @@ class FredIngester(Ingester):
             )
             frames.append(reduced)
 
+            if code in self._pre_vintage and not reduced.empty:
+                try:
+                    frames.append(self._backfill(code, reduced["ts"].min()[:10]))
+                except Exception:
+                    log.exception("Pre-vintage backfill failed.",
+                                  extra={"source": self.source, "series_id": code})
+                    self._failures.append(f"{code} (pre-vintage)")
+
         df = pd.concat(frames, ignore_index=True) if frames else empty_observations()
         return self.validate(df)
+
+    def _backfill(self, code: str, before: str) -> pd.DataFrame:
+        """Current values before the first archived date, with derived release dates."""
+        params = {
+            "series_id": code, "api_key": self._api_key, "file_type": "json",
+            "observation_start": self._observation_start,
+            "observation_end": (dt.date.fromisoformat(before) - dt.timedelta(days=1)).isoformat(),
+        }
+        resp = retry(
+            lambda: requests.get(f"{self._base_url}/series/observations", params=params,
+                                 timeout=self._timeout),
+            exceptions=(requests.RequestException,), **self._retry_kwargs,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"FRED {code}: HTTP {resp.status_code} on the backfill")
+        derived = derive_pre_vintage(resp.json().get("observations", []), code, before,
+                                     self._pre_vintage[code])
+        log.warning(
+            "FRED: %d points before %s with a DERIVED publication date (+%d business days, "
+            "the measured maximum); the value is taken as published (see the config note on "
+            "revisions), the date is derived, not observed.",
+            len(derived), before, self._pre_vintage[code],
+            extra={"source": self.source, "series_id": code},
+        )
+        return derived
 
     def partial_failures(self) -> list[str]:
         """FRED codes that failed during the last :meth:`fetch`."""

@@ -363,8 +363,8 @@ o a medias.
 | 0 | Andamiaje: esquema, adaptador de BD, loader idempotente, config, logging, CI | ✅ |
 | 1 | Niveles 1 y 4: macro (FRED), precios crudos, cuenta IBKR, página de cartera | ✅ |
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor, página por empresa | ✅ |
-| 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | ✅ construida; aceptación parcial: el semáforo acierta 5 de 6 correcciones desde 2012 con 0,8 % de falsas alarmas, pero confirma más que anticipa, y antes de 2012 no hay datos point-in-time para juzgarlo |
-| 4 | Alertas Telegram y validación estadística | ✅ construida; falta conectar el bot de Telegram. La validación no encontró ninguna señal significativa (abajo) |
+| 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | ✅ construida; aceptación parcial: el semáforo acierta 5 de 6 correcciones desde mediados de 2011 con 0,8 % de falsas alarmas, pero confirma más que anticipa, y antes no hay datos point-in-time para juzgarlo |
+| 4 | Alertas Telegram y validación estadística | ✅ La validación no encontró ninguna señal que prediga rentabilidad; el freno sí protege y apenas cuesta (abajo) |
 | 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | pendiente |
 
 El semáforo de régimen de la fase 3 usa **pesos iguales y fijos**, no optimizados sobre el
@@ -386,10 +386,30 @@ permutación y Benjamini-Hochberg a q = 0,10.
 es la contraria a la hipótesis: tras el verde se ganó menos que la media, y tras las señales
 de estrés (crédito, curva, volatilidad), más — la huella de la reversión a la media, que hace
 que el estrés se lea con más fuerza cerca de los suelos. El componente de equiponderado
-contra capitalización, que ya no discriminaba en 2012-2026, falla también fuera de muestra
-(2004-2012). No se cambió ninguna regla al ver el resultado: el semáforo sigue siendo un
-freno de disciplina, y ya no hay motivo para creer que añada rentabilidad.
+contra capitalización, que ya no discriminaba en 2011-2026, falla también fuera de muestra
+(2004-2011). No se cambió ninguna regla al ver el resultado.
 `python run_validation.py` reproduce el informe entero.
+
+### Y lo que un freno sí promete: proteger sin costar
+
+Un freno no tiene que adivinar la rentabilidad; tiene que evitar comprar justo antes de lo
+peor y no costar mucho. El segundo estudio (`python run_validation.py --brake`) lo mide así:
+la **caída máxima** tras activarse, y la **riqueza final** de quien aporta cada mes y retiene
+el aporte en efectivo (al tipo de la Fed) mientras el freno está activo. Cuatro variantes y la
+regla de decisión, escritas antes de ejecutar:
+
+- **El semáforo actual protege a un mes** (peor caída posterior −4,5 % frente a −2,2 %,
+  significativa aunque con pocos casos) y **no cuesta nada** (+0,1 % de riqueza final).
+- **El filtro clásico** —S&P 500 bajo su media de 200 sesiones— **protege más** (−8,0 % frente
+  a −4,0 % a 90 días) pero **cuesta siempre**, entre 0,2 % y 0,8 %: la volatilidad se agrupa,
+  así que tras la señal vienen caídas más hondas *y* rebotes más fuertes, y esperar se pierde
+  el rebote.
+- **Ninguna variante mejoró la regla actual**, que se queda como está. Todas las diferencias
+  son menores del 1 %: el freno se justifica por disciplina, no por rentabilidad.
+
+VIX y VIX3M se alargan hasta 2000 y 2007 con una **fecha de publicación derivada** (la de
+referencia más el rezago máximo medido), solo porque se comprobó que esas series no se
+revisan: la primera publicación coincide con el valor actual en todos los días archivados.
 
 ---
 

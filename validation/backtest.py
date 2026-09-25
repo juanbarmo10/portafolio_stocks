@@ -33,7 +33,7 @@ every revised value before that would be look-ahead. Saying so is the result.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -110,12 +110,13 @@ def signals(built: rg.RegimeBuild) -> list[Signal]:
     return out
 
 
-def _sample(signal: pd.Series, prices: pd.Series, horizon: int, offset: int
+def _sample(signal: pd.Series, prices: pd.Series, horizon: int, offset: int,
+            outcome: Callable[..., float | None] = forward_return
             ) -> tuple[list[float], list[float]]:
     exists = signal.dropna()
     on, off = [], []
     for day in grid_dates(exists.index, horizon, offset):
-        r = forward_return(prices, day, horizon)
+        r = outcome(prices, day, horizon)
         if r is None:
             continue
         (on if exists.loc[day] == 1 else off).append(r)
@@ -125,12 +126,17 @@ def _sample(signal: pd.Series, prices: pd.Series, horizon: int, offset: int
 def test_signal(
     signal: Signal, prices: pd.Series, horizon: int, *, min_group: int = 8,
     permutations: int = 10_000, seed: int = 0, offsets: int = 10,
+    outcome: Callable[..., float | None] = forward_return,
 ) -> TestResult:
-    """One signal at one horizon (see the module docstring for the protocol)."""
+    """One signal at one horizon (see the module docstring for the protocol).
+
+    ``outcome`` is what is measured after each date: the forward return by default, or any
+    function with its signature (the brake study uses the forward maximum drawdown).
+    """
     exists = signal.series.dropna()
     window = (f"{exists.index[0].date()} → {exists.index[-1].date()}"
               if len(exists) else "—")
-    on, off = _sample(signal.series, prices, horizon, 0)
+    on, off = _sample(signal.series, prices, horizon, 0, outcome)
     mean_on = float(np.mean(on)) if on else None
     mean_off = float(np.mean(off)) if off else None
     edge = None if mean_on is None or mean_off is None else mean_on - mean_off
@@ -141,7 +147,7 @@ def test_signal(
         same = []
         for k in range(1, offsets + 1):
             offset = int(k * max(1.0, horizon * SESSIONS_PER_DAY / offsets))
-            a, b = _sample(signal.series, prices, horizon, offset)
+            a, b = _sample(signal.series, prices, horizon, offset, outcome)
             if a and b:
                 same.append(np.sign(np.mean(a) - np.mean(b)) == np.sign(edge))
         stability = float(np.mean(same)) if same else None
