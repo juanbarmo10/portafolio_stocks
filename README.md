@@ -324,7 +324,7 @@ La versión pública corre en **Streamlit Community Cloud** y lee una base **Pos
    *Secrets*: `DATABASE_URL = "..."` (la misma cadena) y `PUBLIC_MODE = "1"`.
 
 La copia pública no guarda los ~1,4 M de cierres de los miembros del S&P 500 —no caben en el
-plan gratuito—, sino la serie de amplitud ya calculada con su cobertura. Ocupa unos 30-40 MB.
+plan gratuito—, sino la serie de amplitud ya calculada con su cobertura. Ocupa unos 93 MB.
 
 Re-ejecutar es seguro por construcción: toda escritura pasa por un
 `INSERT ... ON CONFLICT DO UPDATE`.

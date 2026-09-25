@@ -314,3 +314,5 @@ def test_the_public_copy_lists_its_published_companies_without_opinion(tmp_path,
     assert "No hay ninguna empresa escrita" not in text
     assert "Costes de cambio altos" not in text, "no thesis text in the public copy"
     assert "Ingresos" in text or "ingresos" in text, "the audited numbers render"
+    assert "tu lista de estudio" not in text and "settings.local.yaml" not in text, (
+        "the visitor is not the owner: no operator instructions in public")

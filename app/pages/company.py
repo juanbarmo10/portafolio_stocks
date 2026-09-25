@@ -183,7 +183,14 @@ st.subheader("1 · En estudio" if ticker in under_study else "1 · La tesis")
 for flag in status.flags:
     st.warning(flag)
 
-if ticker in under_study:
+if ticker in under_study and public:
+    # The visitor is not the owner: no "your list", and no instructions for editing a
+    # config file they do not have (the portfolio page drops its operator notes the same way).
+    st.info(
+        f"**{ticker}: empresa en estudio.** Cifras auditadas completas, tal como se "
+        "presentaron a la SEC. No hay tesis publicada: el panel no opina sobre ella (§5.2)."
+    )
+elif ticker in under_study:
     st.info(
         f"**{ticker} está en tu lista de estudio, sin ficha de tesis.** Debajo tienes sus "
         "cifras auditadas completas — que es con lo que se estudia una empresa. Lo que el "
@@ -348,6 +355,8 @@ row[3].metric(
 if accrual.roic is not None:
     if hurdle is None:
         st.caption(
+            "Sin tasa exigida de referencia, el ROIC no se compara contra nada. "
+            "**Desconocido no es aprobado** (§12)." if public else
             "Sin tasa exigida configurada, el ROIC no se compara contra nada: escribe "
             "`panel.level3.hurdle_rate` en `settings.local.yaml`. **Desconocido no es "
             "aprobado** (§12)."
