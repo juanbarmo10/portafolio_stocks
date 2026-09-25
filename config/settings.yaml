@@ -261,6 +261,15 @@ sources:
         kind: instant
         unit: USD
         tags: [LongTermDebtCurrent, DebtCurrent, ConvertibleNotesPayableCurrent]
+      # Para cuando la deuda no se puede identificar: ImmunityBio presenta la mayor parte de
+      # la suya (notas convertibles con partes vinculadas) con etiquetas PROPIAS; los
+      # conceptos estándar solo ven `SecuredLongTermDebt` 415 M de ~1.600 M de pasivo no
+      # corriente. NO se añade SecuredLongTermDebt como sinónimo de la deuda: daría una cifra
+      # parcial y plausible. La página enseña el pasivo no corriente y lo explica.
+      liabilities_current:
+        kind: instant
+        unit: USD
+        tags: [LiabilitiesCurrent]
       short_term_investments:
         kind: instant
         unit: USD
@@ -693,6 +702,45 @@ brake_study:
     - ["2019-07-01", "2026-09-23"]
   long_period: ["1999-12-01", "2012-04-12"]   # solo V2: fuera de muestra para todo
   min_months_to_end: 36            # una simulación de aporte dura al menos 3 años
+
+# --- Estudio de compras de directivos (CLAUDE.md §15.1.6) -----------------------------
+# Escrito el 2026-09-25 ANTES de descargar un solo dato y no retocado después. Pedido del
+# usuario: "las compras de directivos hay que validarlas" antes de enseñarlas como señal.
+# Pregunta: ¿las compras en mercado abierto de directivos preceden una rentabilidad mayor
+# que la del S&P 500? Nada de producción cambia por esto hasta que el usuario lo decida.
+insider_study:
+  source_url: "https://www.sec.gov/files/structureddata/data/insider-transactions-data-sets/{quarter}_form345.zip"
+  first_quarter: 2017q1            # los cierres de los miembros del S&P 500 empiezan en 2017
+  # Qué es una compra: Form 4 original (no enmiendas), código P (mercado abierto O colocación
+# privada: la SEC no los separa, y se dice en el informe), adquirida,
+  # por un consejero o directivo. Los "10 % owners" que no son ninguna de las dos cosas son
+  # casi siempre fondos: fuera.
+  signals:
+    cluster:                       # la señal con más literatura: varios comprando a la vez
+      min_insiders: 3
+      window_days: 30              # insiders DISTINTOS con presentación en 30 días naturales
+      # Precisado el 2026-09-25 al leer el primer trimestre, ANTES de ver ningún resultado:
+      # una presentación conjunta (un fondo y sus socios consejeros declarando la MISMA
+      # compra, p. ej. NKTX 2024-03-29) cuenta como UN comprador, no como tres. Si no, un
+      # solo fondo fabricaría un "grupo".
+      joint_filing_counts_once: true
+    executive:                     # el CEO o el CFO poniendo dinero propio
+      title_pattern: "(chief executive|\\bceo\\b|chief financial|\\bcfo\\b)"
+      min_value_usd: 100000
+  event_date: filing_date          # cuándo fue PÚBLICO, no cuándo compró (§9.4)
+  cooldown_days: 180               # un evento por empresa cada 180 días: independencia
+  horizons_days: [30, 90, 180]     # entrada el cierre siguiente a la presentación
+  benchmark: SPY                   # rentabilidad de precio de los dos (sin dividendos)
+  universe: sp500_at_event         # miembro del S&P 500 ese día y con precio
+  baseline_step_days: 30           # mismas empresas, rejilla mensual lejos de sus eventos
+  fdr_alpha: 0.10                  # BH sobre las 6 pruebas (2 señales × 3 horizontes)
+  permutations: 10000
+  seed: 0
+  halves_split: "2021-12-31"       # estabilidad del signo: 2017-2021 frente a 2022-hoy
+  # Regla de decisión, escrita antes: la señal se considera VALIDADA solo si es significativa
+  # tras BH a 90 o 180 días, con exceso medio POSITIVO sobre la base, y el mismo signo en las
+  # dos mitades. Si no, el panel no la enseña como señal.
+  decision_horizons: [90, 180]
 
 # --- Ejecución diaria (§3, §8 fase 5) ------------------------------------------------
 # La HORA vive en deploy/equitydash-daily.timer (la lee systemd, no Python). Aquí solo lo

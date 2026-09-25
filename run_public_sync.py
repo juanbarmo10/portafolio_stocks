@@ -19,7 +19,7 @@ import pandas as pd
 from core.config import load_settings
 from core.logging_setup import configure_logging, get_logger
 from db import public_sync as ps
-from db.database import connect_url, open_connection
+from db.database import connect_url, open_connection, read_table
 from ingest.base import held_tickers
 
 log = get_logger(__name__)
@@ -42,10 +42,25 @@ def main(argv: list[str] | None = None) -> int:
         pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=int(cfg.get("lookback_days", 10)))
     ).date().isoformat()
 
+    # Researched companies the cloud does not list yet go up whole (ps.select).
+    newcomers: set[str] = set()
+    if since is not None and url:
+        target = connect_url(url)
+        try:
+            published = set(read_table(target, "companies")["cik"])
+        except Exception:  # noqa: BLE001 — a first run has no table: everything is new
+            published = set()
+        finally:
+            target.close()
+        newcomers = ps.researched_ciks(settings) - published
+        if newcomers:
+            log.info("Public sync: %d new researched compan(ies) sent whole.", len(newcomers))
+
     local = open_connection(settings.db_path)
     try:
         readings = ps.constituent_readings(local, settings.raw["panel"]["level2"])
-        selection = ps.select(local, settings, since=since, breadth_readings=readings)
+        selection = ps.select(local, settings, since=since, breadth_readings=readings,
+                              newcomers=newcomers)
         ps.assert_public(selection, settings, held=set(held_tickers(local)))
     finally:
         local.close()

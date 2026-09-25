@@ -45,6 +45,7 @@ from transform import portfolio as port
 from transform import thesis as th
 from transform import price_action as pa
 from transform import quarterly as qt
+from transform import screen as sc
 from transform import valuation as val
 from transform.adjustments import split_adjusted, total_return_index
 from transform import value_accrual as va
@@ -192,7 +193,34 @@ if snapshot.stale_days is not None:
     header.append(f"último dato presentado hace {snapshot.stale_days} días")
 st.caption(" · ".join(header))
 
-if observations.empty or snapshot.revenue_ttm is None:
+# Why fundamentals are missing decides what to say (all three seen 2026-09-25): a
+# foreign issuer files IFRS on 20-F/6-K (Nu Holdings), a pre-revenue company files no
+# revenue at all (Nautilus), and only otherwise is it a data gap to fix.
+company_forms = set(filings.loc[filings["cik"] == cik, "form"]) if not filings.empty else set()
+foreign_issuer = bool(company_forms & {"20-F", "20-F/A", "6-K", "40-F"}) and \
+    not company_forms & {"10-K", "10-Q"}
+has_facts = not observations.empty and observations["series_id"].str.startswith(cik).any()
+if foreign_issuer and not has_facts:
+    st.info(
+        "**Emisor extranjero**: presenta un 20-F anual y 6-K trimestrales, con normas **IFRS** "
+        "en vez de US GAAP. El panel solo lee US GAAP, y los 6-K no llevan XBRL: aquí no hay "
+        "fundamentales auditados que mostrar. Precio, valoración de mercado e interés corto "
+        "sí; las cuentas, en sus informes trimestrales."
+    )
+elif has_facts and snapshot.revenue_ttm is None:
+    revenue_q = fun.known(observations, cik, "revenue", fun.QUARTER, as_of_iso)
+    sold = revenue_q[revenue_q["value"] > 0]
+    first = (f" Presentó ingresos por primera vez el trimestre cerrado el "
+             f"{str(sold['ts'].iloc[0])[:10]} ({reported_amount(float(sold['value'].iloc[0]))});"
+             " menos de cuatro trimestres, así que no hay cifra de doce meses."
+             if not sold.empty else "")
+    st.info(
+        "**Sin ingresos de doce meses**: habitual en una biotecnológica o tecnológica que "
+        f"aún no vende, o que acaba de empezar.{first} Márgenes y múltiplos sobre ventas no "
+        "existen todavía; lo que manda es la **caja**: cuánta tiene, cuánto quema y cuánto "
+        "le dura (balance, abajo), y cuánto diluye."
+    )
+elif observations.empty or snapshot.revenue_ttm is None:
     st.info(
         "Sin fundamentales calculables para esta empresa a esa fecha. Ejecuta "
         "`python run_ingest.py --only sec sec_filings`, o revisa si hacen falta cuatro "
@@ -300,6 +328,7 @@ row[3].metric(
 if (
     snapshot.cash_conversion is None
     and snapshot.fcf_ttm is not None
+    and snapshot.fcf_ttm > 0
     and snapshot.net_income_ttm is not None
     and snapshot.net_income_ttm <= 0
 ):
@@ -402,8 +431,66 @@ if sheet.assets is not None:
                   help="Beneficio operativo TTM / gasto por intereses TTM: cuántas veces "
                        "cubre el negocio lo que paga por su deuda. Vacía si no presenta "
                        "intereses o pierde dinero.")
-    st.caption("Solo cifras del último balance presentado: una partida que no aparece en él "
-               "queda vacía en vez de arrastrar la de un balance anterior.")
+    row[2].metric("Quema de caja (TTM, USD)", compact_amount(sheet.cash_burn_ttm),
+                  help="Flujo de caja libre negativo de los últimos cuatro trimestres. Vacía "
+                       "si la empresa genera caja.")
+    row[3].metric("Autonomía de caja", f"{number(sheet.runway_years, decimals=1)} años"
+                  if sheet.runway_years is not None else MISSING,
+                  help="Caja e inversiones / quema anual: cuánto dura la caja al ritmo del "
+                       "último año antes de tener que conseguir dinero — que, para quien quema "
+                       "caja, suele significar emitir acciones (dilución) o deuda.")
+    notes = ["Solo cifras del último balance presentado: una partida que no aparece en él "
+             "queda vacía en vez de arrastrar la de un balance anterior."]
+    if sheet.debt is None and sheet.noncurrent_liabilities:
+        notes.append(
+            f"⚠️ **Ningún concepto estándar de deuda** en este balance, pero el pasivo no "
+            f"corriente es de **{reported_amount(sheet.noncurrent_liabilities)}**. Hay "
+            "empresas que presentan su deuda con etiquetas propias, que la SEC no normaliza; "
+            "vacía no significa sin deuda — mira el balance del 10-Q.")
+    if sheet.equity is not None and sheet.equity < 0:
+        notes.append("⚠️ **Patrimonio negativo:** los pasivos superan a los activos.")
+    st.caption(" ".join(notes))
+
+# Against its industry (§15.1.4): without a comparison, "SBC 6 % of revenue" says nothing.
+# The group is the quarterly screen's (S&P 500 + researched) sharing the SIC code; the
+# public copy carries no screen, so publicly the block does not appear.
+screen_table = app_data.screen_view(app_data.db_mtime())
+if not screen_table.empty:
+    registry_now = app_data.companies()
+    comparison = sc.peer_comparison(
+        screen_table, cik, dict(zip(registry_now["cik"], registry_now["sic"])),
+        dict(zip(registry_now["cik"], registry_now["sic_description"])))
+    if comparison is None:
+        if not public:
+            st.caption("Sin grupo de comparación: su código de industria (SIC) no reúne "
+                       f"{sc.MIN_PEERS} empresas en el cribado, ni con 3 o 2 dígitos.")
+    else:
+        multiples = {"cash_conversion", "ev_sales"}
+        st.markdown(f"**Frente a su sector** · SIC {comparison.code}"
+                    + (f" ({comparison.description})" if comparison.description else
+                       f" (primeros {comparison.digits} dígitos)")
+                    + f" · {len(comparison.peers)} empresas")
+        rows = comparison.rows
+        st.dataframe(pd.DataFrame({
+            "Métrica": rows["label"],
+            ticker: [(number(v, decimals=1) + "×" if m in multiples else pct(v))
+                     if v is not None and not pd.isna(v) else MISSING
+                     for m, v in zip(rows["metric"], rows["value"])],
+            "Mediana del grupo": [(number(v, decimals=1) + "×" if m in multiples else pct(v))
+                                  if v is not None and not pd.isna(v) else MISSING
+                                  for m, v in zip(rows["metric"], rows["median"])],
+            "Por encima de": [f"{pct(p, decimals=0)} del grupo"
+                              if p is not None and not pd.isna(p) else MISSING
+                              for p in rows["percentile"]],
+        }), hide_index=True, width="stretch")
+        st.caption(
+            f"Cifras anuales del cribado (CY{int(screen_table['fiscal_year'].iloc[0])}). "
+            "El grupo son empresas **del S&P 500** con el mismo código de industria de la SEC "
+            f"({', '.join(comparison.peers[:10])}{'…' if len(comparison.peers) > 10 else ''}): "
+            "para una empresa pequeña son los **grandes del sector**, no sus pares de tamaño. "
+            "«Por encima de» dice dónde cae, no si es bueno: más SBC o más crecimiento no se "
+            "leen en la misma dirección."
+        )
 
 # --- 3. Valuation ---------------------------------------------------------------------
 

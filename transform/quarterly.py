@@ -96,6 +96,14 @@ class Balance:
         net_cash: ``liquidity − debt``; positive means more cash than debt.
         interest_coverage: TTM operating income over TTM interest expense. ``None`` with
             no interest filed or a loss — a negative coverage reads as nothing useful.
+        noncurrent_liabilities: ``liabilities − liabilities_current``: what the page shows
+            when no debt concept is filed, so a company with debt under its own tags
+            (ImmunityBio) does not read as debt-free.
+        cash_burn_ttm: ``−FCF`` over the last four quarters when negative, else ``None``.
+        runway_years: ``liquidity / cash_burn_ttm`` — how long the cash lasts at the last
+            year's burn, before raising money (which, for a company burning cash, usually
+            means dilution). ``None`` when the company does not burn cash. For a
+            pre-revenue biotech it is the first number to read (THEORY §3.5.1).
     """
 
     as_of: str
@@ -111,6 +119,9 @@ class Balance:
     assets: float | None
     liabilities: float | None
     interest_coverage: float | None
+    cash_burn_ttm: float | None
+    runway_years: float | None
+    noncurrent_liabilities: float | None
 
 
 def balance(observations: pd.DataFrame, cik: str, as_of: Any) -> Balance:
@@ -132,10 +143,17 @@ def balance(observations: pd.DataFrame, cik: str, as_of: Any) -> Balance:
     interest = fun.ttm_at(observations, cik, "interest_expense", as_of)
     coverage = (ebit / interest if ebit is not None and interest and interest > 0
                 and ebit > 0 else None)
+    fcf = fun.free_cash_flow(observations, cik, as_of)
+    liabilities, current_liabilities = instant("liabilities"), instant("liabilities_current")
+    burn = -fcf if fcf is not None and fcf < 0 else None
     return Balance(
         as_of=str(pd.Timestamp(as_of).date()), balance_date=last_day, cash=cash, short_term_investments=investments,
         liquidity=liquidity, debt_current=current, long_term_debt=long_term, debt=debt,
         net_cash=None if liquidity is None or debt is None else liquidity - debt,
         equity=instant("equity"), assets=instant("assets"),
-        liabilities=instant("liabilities"), interest_coverage=coverage,
+        liabilities=liabilities, interest_coverage=coverage,
+        cash_burn_ttm=burn,
+        runway_years=None if burn is None or liquidity is None else liquidity / burn,
+        noncurrent_liabilities=(None if liabilities is None or current_liabilities is None
+                                else liabilities - current_liabilities),
     )

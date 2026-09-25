@@ -44,7 +44,8 @@ OBSERVATION_COLUMNS = ["source", "series_id", "ts", "ts_release", "value"]
 
 # Per-table contract: (table, primary-key columns, all columns, numeric columns,
 # whether the table carries an ingested_at stamp). Mirrors db/schema.sql.
-COMPANY_COLUMNS = ["cik", "ticker", "name", "sector", "thesis_category", "first_seen", "status"]
+COMPANY_COLUMNS = ["cik", "ticker", "name", "sector", "thesis_category", "first_seen", "status",
+                   "sic", "sic_description"]
 FILING_COLUMNS = ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url"]
 CORPORATE_ACTION_COLUMNS = [
     "action_id", "cik", "ticker", "kind", "ex_date", "ratio", "amount", "currency", "source",
@@ -196,6 +197,8 @@ def connect(db_path: Path):
 LATE_COLUMNS: dict[str, dict[str, str]] = {
     "trades": {"conid": "TEXT"},
     "cash_transactions": {"conid": "TEXT"},
+    # 2026-09-25: the SEC industry code, for comparing a company with its peers.
+    "companies": {"sic": "TEXT", "sic_description": "TEXT"},
 }
 
 

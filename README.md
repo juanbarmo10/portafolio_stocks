@@ -296,6 +296,7 @@ python run_alerts.py                 # evalúa las reglas y envía a Telegram lo
 python run_alerts.py --dry-run       # enseña qué dispararía, sin enviar ni registrar
 python run_alerts.py --test-message  # comprueba la configuración del bot
 python run_validation.py             # informe de validación del semáforo (reproducible)
+python run_validation.py --insiders  # estudio de compras de directivos
 ```
 
 Para ejecutarlo todo cada día (ingesta y luego alertas, aunque la ingesta falle) hay un
@@ -465,6 +466,22 @@ referencia más el rezago máximo medido), solo porque se comprobó que esas ser
 revisan: la primera publicación coincide con el valor actual en todos los días archivados.
 
 ---
+
+### Compras de directivos: estudiadas antes de enseñarlas, y no pasan
+
+La literatura dice que cuando varios directivos compran acciones de su propia empresa, la
+acción tiende a batir al mercado. Antes de enseñarlo como señal, el panel lo probó con un
+protocolo escrito antes de descargar los datos: 217.919 compras declaradas en Form 4 desde
+2017 (datos abiertos de la SEC), dos definiciones (tres o más directivos en 30 días; el CEO o
+el CFO comprando más de 100.000 USD), fechadas por el día en que se hicieron públicas, frente a
+las mismas empresas en días normales, con corrección por comparaciones múltiples.
+
+En el S&P 500 el resultado es el contrario: tras una compra del CEO o del CFO la acción rindió
+**4,7 puntos menos** en seis meses que en sus días normales. Los directivos de grandes empresas
+compran después de caídas fuertes (12-14 puntos peor que el índice en los tres meses previos), y
+la debilidad sigue. La señal no se enseña, y tampoco se convierte en señal de venta: sería una
+hipótesis nueva elegida después de ver los datos. Las empresas pequeñas, donde la literatura
+sitúa el efecto, quedan sin probar.
 
 ## Licencia
 

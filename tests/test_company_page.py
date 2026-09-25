@@ -374,3 +374,35 @@ def test_the_page_lays_out_the_quarters_and_the_balance_sheet(company_app):
     assert len(grid.columns) == 8 and list(grid.columns) == sorted(grid.columns)
     metrics = {m.label: m.value for m in app.metric}
     assert metrics["Caja neta (USD)"] != "—"
+
+
+# --- Why the fundamentals are missing (2026-09-25) --------------------------------------------
+
+FOREIGN = """
+universe:
+  watchlist:
+    - ticker: NU
+      cik: "0001691493"
+"""
+
+
+def test_a_foreign_issuer_is_explained_not_sent_to_rerun_the_ingest(tmp_path, monkeypatch):
+    """Nu Holdings files IFRS on 20-F/6-K: no US-GAAP facts, and rerunning fixes nothing."""
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(FOREIGN, encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+    db_path = tmp_path / "foreign.db"
+    conn = loader.init_db(db_path)
+    loader.upsert_filings(conn, [
+        {"accession": "a1", "cik": "0001691493", "form": "20-F", "period_end": "2025-12-31",
+         "filed_date": "2026-04-08", "is_amended": 0, "url": None},
+        {"accession": "a2", "cik": "0001691493", "form": "6-K", "period_end": "2026-06-30",
+         "filed_date": "2026-08-13", "is_amended": 0, "url": None}])
+    conn.close()
+    monkeypatch.setattr(app_data, "db_path", lambda: db_path)
+    st.cache_data.clear()
+    infos = " ".join(i.value for i in render().info)
+    assert "Emisor extranjero" in infos and "IFRS" in infos
+    assert "--only sec sec_filings" not in infos, "rerunning the SEC ingest fixes nothing"
+    st.cache_data.clear()

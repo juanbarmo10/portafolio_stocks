@@ -185,3 +185,71 @@ def apply_filters(table: pd.DataFrame, limits: Mapping[str, float | None], *,
     # Unknown to a rule and failing no other: the ones the data, not the rules, left out.
     unknown = {c: int((m & ~failed).sum()) for c, m in missing_by.items()}
     return Filtered(table[keep], int(failed.sum()), unknown)
+
+
+# --- Peers (§15.1.4, 2026-09-25) ------------------------------------------------------------
+
+MIN_PEERS = 6
+# (column, label, reading) — the reading says which way is "more", never which is better:
+# a high SBC share can be a young company's choice, a low EV/sales a business in decline.
+PEER_METRICS = [
+    ("revenue_growth", "Crecimiento de ingresos"),
+    ("operating_margin", "Margen operativo"),
+    ("fcf_margin", "Margen FCF"),
+    ("cash_conversion", "FCF / beneficio"),
+    ("sbc_over_revenue", "SBC / ingresos"),
+    ("dilution", "Dilución"),
+    ("ev_sales", "VE / ventas"),
+    ("fcf_after_sbc_yield", "Rent. FCF − SBC"),
+]
+
+
+@dataclass(frozen=True)
+class PeerComparison:
+    """A company against the screen companies sharing its SIC code.
+
+    Attributes:
+        code / digits: The SIC prefix used — 4 digits when that gives ``MIN_PEERS``, else 3,
+            else 2. A broader group is still a group, but a looser one, and says so.
+        peers: Tickers in the group (the company excluded).
+        rows: ``[metric, label, value, median, percentile, n]`` — ``percentile`` is the share
+            of peers with a lower value (``None`` when the company's value is missing).
+    """
+
+    code: str | None
+    digits: int
+    description: str | None
+    peers: list[str]
+    rows: pd.DataFrame
+
+
+def peer_comparison(table: pd.DataFrame, cik: str, sics: Mapping[str, str | None],
+                    descriptions: Mapping[str, str | None] | None = None) -> PeerComparison | None:
+    """See :class:`PeerComparison`. ``None`` when the company is not in the screen or has no
+    SIC, or no prefix gives ``MIN_PEERS`` peers."""
+    if table.empty or cik not in set(table["cik"]) or not sics.get(cik):
+        return None
+    own = str(sics[cik])
+    for digits in (4, 3, 2):
+        prefix = own[:digits]
+        members = [c for c in table["cik"] if c != cik and str(sics.get(c) or "")[:digits] == prefix]
+        if len(members) >= MIN_PEERS:
+            break
+    else:
+        return None
+    group = table[table["cik"].isin(members)]
+    me = table[table["cik"] == cik].iloc[0]
+    rows = []
+    for column, label in PEER_METRICS:
+        values = pd.to_numeric(group[column], errors="coerce").dropna()
+        mine = me[column]
+        mine = None if mine is None or pd.isna(mine) else float(mine)
+        rows.append({"metric": column, "label": label, "value": mine,
+                     "median": float(values.median()) if len(values) else None,
+                     "percentile": (float((values < mine).mean()) if mine is not None
+                                    and len(values) else None),
+                     "n": int(len(values))})
+    return PeerComparison(code=prefix, digits=digits,
+                          description=(descriptions or {}).get(cik) if digits == 4 else None,
+                          peers=sorted(str(t) for t in group["ticker"].dropna()),
+                          rows=pd.DataFrame(rows))

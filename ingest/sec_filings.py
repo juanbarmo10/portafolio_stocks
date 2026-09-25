@@ -65,6 +65,9 @@ FINANCIAL_FORMS = frozenset({"10-K", "10-Q", "20-F", "40-F", "6-K"})
 
 # 52 weeks. Preserves the weekday, which "+1 year" does not — and results land midweek.
 YEAR_OF_WEEKS = dt.timedelta(days=364)
+# No quarterly report follows the previous one this soon; an announcement closer than this
+# is an off-cycle item 2.02 (preliminary figures, a conference), not the next quarter.
+MIN_REPORT_GAP = dt.timedelta(days=45)
 QUARTERS_PER_YEAR = 4
 
 
@@ -94,7 +97,7 @@ def company_row(
     The registry is what lets any later reader go from a held ticker to its CIK without
     guessing (section 9.3). Sector and thesis category come only from a written card: the
     SEC's SIC code is not GICS, and copying it into ``sector`` would pass one off as the
-    other.
+    other — it has its own column, used to find a company's peers.
     """
     card = card or {}
     return {
@@ -105,6 +108,8 @@ def company_row(
         "thesis_category": card.get("thesis_category"),
         "first_seen": today,
         "status": "active",
+        "sic": str(submissions.get("sic") or "") or None,
+        "sic_description": submissions.get("sicDescription") or None,
     }
 
 
@@ -194,7 +199,9 @@ def estimate_next_earnings(
     anything — in which case the panel shows no date at all rather than a guess dressed as
     a schedule (section 12).
 
-    Preferred method: the announcement four quarters back plus 364 days. Companies report
+    Preferred method: the earliest anniversary (+364 days) of last year's announcements that
+    is at least ``MIN_REPORT_GAP`` after the latest one — robust to an off-cycle item 2.02,
+    which "four announcements back" was not. Companies report
     on a stable calendar, and 52 weeks preserves the weekday where "+1 year" drifts into
     the weekend. With fewer than five announcements it falls back to the last date plus the
     median gap, which is coarser and is labelled as such.
@@ -204,8 +211,17 @@ def estimate_next_earnings(
     dates = [dt.date.fromisoformat(row["date"]) for row in announcements]  # newest first
 
     if len(dates) > QUARTERS_PER_YEAR:
-        anchor = dates[QUARTERS_PER_YEAR - 1]  # same fiscal quarter, one year earlier
-        return (anchor + YEAR_OF_WEEKS).isoformat(), "misma fecha del año anterior + 364 días"
+        # The anniversary of each announcement of the last year, and the earliest one that
+        # can still be the next report. Counting four announcements back instead broke on an
+        # off-cycle item 2.02 — preliminary results at a January conference (Duolingo
+        # 2026-01-12; ImmunityBio three in a year): it counted as a quarter and the estimate
+        # skipped November for January (2026-09-25).
+        last = dates[0]
+        anniversaries = sorted(d + YEAR_OF_WEEKS for d in dates
+                               if last - d < YEAR_OF_WEEKS + dt.timedelta(days=30))
+        upcoming = [d for d in anniversaries if d > last + MIN_REPORT_GAP]
+        if upcoming:
+            return upcoming[0].isoformat(), "misma fecha del año anterior + 364 días"
 
     gaps = [(dates[i] - dates[i + 1]).days for i in range(len(dates) - 1)]
     median_gap = sorted(gaps)[len(gaps) // 2]

@@ -40,7 +40,9 @@ CREATE TABLE IF NOT EXISTS companies (
     sector          TEXT,                   -- GICS or equivalent
     thesis_category TEXT,                   -- the axis that actually matters (section 5.3)
     first_seen      TEXT,
-    status          TEXT                    -- 'active'|'delisted'|'acquired'|'merged'
+    status          TEXT,                   -- 'active'|'delisted'|'acquired'|'merged'
+    sic             TEXT,                   -- SEC industry code: NOT GICS, never in `sector`
+    sic_description TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_companies_ticker ON companies(ticker);
 

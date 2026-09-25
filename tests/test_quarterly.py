@@ -70,3 +70,18 @@ def test_a_balance_line_missing_from_the_latest_sheet_is_not_carried_forward():
     assert sheet.balance_date == "2026-06-30"
     assert sheet.debt == 300.0 and sheet.net_cash == pytest.approx(120.0 - 300.0)
     assert sheet.interest_coverage is None, "no interest filed"
+
+
+def test_a_company_burning_cash_gets_its_runway_and_undeclared_debt_is_not_zero():
+    """A pre-revenue biotech: burns 40 a year with 60 in cash → 1,5 years. Its debt is under
+    its own tags: no standard concept, but 500 of non-current liabilities, shown instead."""
+    rows = [fact("assets", "2026-06-30", 700.0, period=""),
+            fact("cash", "2026-06-30", 60.0, period=""),
+            fact("liabilities", "2026-06-30", 550.0, period=""),
+            fact("liabilities_current", "2026-06-30", 50.0, period="")]
+    for i, end in enumerate(["2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30"]):
+        rows += [fact("operating_cash_flow", end, -9.0), fact("capex", end, 1.0)]
+    sheet = qt.balance(pd.DataFrame(rows), CIK, "2026-09-01")
+    assert sheet.cash_burn_ttm == pytest.approx(40.0)
+    assert sheet.runway_years == pytest.approx(1.5)
+    assert sheet.debt is None and sheet.noncurrent_liabilities == pytest.approx(500.0)

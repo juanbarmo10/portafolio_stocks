@@ -230,7 +230,8 @@ def test_the_ingester_reads_the_cache_and_fills_both_tables(tmp_path):
     assert tables["companies"] == [{
         "cik": CIK, "ticker": "MSFT", "name": "MICROSOFT CORP", "sector": None,
         "thesis_category": None, "first_seen": dt.date.today().isoformat(), "status": "active",
-    }], "SIC is not GICS: sector stays empty without a written card"
+        "sic": "7372", "sic_description": "Services-Prepackaged Software",
+    }], "SIC is not GICS: it has its own column, and sector stays empty without a card"
     assert len(tables["filings"]) > 50
     assert ingester.partial_failures() == []
 
@@ -346,3 +347,14 @@ def test_without_the_ticker_map_the_run_says_so(tmp_path):
     finally:
         conn.close()
     assert any("company_tickers" in f for f in ingester.partial_failures())
+
+
+def test_an_off_cycle_announcement_does_not_count_as_a_quarter():
+    """Duolingo's real calendar: preliminary results at a January conference (2026-01-12)
+    carry item 2.02 too. Counting four announcements back landed on it and skipped November
+    for January; the anniversary of last November is the next report."""
+    dates = ["2026-08-05", "2026-05-04", "2026-02-26", "2026-01-12", "2025-11-05",
+             "2025-08-06", "2025-05-01", "2025-02-27"]
+    date, method = estimate_next_earnings([{"date": d, "accession": "x"} for d in dates])
+    assert date == "2026-11-04"
+    assert "año anterior" in method

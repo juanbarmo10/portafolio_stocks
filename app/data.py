@@ -271,3 +271,24 @@ def regime_view(mtime: float) -> dict | None:
         "evaluation": rg.evaluate(built.frame, built.benchmark),
         "closes": built.closes, "splits": built.splits,
     }
+
+
+@st.cache_data(show_spinner="Calculando el cribado…")
+def screen_view(mtime: float) -> pd.DataFrame:
+    """The quarterly screen table (``transform.screen``): SEC frames, the registry's names and
+    the last closes. Shared by the screen page and the company page's peer comparison."""
+    from ingest.screen import SOURCE  # noqa: PLC0415 — the label lives with its ingester
+    from transform import screen as sc  # noqa: PLC0415
+
+    frames = observations(SOURCE, mtime)
+    if frames.empty:
+        return pd.DataFrame()
+    registry = companies()
+    names = {str(r["cik"]): (str(r["ticker"]), r.get("name"))
+             for r in registry.to_dict("records")}
+    # Class shares: a dot in the membership list (BRK.B), a dash at the price source.
+    tickers = tuple(sorted({t for t, _ in names.values()}
+                           | {t.replace(".", "-") for t, _ in names.values()}))
+    since = (dt.date.today() - dt.timedelta(days=20)).isoformat()
+    closes = recent_closes(tickers, since, mtime)
+    return sc.screen_table(frames, closes, corporate_actions(), names)

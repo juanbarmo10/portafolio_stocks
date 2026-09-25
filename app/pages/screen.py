@@ -11,7 +11,6 @@ It is not in ``PUBLIC_PAGES``, so a public deployment does not register it (RESE
 
 from __future__ import annotations
 
-import datetime as dt
 from typing import Any
 
 import pandas as pd
@@ -35,28 +34,11 @@ st.caption(
 )
 
 
-@st.cache_data(show_spinner="Calculando el cribado…")
-def screen_view(mtime: float) -> pd.DataFrame:
-    """The screen table: the frames, the registry's names and the last closes."""
-    frames = app_data.observations(SOURCE, mtime)
-    if frames.empty:
-        return pd.DataFrame()
-    registry = app_data.companies()
-    names = {str(r["cik"]): (str(r["ticker"]), r.get("name"))
-             for r in registry.to_dict("records")}
-    # Class shares: a dot in the membership list (BRK.B), a dash at the price source.
-    tickers = tuple(sorted({t for t, _ in names.values()}
-                           | {t.replace(".", "-") for t, _ in names.values()}))
-    since = (dt.date.today() - dt.timedelta(days=20)).isoformat()
-    closes = app_data.recent_closes(tickers, since, mtime)
-    return sc.screen_table(frames, closes, app_data.corporate_actions(), names)
-
-
 if not app_data.database_ready():
     st.info("Todavía no hay base de datos. Ejecuta `python run_ingest.py`.")
     st.stop()
 
-table = screen_view(app_data.db_mtime())
+table = app_data.screen_view(app_data.db_mtime())
 ingested = app_data.source_last_ingest(SOURCE, app_data.db_mtime())
 if table.empty:
     st.info("El cribado todavía no se ha descargado. Ejecuta "

@@ -14,6 +14,12 @@ said on the page:
 - **No filing date.** ``frames`` gives the accession, not ``filed``. These rows are stored
   with an unknown ``ts_release`` and serve today's screen only — never a backtest (§9.4).
 
+**Industry (SIC) for the peer comparison.** ``frames`` does not carry it; the company's
+``submissions`` file does (~150 KB each). Only a ``{cik: [sic, description, fetched]}`` map
+is kept, in ``.cache/sec/sic_map.json``, and a CIK is fetched again only after
+``SIC_REFRESH_DAYS`` — after the first run, a quarter costs a handful of requests. The code
+goes to its own column of ``companies``: it is not GICS and never goes into ``sector``.
+
 Taxonomy normalization is the same as ``sec_xbrl``: each metric's ordered tag list in
 ``sources.sec.concepts``, first tag with a value wins per company.
 
@@ -41,6 +47,8 @@ log = get_logger(__name__)
 
 SOURCE = "sec_frames"
 FRAMES_URL = "{base}/api/xbrl/frames/us-gaap/{tag}/{unit}/{period}.json"
+SUBMISSIONS_URL = "{base}/submissions/CIK{cik}.json"
+SIC_REFRESH_DAYS = 180
 
 
 def screen_year(today: dt.date) -> int:
@@ -96,6 +104,7 @@ class ScreenIngester(Ingester):
                           if m in set(screen.get("metrics", []))}
         self._cache_dir = Path(str(cfg.get("cache_dir", ".cache/sec"))) / "frames"
         self._ticker_map_path = Path(str(cfg.get("cache_dir", ".cache/sec"))) / "company_tickers.json"
+        self._sic_path = Path(str(cfg.get("cache_dir", ".cache/sec"))) / "sic_map.json"
         self._ticker_map_url = str(cfg.get("ticker_map_url",
                                            "https://www.sec.gov/files/company_tickers.json"))
         self._delay_s = 1.0 / float(cfg.get("rate_limit_rps", 8) or 8)
@@ -158,6 +167,35 @@ class ScreenIngester(Ingester):
         time.sleep(self._delay_s)
         return payload
 
+    def _sic_map(self, ciks: set[str]) -> dict[str, list[Any]]:
+        """``{cik: [sic, description, fetched_iso]}``, fetching only what is missing or old."""
+        cached: dict[str, list[Any]] = {}
+        if self._sic_path.exists():
+            cached = json.loads(self._sic_path.read_text(encoding="utf-8"))
+        cutoff = (dt.date.today() - dt.timedelta(days=SIC_REFRESH_DAYS)).isoformat()
+        stale = sorted(c for c in ciks if c not in cached or cached[c][2] < cutoff)
+        for i, cik in enumerate(stale):
+            url = SUBMISSIONS_URL.format(base=self._base_url, cik=cik)
+            try:
+                response = retry(lambda u=url: requests.get(
+                    u, headers={"User-Agent": self._user_agent}, timeout=60),
+                    exceptions=(requests.RequestException,))
+                response.raise_for_status()
+                body = response.json()
+                cached[cik] = [str(body.get("sic") or "") or None,
+                               body.get("sicDescription") or None, dt.date.today().isoformat()]
+            except Exception as exc:  # noqa: BLE001 — one company must not sink the screen
+                self._failures.append(f"SIC {cik}: {exc}")
+            time.sleep(self._delay_s)
+            if i % 100 == 99:   # progress survives an interruption
+                self._sic_path.write_text(json.dumps(cached), encoding="utf-8")
+        if stale:
+            self._sic_path.parent.mkdir(parents=True, exist_ok=True)
+            self._sic_path.write_text(json.dumps(cached), encoding="utf-8")
+            log.info("SIC fetched for %d compan(ies); %d from cache.", len(stale),
+                     len(ciks) - len(stale), extra={"source": SOURCE})
+        return cached
+
     def fetch(self) -> pd.DataFrame:
         if self._skip_reason:
             log.info("Screen skipped: %s.", self._skip_reason, extra={"source": SOURCE})
@@ -171,10 +209,13 @@ class ScreenIngester(Ingester):
         # researched companies are left to sec_filings, which writes their card's sector.
         names = {str(r["cik_str"]).zfill(10): str(r["title"]) for r in raw_map.values()}
         today = dt.date.today().isoformat()
+        sic = self._sic_map(ciks)
         self._companies = [
             {"cik": mapping[normalize_ticker(t)], "ticker": t,
              "name": names.get(mapping[normalize_ticker(t)]), "sector": None,
-             "thesis_category": None, "first_seen": today, "status": "active"}
+             "thesis_category": None, "first_seen": today, "status": "active",
+             "sic": (sic.get(mapping[normalize_ticker(t)]) or [None])[0],
+             "sic_description": (sic.get(mapping[normalize_ticker(t)]) or [None, None])[1]}
             for t in self._tickers if normalize_ticker(t) in mapping
             and mapping[normalize_ticker(t)] not in self._researched_ciks
         ]

@@ -6,9 +6,10 @@ local database stays SQLite and complete; the public one is a filtered copy.
 
 **An allow-list, like PUBLIC_PAGES.** What is copied is named here; anything new is private
 until someone adds it. Never copied, whatever happens: the account (``ibkr`` observations,
-trades, cash, securities), the local exchange rate (it names the jurisdiction), short
-interest (the tickers it covers include the held ones), alerts, exit rules, theses and the
-raw index membership. :func:`assert_public` re-checks the selection before any write.
+trades, cash, securities), the local exchange rate (it names the jurisdiction), the short
+interest of anything **not** researched (FINRA is also asked about held tickers; the
+researched companies' is copied since 2026-09-25, by the user's decision), alerts, exit
+rules, theses and the raw index membership. :func:`assert_public` re-checks the selection before any write.
 
 **Which companies.** Only the ones written down for research (``tracked`` + ``watchlist``).
 A position held without a card is known to the local base — its filings and calendar feed
@@ -39,7 +40,11 @@ from transform import regime as rg
 
 log = get_logger(__name__)
 
-PRIVATE_SOURCES = frozenset({"ibkr", "finra", "local_fx"})
+PRIVATE_SOURCES = frozenset({"ibkr", "local_fx"})
+# FINRA is public data, but its ingester also asks about what is held: only the researched
+# companies' rows travel, and the guard checks every one.
+FINRA_SOURCE = "finra"
+FINRA_SERIES = ("short_interest", "days_to_cover", "short_interest:revised")
 PRIVATE_TABLES = frozenset({"trades", "cash_transactions", "securities", "alerts_log",
                             "exit_ladder", "thesis_log", "universe_membership"})
 TABLES = ("companies", "filings", "events", "corporate_actions")
@@ -59,6 +64,10 @@ def public_tickers(settings: Settings) -> list[str]:
                                *researched]))
 
 
+def researched_tickers(settings: Settings) -> list[str]:
+    return [str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")]
+
+
 def researched_ciks(settings: Settings) -> set[str]:
     return {str(c["cik"]).zfill(10) for c in settings.researched_companies if c.get("cik")}
 
@@ -70,8 +79,14 @@ def _recent(frame: pd.DataFrame, since: str | None) -> pd.DataFrame:
 
 
 def select(conn: Any, settings: Settings, *, since: str | None = None,
-           breadth_readings: list | None = None) -> Selection:
-    """Everything the public panel reads, from the local database."""
+           breadth_readings: list | None = None,
+           newcomers: set[str] | frozenset[str] = frozenset()) -> Selection:
+    """Everything the public panel reads, from the local database.
+
+    ``newcomers``: researched CIKs the public copy does not have yet. Their rows travel
+    whole whatever ``since`` says — an incremental run would otherwise publish a company
+    added to the watchlist with only its last ten days (found 2026-09-25, adding four).
+    """
     ciks = researched_ciks(settings)
     tickers = public_tickers(settings)
 
@@ -79,12 +94,21 @@ def select(conn: Any, settings: Settings, *, since: str | None = None,
     sec = read_observations(conn, source="sec")
     sec = sec[sec["series_id"].str[:10].isin(ciks)] if not sec.empty else sec
     prices = read_observations(conn, series_ids=[f"{t}:close_raw" for t in tickers])
-    frames = [fred, sec, prices]
+    short = read_observations(conn, source=FINRA_SOURCE,
+                              series_ids=[f"{t}:{s}" for t in researched_tickers(settings)
+                                          for s in FINRA_SERIES])
+    frames = [fred, sec, prices, short]
     if breadth_readings:
         frames.append(br.readings_to_observations(breadth_readings))
-    observations = _recent(pd.concat([f for f in frames if not f.empty], ignore_index=True)
-                           if any(not f.empty for f in frames)
-                           else pd.DataFrame(columns=loader.OBSERVATION_COLUMNS), since)
+    everything = (pd.concat([f for f in frames if not f.empty], ignore_index=True)
+                  if any(not f.empty for f in frames)
+                  else pd.DataFrame(columns=loader.OBSERVATION_COLUMNS))
+    new_keys = set(newcomers) | {str(c["ticker"]) for c in settings.researched_companies
+                                 if str(c.get("cik", "")).zfill(10) in newcomers}
+    whole = everything["series_id"].str.split(":").str[0].isin(new_keys) \
+        if not everything.empty else pd.Series(dtype=bool)
+    observations = pd.concat([_recent(everything[~whole], since), everything[whole]],
+                             ignore_index=True) if not everything.empty else everything
 
     companies = read_table(conn, "companies")
     filings = read_table(conn, "filings")
@@ -124,6 +148,11 @@ def assert_public(selection: Selection, settings: Settings, held: set[str]) -> N
         allowed = set(public_tickers(settings))
         if tickers - allowed:
             leaks.append(f"prices outside the public list {sorted(tickers - allowed)}")
+        shorted = {sid.split(":", 1)[0] for sid in obs.loc[obs["source"] == FINRA_SOURCE,
+                                                           "series_id"]}
+        if shorted - set(researched_tickers(settings)):
+            leaks.append("short interest of non-researched tickers "
+                         f"{sorted(shorted - set(researched_tickers(settings)))}")
     ciks = researched_ciks(settings)
     for table in ("companies", "filings"):
         stray = {r["cik"] for r in selection.tables.get(table, [])} - ciks

@@ -42,7 +42,8 @@ def local(tmp_path):
         obs("yfinance", "SPY:close_raw"), obs("yfinance", "HIMS:close_raw"),
         obs("yfinance", "TMUS:close_raw"), obs("yfinance", "AAPL:close_raw"),
         obs("ibkr", "TMUS:position_qty"), obs("ibkr", "NAV:total"),
-        obs("finra", "HIMS:short_interest"), obs("banrep", "TRM:X"),
+        obs("finra", "HIMS:short_interest"), obs("finra", "TMUS:short_interest"),
+        obs("banrep", "TRM:X"),
         obs("fred", "OLD", ts="2010-01-01", release="2010-01-05"),
         obs("sec", f"{HIMS}:revenue:q", ts="2020-03-31", release="2026-09-18"),
     ]))
@@ -82,8 +83,9 @@ def test_only_public_rows_are_selected(local):
     settings = settings_with_watchlist()
     sel = ps.select(local, settings)
     series = set(sel.observations["series_id"])
-    assert {"VIXCLS", f"{HIMS}:revenue:q", "SPY:close_raw", "HIMS:close_raw"} <= series
-    assert not {"TMUS:position_qty", "NAV:total", "HIMS:short_interest", "TRM:X"} & series
+    assert {"VIXCLS", f"{HIMS}:revenue:q", "SPY:close_raw", "HIMS:close_raw",
+            "HIMS:short_interest"} <= series, "a researched company's short interest is public"
+    assert not {"TMUS:position_qty", "NAV:total", "TMUS:short_interest", "TRM:X"} & series
     assert "TMUS:close_raw" not in series, "a held-only price would reveal the holding"
     assert f"{TMUS}:revenue:q" not in series and "AAPL:close_raw" not in series
     assert [r["cik"] for r in sel.tables["companies"]] == [HIMS]
@@ -115,6 +117,11 @@ def test_the_guard_refuses_what_the_filter_should_never_let_through(local):
     sel.tables["companies"].append({"cik": TMUS, "ticker": "TMUS"})
     with pytest.raises(RuntimeError, match="non-researched"):
         ps.assert_public(sel, settings, held={"TMUS"})
+    sel = ps.select(local, settings)
+    sel.observations = pd.concat([sel.observations,
+                                  pd.DataFrame([obs("finra", "TMUS:short_interest")])])
+    with pytest.raises(RuntimeError, match="short interest of non-researched"):
+        ps.assert_public(sel, settings, held={"TMUS"})
 
 
 def test_the_copy_is_written_and_idempotent(local, tmp_path):
@@ -127,7 +134,7 @@ def test_the_copy_is_written_and_idempotent(local, tmp_path):
         ps.write(target, sel)
         copied = read_observations(target)
         assert len(copied) == len(sel.observations)
-        assert set(copied["source"]) == {"fred", "sec", "yfinance"}
+        assert set(copied["source"]) == {"fred", "sec", "yfinance", "finra"}
         assert read_table(target, "trades").empty and read_table(target, "securities").empty
     finally:
         target.close()
@@ -143,3 +150,22 @@ def test_breadth_readings_survive_the_trip():
     back = readings_from_observations(readings_to_observations(readings))
     assert back[0] == readings[0]
     assert back[1].breadth is None and back[1].source_hole and not back[1].meets_threshold
+
+
+def test_a_company_new_to_the_public_copy_goes_up_whole(local):
+    """An incremental run sends ten days; a company just added to the watchlist would be
+    published with ten days of history. A newcomer's rows travel whole."""
+    loader.upsert_observations(local, pd.DataFrame([
+        obs("sec", f"{HIMS}:revenue:q", ts="2019-03-31", release="2019-05-01"),
+        obs("finra", "HIMS:short_interest", ts="2019-03-15", release="2019-03-27")]))
+    settings = settings_with_watchlist()
+    old = {(f"{HIMS}:revenue:q", "2019-03-31"), ("HIMS:short_interest", "2019-03-15")}
+
+    def kept(sel):
+        return set(zip(sel.observations["series_id"], sel.observations["ts"].str[:10]))
+
+    assert not old & kept(ps.select(local, settings, since="2026-09-10"))
+    sel = ps.select(local, settings, since="2026-09-10", newcomers={HIMS})
+    assert old <= kept(sel)
+    assert ("OLD", "2010-01-01") not in kept(sel), "only the newcomer's rows, not everything"
+    ps.assert_public(sel, settings, held={"TMUS"})

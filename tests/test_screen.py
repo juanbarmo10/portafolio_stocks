@@ -199,3 +199,40 @@ def test_a_candidate_goes_to_study_with_its_cik_quoted(screen_db):
 def test_the_screen_is_never_public():
     """It marks what is held and studied — account information."""
     assert "Cribado" not in PUBLIC_PAGES
+
+
+# --- Peers ------------------------------------------------------------------------------------
+
+
+def peer_table(n: int, sic_of_others: str) -> tuple[pd.DataFrame, dict]:
+    ciks = [f"{i:010d}" for i in range(1, n + 2)]
+    table = pd.DataFrame({"cik": ciks, "ticker": [f"T{i}" for i in range(len(ciks))],
+                          "revenue_growth": [0.30] + [0.10 * i / n for i in range(n + 1)][1:],
+                          "dilution": [None] + [0.01] * n})
+    for column, _ in sc.PEER_METRICS:
+        if column not in table:
+            table[column] = None
+    sics = {ciks[0]: "7372", **{c: sic_of_others for c in ciks[1:]}}
+    return table, sics
+
+
+def test_the_company_is_placed_within_its_own_industry():
+    table, sics = peer_table(8, "7372")
+    result = sc.peer_comparison(table, table["cik"][0], sics)
+    assert result.digits == 4 and len(result.peers) == 8
+    growth = result.rows.set_index("metric").loc["revenue_growth"]
+    assert growth["percentile"] == 1.0, "grows faster than every peer"
+    assert growth["median"] == pytest.approx(0.05625)
+    assert pd.isna(result.rows.set_index("metric").loc["dilution", "percentile"]), \
+        "its own value missing: no position, never a guess"
+
+
+def test_a_thin_industry_widens_the_code_and_says_so():
+    table, sics = peer_table(8, "7379")          # same 3 digits, different 4
+    result = sc.peer_comparison(table, table["cik"][0], sics)
+    assert result.digits == 3 and result.code == "737"
+
+
+def test_without_enough_peers_there_is_no_comparison():
+    table, sics = peer_table(3, "7372")
+    assert sc.peer_comparison(table, table["cik"][0], sics) is None

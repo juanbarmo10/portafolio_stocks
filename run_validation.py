@@ -7,6 +7,7 @@ are seeded and the data is point-in-time.
 Usage:
     python run_validation.py                    # print the report
     python run_validation.py --out informe.md   # also write it to a file
+    python run_validation.py --insiders         # the insider-purchase study
 """
 
 from __future__ import annotations
@@ -29,10 +30,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", help="Also write the Markdown report to this file.")
     parser.add_argument("--brake", action="store_true",
                         help="Run the brake study (RESEARCH.md §2.30) instead of the battery.")
+    parser.add_argument("--insiders", action="store_true",
+                        help="Run the insider-purchase study (settings.yaml insider_study).")
     args = parser.parse_args(argv)
 
     settings = load_settings()
     configure_logging(settings.log_level, settings.secrets.values())
+    if args.insiders:
+        return insider_study(settings, args.out)
     level2 = settings.raw["panel"]["level2"]
     cfg = settings.raw.get("validation", {})
 
@@ -84,6 +89,44 @@ def main(argv: list[str] | None = None) -> int:
     print(text)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    return 0
+
+
+def insider_study(settings, out: str | None) -> int:
+    """Download what is missing (cached per quarter), run the pre-registered study, report."""
+    import pandas as pd  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    from ingest import insiders as ingest_insiders  # noqa: PLC0415
+    from validation import insiders as study  # noqa: PLC0415
+
+    cfg = settings.raw["insider_study"]
+    sec = settings.source("sec")
+    agent = settings.secret(str(sec.get("user_agent_env", "SEC_USER_AGENT")))
+    cache = Path(str(sec.get("cache_dir", ".cache/sec"))) / "form345"
+    frames = []
+    for quarter in ingest_insiders.quarters(cfg["first_quarter"], date.today()):
+        frame = ingest_insiders.load_quarter(quarter, cfg["source_url"], agent, cache)
+        if frame is None:
+            log.info("Form 4 %s not published yet by the SEC.", quarter)
+            continue
+        frames.append(frame)
+    purchases = pd.concat(frames, ignore_index=True)
+
+    conn = open_connection(settings.db_path)
+    try:
+        intervals = read_table(conn, "universe_membership")
+        tickers = sorted(set(intervals["ticker"])) + [str(cfg["benchmark"])]
+        closes = read_observations(conn, series_ids=[f"{t}:close_raw" for t in tickers])
+        actions = read_table(conn, "corporate_actions")
+    finally:
+        conn.close()
+    outcome = study.study(purchases, closes, actions, intervals, cfg)
+    text = study.report(outcome, cfg, date.today().isoformat())
+    print(text)
+    if out:
+        with open(out, "w", encoding="utf-8") as handle:
             handle.write(text + "\n")
     return 0
 

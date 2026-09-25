@@ -304,7 +304,8 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
         "start_date",
     ),
     "companies": (
-        ["cik", "ticker", "name", "sector", "thesis_category", "first_seen", "status"],
+        ["cik", "ticker", "name", "sector", "thesis_category", "first_seen", "status",
+         "sic", "sic_description"],
         "cik",
     ),
     "exit_ladder": (["rule_id", "cik", "kind", "trigger", "action", "created_at"], "rule_id"),
