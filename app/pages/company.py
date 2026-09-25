@@ -29,10 +29,12 @@ import streamlit as st
 
 from app import data as app_data
 from app.format import (
+    altair_chart,
     MISSING,
     PUBLIC_NOTE,
     compact_amount,
     money,
+    number,
     pct,
     quantity,
     reported_amount,
@@ -41,9 +43,13 @@ from core.config import load_settings
 from transform import fundamentals as fun
 from transform import portfolio as port
 from transform import thesis as th
+from transform import valuation as val
 from transform import value_accrual as va
+from transform.macro import latest as macro_latest
 
 SERIES_COLORS = ["#2a78d6", "#eb6834"]
+MULTIPLE_LABELS = {"ev_sales": "EV / ventas", "ev_ebit": "EV / EBIT", "pe": "P / E",
+                   "p_fcf": "P / FCF", "fcf_yield": "Rendimiento FCF"}
 
 settings = load_settings()
 public = settings.public_mode
@@ -314,7 +320,7 @@ if not revenue_series.empty:
         lines = pd.concat([lines, fcf[["ts", "value"]].assign(Serie="FCF (TTM)")])
     lines["date"] = pd.to_datetime(lines["ts"]).dt.date
 
-    st.altair_chart(
+    altair_chart(
         alt.Chart(lines)
         .mark_line(strokeWidth=2)
         .encode(
@@ -333,10 +339,129 @@ if not revenue_series.empty:
         width="stretch",
     )
 
-# --- 3. Value accrual -----------------------------------------------------------------
+# --- 3. Valuation ---------------------------------------------------------------------
+
+VAL = settings.raw.get("panel", {}).get("valuation", {})
+RDCF = VAL.get("reverse_dcf", {})
+
+
+@st.cache_data(show_spinner="Calculando la valoración…")
+def valuation_view(cik: str, ticker: str, as_of_iso: str, years: int, mtime: float):
+    """Today's valuation and its monthly history, point-in-time, cached per data version."""
+    obs = app_data.sec_observations()
+    prices = app_data.prices_for([ticker])
+    actions = app_data.corporate_actions()
+    now = val.assess(obs, prices, actions, cik, ticker, as_of_iso)
+    end = pd.Timestamp(as_of_iso)
+    dates = [*pd.date_range(end - pd.DateOffset(years=years), end, freq="ME"), end]
+    return now, val.history(obs, prices, actions, cik, ticker, dates)
+
+
+def multiple(value: float | None) -> str:
+    return MISSING if value is None or pd.isna(value) else f"{number(value, decimals=1)}×"
+
 
 st.divider()
-st.subheader("3 · ¿Cómo llega eso al accionista?")
+st.subheader("3 · ¿A qué precio?")
+st.caption(
+    "Lo que el mercado paga hoy por lo de arriba, con el cierre del día y las cifras "
+    "presentadas hasta entonces (point-in-time). Un múltiplo sobre una base negativa no se "
+    "muestra: un P/E de −30 parecería barato justo cuando la empresa pierde dinero."
+)
+years = int(VAL.get("history_years", 5))
+now, hist = valuation_view(cik, ticker, as_of_iso, years, app_data.db_mtime())
+treasury = macro_latest(app_data.fred_observations(), "DGS10", pd.Timestamp(as_of_iso)).value
+
+if now.price is None or now.market_cap is None:
+    st.info("Sin precio o sin recuento de acciones para esta fecha: la valoración necesita "
+            "los dos (`python run_ingest.py --only prices sec`).")
+else:
+    row = st.columns(4)
+    row[0].metric("Precio (USD)", number(now.price), help=f"Cierre crudo del {now.price_date}.")
+    row[1].metric("Capitalización (USD)", compact_amount(now.market_cap),
+                  help=f"Precio × acciones diluidas medias del periodo cerrado el "
+                       f"{now.shares_date} ({compact_amount(now.shares)}), ajustadas por "
+                       "splits posteriores. No es el recuento de portada: las empresas con "
+                       "varias clases de acciones no lo publican en los datos de la SEC.")
+    row[2].metric("EV aprox. (USD)", compact_amount(now.enterprise_value),
+                  help="Valor de empresa: capitalización + deuda a largo plazo (convertibles "
+                       "incluidos) − caja. "
+                       "No incluye la deuda a corto plazo, las inversiones financieras, los "
+                       "arrendamientos ni los minoritarios.")
+    row[3].metric("EV / ventas", multiple(now.ev_sales))
+    row = st.columns(4)
+    row[0].metric("EV / EBIT", multiple(now.ev_ebit))
+    row[1].metric("P / E", multiple(now.pe))
+    row[2].metric("P / FCF", multiple(now.p_fcf))
+    row[3].metric("Bono EE. UU. 10 años", pct(treasury / 100 if treasury is not None else None))
+    row = st.columns(4)
+    row[0].metric("Rend. FCF", pct(now.fcf_yield),
+                  help="FCF / capitalización: lo que rinde la empresa en caja al precio de hoy. "
+                       "Compáralo con el bono: es lo que cobras por el riesgo.")
+    row[1].metric("Rend. FCF tras SBC", pct(now.fcf_after_sbc_yield),
+                  help="(FCF − compensación en acciones) / capitalización. El FCF suma de "
+                       "vuelta el SBC, que es un coste real pagado en acciones.")
+    row[2].metric("Rend. del beneficio", pct(now.earnings_yield),
+                  help="Beneficio neto / capitalización (la inversa del P/E, con signo).")
+    if now.debt is None:
+        row[3].caption("Sin deuda a largo plazo registrada: el EV la toma como cero.")
+
+    # History: the multiple on each month-end, and where today sits in it.
+    available = [m for m in val.MULTIPLES if hist[m].notna().sum() >= 6]
+    if available:
+        chosen = st.selectbox("Historia del múltiplo", available,
+                              format_func=lambda m: MULTIPLE_LABELS[m])
+        series = hist[["date", chosen]].dropna()
+        current = getattr(now, chosen)
+        percentile = val.percentile_in_history(series[chosen], current)
+        altair_chart(
+            alt.Chart(series.assign(date=pd.to_datetime(series["date"]))).mark_line(
+                strokeWidth=2, color=SERIES_COLORS[0]).encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y(f"{chosen}:Q", title=MULTIPLE_LABELS[chosen],
+                        scale=alt.Scale(zero=False)),
+            ).properties(height=220),
+            width="stretch",
+        )
+        st.caption(
+            f"Cierre de cada mes, {years} años, cada punto con lo presentado hasta ese día. "
+            + (f"Hoy está en el **percentil {percentile * 100:.0f}** de su propia historia "
+               "(100 = el más caro que ha estado)." if percentile is not None else "")
+        )
+
+    # Reverse DCF: what growth the price assumes.
+    st.markdown("**¿Qué crecimiento descuenta el precio?** — DCF inverso")
+    discounts = [float(r) for r in RDCF.get("discount_rates", [0.08, 0.10, 0.12])]
+    terminal = float(RDCF.get("terminal_growth", 0.025))
+    horizon = int(RDCF.get("years", 10))
+    implied = val.reverse_dcf(now, discounts, terminal_growth=terminal, years=horizon)
+
+    def cell(result: val.ImpliedGrowth) -> str:
+        return pct(result.growth) + " al año" if result.growth is not None else result.note
+
+    st.dataframe(pd.DataFrame({
+        "Tasa de descuento": [pct(r, decimals=0) + (" ← tu tasa" if hurdle is not None
+                                                   and abs(r - hurdle) < 1e-9 else "")
+                              for r in discounts],
+        "Sobre el FCF": [cell(x) for x in implied["fcf"]],
+        "Sobre el FCF tras SBC": [cell(x) for x in implied["fcf_after_sbc"]],
+    }), hide_index=True, width="stretch")
+    if any(x.growth is None and "negativa" in x.note for xs in implied.values() for x in xs):
+        st.caption("**Base negativa** = ese flujo es hoy negativo: el precio no se explica por "
+                   "el flujo actual, sino por uno que todavía no existe.")
+    st.caption(
+        f"Crecimiento anual constante del flujo durante {horizon} años —después, "
+        f"{pct(terminal)} para siempre— que hace que su valor presente iguale la "
+        "capitalización de hoy. Si te parece más de lo que la empresa puede sostener, el "
+        "precio ya paga más que tu tesis. La tasa de descuento es tuya (§12): se muestra una "
+        "rejilla" + ("" if hurdle is not None or public else
+                     " y, si escribes `panel.level3.hurdle_rate`, se marca la tuya") + "."
+    )
+
+# --- 4. Value accrual -----------------------------------------------------------------
+
+st.divider()
+st.subheader("4 · ¿Cómo llega eso al accionista?")
 st.caption(
     "El concepto rector (§2): una empresa puede crecer 30% al año y destruir valor por "
     "acción si diluye 35%. Esta sección es el análogo de la vista de unlocks."
@@ -399,7 +524,7 @@ shares = fun.known(observations, cik, "diluted_shares", fun.ANNUAL, as_of_iso)
 if len(shares) >= 2:
     chart = shares.assign(date=pd.to_datetime(shares["ts"]).dt.date)
     st.markdown("**Acciones diluidas en circulación** — el análogo directo de los unlocks")
-    st.altair_chart(
+    altair_chart(
         alt.Chart(chart)
         .mark_line(strokeWidth=2, color=SERIES_COLORS[0], point=True)
         .encode(
@@ -416,7 +541,7 @@ if len(shares) >= 2:
 # --- 4. Filings and calendar ----------------------------------------------------------
 
 st.divider()
-st.subheader("4 · Presentaciones y calendario")
+st.subheader("5 · Presentaciones y calendario")
 
 company_filings = filings[filings["cik"] == cik] if not filings.empty else pd.DataFrame()
 company_events = events[events["cik"] == cik] if not events.empty else pd.DataFrame()
@@ -477,7 +602,7 @@ with filings_column:
 
 if not public:
     st.divider()
-    st.subheader("5 · Tu posición")
+    st.subheader("6 · Tu posición")
 
     account = app_data.account_observations()
     positions = port.latest_positions(account)

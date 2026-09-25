@@ -377,7 +377,8 @@ transform/  funciones puras, sin red — entrada faltante -> None
 app/        Streamlit multipágina (st.navigation)
               ├── 🏠 Hoy       nivel 1 point-in-time + resumen del checklist y lo que viene
               ├── 📈 Mercado   nivel 2 y el semáforo de régimen, con el voto de cada señal
-              ├── 🏢 Empresa   nivel 3, una empresa a fondo contra su propia tesis
+              ├── 🏢 Empresa   nivel 3: fundamentales, valoración (múltiplos, DCF
+              │                inverso) y captura de valor, contra su propia tesis
               ├── 🔬 Cartera   nivel 4: posiciones, reconciliación contra el NAV y
               │                rentabilidad sin aportes frente al S&P 500 (solo local)
               └── 🧾 Fiscal    la cuenta en moneda local, todo ESTIMADO (solo local)

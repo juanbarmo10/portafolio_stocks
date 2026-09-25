@@ -406,6 +406,18 @@ panel:
     # es información sobre los datos. Medido el 2026-09-17: 0,00%.
     nav_tolerance: 0.005
 
+  # Valoración — "¿a qué precio?" (CLAUDE.md §15.1; transform/valuation.py).
+  valuation:
+    history_years: 5          # historia de múltiplos; 5 años evita, en HIMS, la etapa SPAC
+    # DCF inverso: qué crecimiento del flujo durante `years` justifica el precio. La tasa de
+    # descuento es TUYA (§12): se muestra una rejilla, y se marca panel.level3.hurdle_rate si
+    # la escribes. El crecimiento terminal es una CONVENCIÓN (≈ crecimiento nominal de largo
+    # plazo), a la vista en la página y editable aquí.
+    reverse_dcf:
+      years: 10
+      terminal_growth: 0.025
+      discount_rates: [0.08, 0.10, 0.12]
+
   # Nivel 2 — estructura de mercado (§2, fase 3).
   level2:
     # ── SEMÁFORO DE RÉGIMEN (§8 fase 3) ──────────────────────────────────────────────

@@ -22,7 +22,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING, number, pct, reported_amount
+from app.format import altair_chart, MISSING, number, pct, reported_amount
 from core.config import load_settings
 from transform import regime as rg
 from transform.breadth import (
@@ -192,7 +192,7 @@ history["end"] = history["date"].shift(-1).fillna(history["date"].iloc[-1] + pd.
 history["bottom"], history["top"] = 0.0, 1.0
 history = history[history["verdict"] != rg.INSUFFICIENT]
 if not history.empty:
-    st.altair_chart(
+    altair_chart(
         alt.Chart(history).mark_rect().encode(
             x=alt.X("date:T", title=None),
             x2="end:T",
@@ -240,7 +240,7 @@ else:
     ])
     if not series.empty:
         series["date"] = pd.to_datetime(series["date"])
-        st.altair_chart(
+        altair_chart(
             alt.Chart(series).mark_line(color=LINE).encode(
                 x=alt.X("date:T", title=None),
                 y=alt.Y("value:Q", title="% de miembros", axis=alt.Axis(format="%"),
@@ -262,7 +262,7 @@ if not sb.empty:
     sb = sb.assign(date=pd.to_datetime(sb["date"]), share=sb["share"].astype(float))
     st.markdown(f"**Amplitud sectorial** — {int(sb['above'].iloc[-1])} de "
                 f"{len(SB['sectors'])} sectores sobre su media de 200 sesiones")
-    st.altair_chart(
+    altair_chart(
         alt.Chart(sb).mark_line(color=LINE).encode(
             x=alt.X("date:T", title=None),
             y=alt.Y("share:Q", title="% de sectores", axis=alt.Axis(format="%"),
@@ -280,7 +280,7 @@ rot = defensive_rotation(closes, splits, defensive=ROT["defensive"], cyclical=RO
 with left:
     st.markdown(f"**{EW['equal']} / {EW['cap']}** — equiponderado frente a capitalización")
     if not ew.empty:
-        st.altair_chart(
+        altair_chart(
             alt.Chart(ew.assign(date=pd.to_datetime(ew["date"]))).mark_line(color=LINE)
             .encode(x=alt.X("date:T", title=None),
                     y=alt.Y("ratio:Q", title="cociente", scale=alt.Scale(zero=False)))
@@ -293,7 +293,7 @@ with right:
     st.markdown("**Rotación defensiva** — " + " + ".join(ROT["defensive"]) + " frente a "
                 + " + ".join(ROT["cyclical"]))
     if not rot.empty:
-        st.altair_chart(
+        altair_chart(
             alt.Chart(rot.assign(date=pd.to_datetime(rot["date"]))).mark_line(color=LINE)
             .encode(x=alt.X("date:T", title=None),
                     y=alt.Y("rotation:Q", title="base 100", scale=alt.Scale(zero=False)))

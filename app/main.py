@@ -28,11 +28,10 @@ if str(REPO_ROOT) not in sys.path:
 
 import streamlit as st  # noqa: E402 — must follow the sys.path fix
 
-from app.format import PUBLIC_NOTE, PUBLIC_PAGES, enable_spanish_charts  # noqa: E402
+from app.format import PUBLIC_NOTE, PUBLIC_PAGES  # noqa: E402
 from core.config import load_settings  # noqa: E402
 
 st.set_page_config(page_title="equitydash", page_icon="📊", layout="wide")
-enable_spanish_charts()
 
 PAGES_DIR = Path(__file__).parent / "pages"
 

@@ -21,7 +21,7 @@ import streamlit as st
 
 from app import data as app_data
 from app.data import last_ingest, macro_observations
-from app.format import MISSING, number
+from app.format import altair_chart, MISSING, number
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
 from transform import macro
@@ -186,7 +186,7 @@ for chart_cfg in charts_cfg:
         )
 
     st.markdown(f"**{chart_cfg.get('title', '')}**")
-    st.altair_chart(
+    altair_chart(
         alt.layer(*layers).interactive(bind_y=False).properties(height=260),
         width="stretch",
     )

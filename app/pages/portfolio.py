@@ -18,7 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE, money, pct, rebase_100
+from app.format import altair_chart, PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE, money, pct, rebase_100
 from core.config import load_settings
 from transform import corporate_actions as reorg
 from transform import portfolio
@@ -352,7 +352,7 @@ else:
         curve["value"] = nav["value"].to_numpy()
         y_title, value_format = "USD", ".2f"
 
-    st.altair_chart(
+    altair_chart(
         alt.Chart(curve)
         .mark_line(strokeWidth=2, color=LINE_COLOR)
         .encode(
@@ -393,7 +393,7 @@ else:
                         "lo batiste; con menos de varios años es sobre todo ruido.")
     long = curves.melt("date", var_name="Serie", value_name="valor")
     long["Serie"] = long["Serie"].map({"account": "Tu cuenta", "benchmark": "SPY"})
-    st.altair_chart(
+    altair_chart(
         alt.Chart(long).mark_line(strokeWidth=2).encode(
             x=alt.X("date:T", title=None),
             y=alt.Y("valor:Q", title="Base 100, sin aportes", scale=alt.Scale(zero=False)),

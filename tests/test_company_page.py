@@ -316,3 +316,18 @@ def test_the_public_copy_lists_its_published_companies_without_opinion(tmp_path,
     assert "Ingresos" in text or "ingresos" in text, "the audited numbers render"
     assert "tu lista de estudio" not in text and "settings.local.yaml" not in text, (
         "the visitor is not the owner: no operator instructions in public")
+
+
+# --- Valuation (2026-09-25) ----------------------------------------------------------------
+
+
+def test_the_page_says_at_what_price(company_app):
+    """The half of level 3 that was missing: the price against the fundamentals."""
+    app = render()
+    text = rendered_text(app)
+    assert "3 · ¿A qué precio?" in text
+    metrics = {m.label: m.value for m in app.metric}
+    assert metrics["P / E"].endswith("×"), "Microsoft earns money: its P/E is defined"
+    assert metrics["Capitalización (USD)"] != "—"
+    assert any("Tasa de descuento" in pd.DataFrame(d.value).columns for d in app.dataframe), \
+        "the reverse DCF grid is on the page"

@@ -27,6 +27,7 @@ currency-shaped string, which covers widgets that never call in here.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -254,14 +255,15 @@ SPANISH_LOCALE = {
 }
 
 
-def enable_spanish_charts() -> None:
-    """Register and enable an Altair theme carrying :data:`SPANISH_LOCALE`. Idempotent.
+def altair_chart(chart: Any, **kwargs: Any) -> Any:
+    """``st.altair_chart`` with :data:`SPANISH_LOCALE` configured on the chart itself.
 
-    A theme rather than ``.configure()`` on each chart: one call in ``app/main.py`` covers
-    every page, and a chart added later cannot forget it. Verified inside Streamlit.
+    Per chart, not as a global Altair theme: Streamlit swaps the global theme while it
+    serializes a chart (under a lock, and only when the active one is the default), so a
+    theme enabled in ``main.py`` held in one render and was gone in the next — the company
+    page came out in English after a server restart (2026-09-25). A setting carried by the
+    chart cannot be lost that way.
     """
-    import altair as alt  # noqa: PLC0415 — the format helpers stay importable without it
+    import streamlit as st  # noqa: PLC0415 — the format helpers stay importable without it
 
-    @alt.theme.register("equitydash_es", enable=True)
-    def _theme() -> alt.theme.ThemeConfig:
-        return alt.theme.ThemeConfig({"config": {"locale": SPANISH_LOCALE}})
+    return st.altair_chart(chart.configure(locale=SPANISH_LOCALE), **kwargs)

@@ -225,3 +225,14 @@ def test_the_verdict_strip_has_data_and_width(market_db):
     # Height: with nothing on the y axis Streamlit left the bands ~0 px tall. The bands
     # span an explicit 0-1 axis instead.
     assert '"y2"' in strips[0].proto.spec and {"bottom", "top"} <= set(data.columns)
+
+
+def test_every_chart_speaks_spanish(market_db):
+    """Carried by each chart, not by a global theme: Streamlit swaps the global Altair theme
+    while serializing, and a theme enabled in main.py was lost after a server restart."""
+    seed(market_db, healthy=True)
+    app = render()
+    charts = list(app.get("arrow_vega_lite_chart")) + list(app.get("vega_lite_chart"))
+    assert len(charts) >= 4
+    for chart in charts:
+        assert '"decimal": ","' in chart.proto.spec and "septiembre" in chart.proto.spec

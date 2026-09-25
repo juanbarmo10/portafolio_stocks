@@ -244,18 +244,6 @@ def test_a_new_ingest_reaches_a_running_panel(app_db):
     assert len(second) == 2, "the cache served the old read after a new ingest"
 
 
-def test_charts_speak_spanish():
-    """Axis numbers and months in Spanish, like every other figure on the panel."""
-    import altair as alt
-
-    from app.format import enable_spanish_charts
-
-    enable_spanish_charts()
-    spec = alt.Chart(pd.DataFrame({"x": [1]})).mark_point().encode(x="x:Q").to_dict()
-    assert spec["config"]["locale"]["number"]["decimal"] == ","
-    assert "septiembre" in spec["config"]["locale"]["time"]["months"]
-
-
 # --- The landing page summarizes the rest of the checklist (2026-09-25) -----------------
 
 
