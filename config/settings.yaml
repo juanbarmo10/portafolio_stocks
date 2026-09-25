@@ -625,10 +625,6 @@ panel:
     lookback_days: 30          # ventana de la columna "cambio" de la tabla macro
     # Las cuatro que se ven sin desplegar en "Hoy" (§15.2); el resto, en el desplegable.
     key_readings: [BAMLH0A0HYM2, T10Y2Y, DTWEXBGS, VIXCLS]
-  # Diario de decisiones (§15.1.10, app/pages/journal.py). Las entradas viven en
-  # settings.local.yaml (`journal`); aquí solo cómo se emparejan con las operaciones.
-  journal:
-    tolerance_days: 3            # la nota puede escribirse la víspera o unos días después
     readings:
       - series_id: BAMLH0A0HYM2
         label: Spread HY (OAS)
@@ -690,6 +686,16 @@ panel:
         unit: pp
         series: [T10Y2Y]
         zero_rule: true        # el cruce por cero es el hecho, no un umbral elegido
+
+  # Diario de decisiones (§15.1.10, app/pages/journal.py). Las entradas viven en
+  # settings.local.yaml (`journal`); aquí solo cómo se emparejan con las operaciones.
+  journal:
+    tolerance_days: 3            # la nota puede escribirse la víspera o unos días después
+  # Riesgo y modos de fallo (Cartera, transform/risk.py). No optimizados contra nada.
+  risk:
+    window_days: 365             # rendimientos diarios para volatilidad y correlación
+    factor_years: 3              # semanas para las sensibilidades (~156)
+    t_threshold: 2.0             # |t| por debajo = "ruido"
 
 # ---------------------------------------------------------------------------
 # Ingesta — política común de reintentos (ingest/base.py)

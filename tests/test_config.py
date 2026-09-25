@@ -263,3 +263,13 @@ def test_a_complete_exit_rule_loads():
     rule = {"rule_id": "a1", "kind": "take_profit", "trigger": "t", "action": "a",
             "rule": {"metric": "weight", "operator": ">", "threshold": 0.12}}
     config.validate_theses([_card(exit_ladder=[rule])])
+
+
+def test_the_panel_sections_keep_their_keys():
+    """A block pasted at a shallower indentation in the middle of a mapping re-parents every
+    key below it, with no error: on 2026-09-25 `panel.level1.readings` and `charts` ended up
+    under `panel.risk`, and the landing page silently lost its tiles and charts."""
+    panel = config.load_settings().raw["panel"]
+    assert {"readings", "charts", "lookback_days", "key_readings"} <= set(panel["level1"])
+    assert set(panel["risk"]) == {"window_days", "factor_years", "t_threshold"}
+    assert set(panel["journal"]) == {"tolerance_days"}

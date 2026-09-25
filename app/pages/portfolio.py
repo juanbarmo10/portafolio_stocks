@@ -23,13 +23,17 @@ from app.format import (
     PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE,
     altair_chart,
     money,
+    number,
     pct,
     rebase_100,
 )
 from core.config import load_settings
 from transform import corporate_actions as reorg
+from transform import bcb
 from transform import portfolio
+from transform import risk
 from transform.adjustments import total_return_index
+from transform.price_action import as_series
 
 # Categorical slot 1 of the reference palette, as on the macro page.
 LINE_COLOR = "#2a78d6"
@@ -349,6 +353,104 @@ else:
             "de fallo nadie ha escrito: añádelas a `universe.tracked` en "
             "`config/settings.local.yaml`."
         )
+
+# --- 4b. Risk, size and shared failure modes (§15.1.8, §5.3) --------------------------
+# Private: its tables are not in the public allow-list of columns (test_public_mode), and
+# the page is not published anyway (PUBLIC_PAGES).
+if not public:
+
+    st.subheader("Riesgo y modos de fallo compartidos")
+    RISK = settings.raw.get("panel", {}).get("risk", {})
+    LIMITS = settings.raw.get("portfolio", {})
+    as_of_risk = pd.Timestamp.today().normalize()
+    held = list(valued["ticker"]) if not valued.empty else []
+    studied = [str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")]
+    factor_etfs = ["SPY", "IWM", "XLK", "XLY", "XLP"]
+    risk_prices = app_data.prices_for(sorted(set(held) | set(studied) | set(factor_etfs)))
+    risk_actions = app_data.corporate_actions()
+
+
+    def tr_index(ticker: str) -> pd.Series:
+        own = risk_prices[risk_prices["series_id"] == f"{ticker}:close_raw"]
+        if own.empty:
+            return pd.Series(dtype=float)
+        return as_series(total_return_index(own.assign(ts=own["ts"].str[:10]), risk_actions,
+                                            ticker, as_of_risk.date().isoformat()))
+
+
+    indices = {t: tr_index(t) for t in sorted(set(held) | set(studied) | set(factor_etfs))}
+
+    if held and account_total:
+        weights = {row["ticker"]: float(row["market_value"]) / account_total
+                   for row in valued.to_dict("records") if pd.notna(row["market_value"])}
+        weights["CASH"] = (cash_now or 0.0) / account_total
+        breakdown = risk.risk_breakdown(
+            weights, risk.daily_returns({t: indices[t] for t in held}, as_of_risk,
+                                        int(RISK.get("window_days", 365))))
+        st.dataframe(pd.DataFrame({
+            "Posición": breakdown.table["ticker"].replace({"CASH": "Efectivo"}),
+            "Peso (con efectivo)": breakdown.table["weight"],
+            "Volatilidad anual": breakdown.table["volatility"],
+            "Parte del riesgo": breakdown.table["share_of_risk"],
+        }), hide_index=True, width="stretch", column_config={
+            c: st.column_config.NumberColumn(format="percent")
+            for c in ("Peso (con efectivo)", "Volatilidad anual", "Parte del riesgo")})
+        corr = breakdown.correlation
+        pairs = [(a, b, corr.loc[a, b]) for i, a in enumerate(corr.columns)
+                 for b in corr.columns[i + 1:]] if not corr.empty else []
+        st.caption(
+            f"Volatilidad de la cuenta: **{pct(breakdown.portfolio_volatility)} anual** "
+            f"(un año de rendimientos diarios, efectivo incluido). «Parte del riesgo» reparte "
+            "esa volatilidad entre las posiciones: pesa más quien más se mueve y más se mueve "
+            "con las demás."
+            + (" Correlaciones: " + "; ".join(f"{a}-{b} {number(c)}" for a, b, c in pairs) + "."
+               if pairs else "")
+        )
+        categories = {t: (metadata.get(t) or {}).get("thesis_category") for t in weights}
+        breaches = risk.limit_breaches(weights, categories, LIMITS.get("max_position"),
+                                       LIMITS.get("max_per_thesis_category"))
+        if breaches:
+            st.warning("Por encima de tus límites escritos: " + "; ".join(breaches) + ".")
+        elif LIMITS.get("max_position") is None and LIMITS.get("max_per_thesis_category") is None:
+            st.caption("Sin límites de tamaño escritos (`portfolio.max_position`, "
+                       "`portfolio.max_per_thesis_category` en `settings.local.yaml`): el panel "
+                       "no inventa uno.")
+
+    fred_now = app_data.fred_observations()
+    factors = risk.factor_returns(
+        {t: indices[t] for t in factor_etfs},
+        bcb.series(fred_now, "DGS10", as_of_risk), bcb.series(fred_now, "DTWEXBGS", as_of_risk))
+    factors = factors[factors.index >= as_of_risk - pd.DateOffset(years=int(RISK.get("factor_years", 3)))]
+    names = [t for t in dict.fromkeys([*held, *studied]) if not indices.get(t, pd.Series()).empty]
+    sens = [x for x in (risk.sensitivity(indices[t], factors, t) for t in names) if x]
+    if sens:
+        modes = risk.failure_modes(sens, t_threshold=float(RISK.get("t_threshold", 2.0)))
+        grid = modes.pivot_table(index="scenario", columns="ticker", values="move",
+                                 aggfunc="first", sort=False)
+        reliable = modes.pivot_table(index="scenario", columns="ticker", values="reliable",
+                                     aggfunc="first", sort=False)
+        shown = pd.DataFrame({
+            (t + (" · cartera" if t in held else "")): [
+                (pct(grid.at[sc, t]) + ("" if bool(reliable.at[sc, t]) else " (ruido)"))
+                if pd.notna(grid.at[sc, t]) else MISSING for sc in grid.index]
+            for t in grid.columns}, index=grid.index)
+        st.markdown("**Qué pasaría en cada escenario** — movimiento estimado de cada acción")
+        st.dataframe(shown, width="stretch")
+        together = [(sc, [t for t in grid.columns if bool(reliable.at[sc, t])
+                          and grid.at[sc, t] < 0]) for sc in grid.index]
+        shared = [(sc, ts) for sc, ts in together if len(ts) >= 2 and sc != "mercado −20 %"]
+        st.caption(
+            ("**Caen juntas:** " + "; ".join(f"si {sc}: {', '.join(ts)}" for sc, ts in shared)
+             + ". " if shared else "")
+            + f"Regresión de los rendimientos semanales de {int(RISK.get('factor_years', 3))} "
+            "años sobre el mercado, el tipo a 10 años, el dólar, pequeñas − grandes, tecnología − "
+            "mercado y consumo cíclico − defensivo. Es cómo se movieron **juntas en el pasado**, "
+            "no una predicción. «(ruido)» = no distinguible de cero (|t| < "
+            f"{number(float(RISK.get('t_threshold', 2.0)), decimals=0)}). Con seis factores y "
+            "varias empresas, alguna saldrá fiable por azar: úsalo para hacer preguntas a tu "
+            "tesis, no para responderlas."
+        )
+
 
 # --- 5. Equity curve -----------------------------------------------------------------
 

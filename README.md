@@ -389,10 +389,14 @@ app/        Streamlit multipágina (st.navigation)
               │                valoración (múltiplos, DCF inverso), el precio frente al
               │                mercado y su reacción a resultados, y captura de valor,
               │                contra su propia tesis
-              ├── 🔬 Cartera   nivel 4: posiciones, reconciliación contra el NAV y
-              │                rentabilidad sin aportes frente al S&P 500 (solo local)
-              ├── 📋 Desplegar nivel 4: puertas antes de comprar, el tramo y el coste
-              │                medido de llevar el dinero al bróker (solo local)
+              ├── 🔬 Cartera   nivel 4: posiciones, reconciliación contra el NAV,
+              │                rentabilidad frente al S&P 500, riesgo por posición y
+              │                modos de fallo compartidos (solo local)
+              ├── 📋 Desplegar nivel 4: puertas antes de comprar, el tramo, la banda de
+              │                valoración y el coste medido de llevar el dinero al
+              │                bróker (solo local)
+              ├── 📓 Diario    cada decisión de la cuenta con su razón escrita, el
+              │                semáforo de ese día y lo que pasó después (solo local)
               └── 🧾 Fiscal    la cuenta en moneda local, todo ESTIMADO (solo local)
 fiscal/     lotes y ventas en moneda local, parte del activo / parte de la divisa
 alerts/     Telegram, con deduplicación vía alerts_log

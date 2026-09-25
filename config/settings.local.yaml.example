@@ -68,6 +68,9 @@ universe:
 portfolio:
   target_weights: {}           # ej. { AAPL: 0.08, MSFT: 0.08 }
   target_by_thesis_category: {}
+  # Tus límites de tamaño, fracción del patrimonio con el efectivo (Cartera los comprueba).
+  max_position: null
+  max_per_thesis_category: null
 
 # Plan de aportes (§13, entrada de usuario nº1). Determina cuántas posiciones son
 # razonables y si la comisión es material por ticket.
