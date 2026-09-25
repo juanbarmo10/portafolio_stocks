@@ -74,8 +74,8 @@ def test_the_fixture_parses_into_one_account(statement):
 
 
 IDENTITY = {
-    "NOMBRE APELLIDO", "CALLE FALSA 123", "BOGOTA", "110111",
-    "19900101", "alguien@example.com", "Colombia",
+    "NOMBRE APELLIDO", "CALLE FALSA 123", "CIUDADFICTICIA", "999999",
+    "19900101", "alguien@example.com", "Paisficticio",
 }
 
 # An AccountInformation shaped like the real one: the fixture's was already scrubbed, so
@@ -83,9 +83,9 @@ IDENTITY = {
 UNSCRUBBED = """<FlexQueryResponse><FlexStatements count="1"><FlexStatement>
 <AccountInformation accountId="U1234567" ibEntity="IBLLC-US" currency="USD"
   taxLotMatchingMethod="FIFO" accountCapabilities="Cash" dividendReinvestmentEnabled="No"
-  name="NOMBRE APELLIDO" street="CALLE FALSA 123" city="BOGOTA"
-  postalCodeResidentialAddress="110111" dateOfBirth="19900101"
-  primaryEmail="alguien@example.com" country="Colombia" />
+  name="NOMBRE APELLIDO" street="CALLE FALSA 123" city="CIUDADFICTICIA"
+  postalCodeResidentialAddress="999999" dateOfBirth="19900101"
+  primaryEmail="alguien@example.com" country="Paisficticio" />
 </FlexStatement></FlexStatements></FlexQueryResponse>"""
 
 

@@ -13,7 +13,7 @@ and the realized-PnL tests exist precisely to make the two collide. That is the 
 acceptance criterion, and it is also the only way a bug in the lot matching ever surfaces.
 
 **Why the FIFO engine has to exist at all.** IBKR reports a realized PnL, but the fiscal
-layer needs lots with their own acquisition date and a cost frozen in COP at that day's TRM
+layer needs lots with their own acquisition date and a cost frozen in the local currency at that day's rate
 (section 11), which is a different object from a broker's PnL summary. Building the lots
 here means the fiscal layer inherits them instead of re-deriving them from scratch.
 
@@ -277,8 +277,11 @@ def fifo_lots(trades: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[st
           ``cost`` includes the share of the buy commission, which is what makes the
           average cost comparable with the broker's.
         - ``disposals``: ``[ticker, ts, quantity, proceeds, cost, realized_pnl,
-          acquired_ts, holding_days]``. ``realized_pnl`` nets **both** commissions, which
-          is IBKR's convention — verified against its own FIFO summary in the tests.
+          acquired_ts, holding_days, buy_commission, sell_commission]``. ``realized_pnl``
+          nets **both** commissions, which is IBKR's convention — verified against its own
+          FIFO summary in the tests. The two commission shares (negative) are also given
+          apart, because a currency conversion needs them at different dates: the buy leg
+          at the purchase date's rate, the sell leg at the sale's.
         - ``unmatched``: one label per sale with no lot to match. Those are excluded from
           the disposals rather than matched against an invented zero-cost purchase: the
           usual cause is a 365-day statement window that starts after the position was
@@ -287,7 +290,7 @@ def fifo_lots(trades: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[st
     lot_columns = ["ticker", "ts", "quantity", "price", "commission", "cost"]
     disposal_columns = [
         "ticker", "ts", "quantity", "proceeds", "cost", "realized_pnl",
-        "acquired_ts", "holding_days",
+        "acquired_ts", "holding_days", "buy_commission", "sell_commission",
     ]
     if trades is None or trades.empty:
         return pd.DataFrame(columns=lot_columns), pd.DataFrame(columns=disposal_columns), []
@@ -330,6 +333,8 @@ def fifo_lots(trades: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[st
                 "realized_pnl": realized,
                 "acquired_ts": lot["ts"],
                 "holding_days": _days_between(lot["ts"], row["ts"]),
+                "buy_commission": lot["per_unit_commission"] * matched,
+                "sell_commission": per_unit_commission * matched,
             })
             lot["quantity"] -= matched
             remaining -= matched
@@ -426,7 +431,7 @@ def income_summary(
         fees=total("fee"),
         commissions=commissions_total,
         deposits=total("deposit"),
-        # Observed, not assumed (section 11). What it means for a Colombian resident is a
+        # Observed, not assumed (section 11). What it means for the owner's tax residence is a
         # question for an accountant, and this module does not answer it.
         effective_withholding_rate=(-withholding / dividends) if dividends else None,
     )

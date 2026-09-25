@@ -42,6 +42,7 @@ pages = [
     st.Page(PAGES_DIR / "market.py", title="Mercado", icon="📈"),
     st.Page(PAGES_DIR / "company.py", title="Empresa", icon="🏢"),
     st.Page(PAGES_DIR / "portfolio.py", title="Cartera", icon="🔬"),
+    st.Page(PAGES_DIR / "fiscal.py", title="Fiscal", icon="🧾"),
 ]
 
 settings = load_settings()

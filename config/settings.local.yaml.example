@@ -90,3 +90,19 @@ fiscal:
   w8ben_on_file: null          # estado del W-8BEN en la cuenta (§13, entrada nº5)
   # Las retenciones sobre dividendos NO se configuran: se usa la retención OBSERVADA
   # que reporta el Flex Query en cash_transactions. Nunca una tasa supuesta.
+
+  # Tasa de cambio oficial de TU moneda contra el USD (§9.9, §11). Vive solo aquí porque
+  # la fuente y la moneda revelan tu jurisdicción. Sin este bloque la página Fiscal no
+  # puede convertir nada y lo dice. Endpoint tipo Socrata: una fila por periodo de vigencia.
+  local_fx:
+    url: null                  # ej. https://www.datos.<pais>/resource/<id>.json
+    currency: null             # ej. "XYZ": solo para rotular la página
+    date_field: null           # campo con la fecha desde la que rige la tasa
+    value_field: null          # campo con la tasa (moneda local por 1 USD)
+    series_id: "FX:LOCAL_PER_USD"
+    source: local_fx
+    history_since: "2024-01-01"   # antes de tu primera operación
+
+  # Periodo de tenencia que cambia el tratamiento de una ganancia, EN MESES. Pregúntalo a
+  # tu contador; el panel no lo supone. En null, "no calculable" (§11).
+  holding_period_months: null

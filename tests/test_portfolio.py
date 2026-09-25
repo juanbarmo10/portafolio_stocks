@@ -377,3 +377,19 @@ def test_held_tickers_for_the_ingesters_follow_the_same_rule(tmp_path):
         assert held_tickers(conn) == ["UBER"]
     finally:
         conn.close()
+
+
+def test_the_commission_shares_add_up_to_the_realized_result():
+    """Split apart for the local-currency layer, and still IBKR's number when summed."""
+    trades = pd.DataFrame([
+        {"trade_id": "1", "ticker": "X", "ts": "2025-01-02", "side": "buy", "quantity": 2.0,
+         "price": 100.0, "commission": -1.0},
+        {"trade_id": "2", "ticker": "X", "ts": "2025-06-02", "side": "sell", "quantity": 1.0,
+         "price": 120.0, "commission": -0.5},
+    ])
+    _, disposals, _ = portfolio.fifo_lots(trades)
+    row = disposals.iloc[0]
+    assert row["buy_commission"] == pytest.approx(-0.5)
+    assert row["sell_commission"] == pytest.approx(-0.5)
+    assert row["proceeds"] - row["cost"] + row["buy_commission"] + row["sell_commission"] \
+        == pytest.approx(row["realized_pnl"])

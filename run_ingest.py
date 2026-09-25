@@ -26,6 +26,7 @@ from core.logging_setup import configure_logging, get_logger
 from db import loader
 from ingest.base import Ingester
 from ingest.fred import FredIngester
+from ingest.local_fx import LocalFxIngester
 from ingest.macro_calendar import MacroCalendarIngester
 from ingest.ibkr_flex import (
     IbkrFlexIngester,
@@ -52,6 +53,8 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "sec_filings": (SecFilingsIngester.is_available, SecFilingsIngester),
     "short_interest": (ShortInterestIngester.is_available, ShortInterestIngester),
     "universe": (UniverseIngester.is_available, UniverseIngester),
+    # Local only: its config lives in settings.local.yaml (section 11).
+    "local_fx": (LocalFxIngester.is_available, LocalFxIngester),
 }
 
 # Where non-observation rows go. An ingester returning a table name absent from this
