@@ -100,3 +100,17 @@ def test_the_reverse_dcf_refuses_what_it_cannot_answer():
     assert val.implied_growth(1e9, 5.0, 0.02, terminal_growth=0.025).growth is None
     assert val.implied_growth(None, 5.0, 0.10).growth is None
     assert "más de" in val.implied_growth(1e15, 1.0, 0.10).note, "beyond the search range"
+
+
+def test_the_band_places_today_within_its_own_history_and_skips_thin_ones():
+    bases = {"shares": 100.0, "shares_date": "2025-01-01", "debt": 0.0, "cash": 0.0,
+             "revenue": 1000.0, "ebit": 100.0, "net_income": 80.0, "fcf": 50.0, "sbc": 0.0}
+    now = val.combine(bases, pd.DataFrame([{"series_id": "X:close_raw", "ts": "2025-06-02",
+                                            "value": 10.0}]), [], "X", "2025-06-02")
+    history = pd.DataFrame({"ev_sales": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+                            "pe": [10.0, 12.0, None, None, None, None]})
+    band = val.band(now, history).set_index("multiple")
+    assert list(band.index) == ["ev_sales"], "four months of P/E is not a band"
+    assert band.loc["ev_sales", "today"] == pytest.approx(1.0)
+    assert band.loc["ev_sales", "median"] == pytest.approx(1.75)
+    assert band.loc["ev_sales", "percentile"] == pytest.approx(2 / 6)

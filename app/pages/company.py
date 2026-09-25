@@ -570,18 +570,6 @@ VAL = settings.raw.get("panel", {}).get("valuation", {})
 RDCF = VAL.get("reverse_dcf", {})
 
 
-@st.cache_data(show_spinner="Calculando la valoración…")
-def valuation_view(cik: str, ticker: str, as_of_iso: str, years: int, mtime: float):
-    """Today's valuation and its monthly history, point-in-time, cached per data version."""
-    obs = app_data.sec_observations()
-    prices = app_data.prices_for([ticker])
-    actions = app_data.corporate_actions()
-    now = val.assess(obs, prices, actions, cik, ticker, as_of_iso)
-    end = pd.Timestamp(as_of_iso)
-    dates = [*pd.date_range(end - pd.DateOffset(years=years), end, freq="ME"), end]
-    return now, val.history(obs, prices, actions, cik, ticker, dates)
-
-
 def multiple(value: float | None) -> str:
     return MISSING if value is None or pd.isna(value) else f"{number(value, decimals=1)}×"
 
@@ -594,7 +582,7 @@ st.caption(
     "muestra: un P/E de −30 parecería barato justo cuando la empresa pierde dinero."
 )
 years = int(VAL.get("history_years", 5))
-now, hist = valuation_view(cik, ticker, as_of_iso, years, app_data.db_mtime())
+now, hist = app_data.valuation_view(cik, ticker, as_of_iso, years, app_data.db_mtime())
 treasury = macro_latest(app_data.fred_observations(), "DGS10", pd.Timestamp(as_of_iso)).value
 
 if now.price is None or now.market_cap is None:

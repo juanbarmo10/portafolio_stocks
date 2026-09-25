@@ -140,3 +140,22 @@ def test_the_page_asks_for_the_pesos_of_each_deposit_by_its_date(deploy_db):
 def test_the_deploy_page_is_never_public():
     """It shows the account's cash and deposits."""
     assert "Desplegar capital" not in PUBLIC_PAGES
+
+
+def test_the_deploy_page_checks_the_pick_before_the_price(deploy_db, monkeypatch, tmp_path):
+    """No card and no exit rule are said before any multiple: §2, level 4."""
+    from core import config
+
+    local = tmp_path / "settings.local.yaml"
+    local.write_text('universe:\n  watchlist:\n    - ticker: AAA\n      cik: "0000000001"\n',
+                     encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+    app = AppTest.from_file(MAIN, default_timeout=120).run()
+    app.switch_page(PAGE)
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+    checks = next(m.value for m in app.markdown if "Comprobación" in m.value)
+    assert "sin ficha" in checks and "sin escribir" in checks
+    assert any("Sin banda de valoración para AAA" in c.value for c in app.caption)
+    config.load_settings.cache_clear()

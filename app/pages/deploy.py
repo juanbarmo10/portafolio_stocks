@@ -17,12 +17,13 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING, money, pct
+from app.format import MISSING, money, number, pct
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
 from transform import funding as fx
 from transform import portfolio as port
 from transform import regime as rg
+from transform import valuation as val
 
 settings = load_settings()
 local = settings.raw
@@ -115,12 +116,14 @@ if cash_now and cash_now >= amount:
             "cuesta ninguna transferencia: va antes que cualquier depósito nuevo.")
 
 targets = dict(local.get("portfolio", {}).get("target_weights") or {})
+suggested = None
 if targets and not positions.empty:
     valued = port.valuation(positions, port.latest_prices(app_data.prices_for(
         sorted(set(positions["ticker"]) | set(targets)))))
     drift = port.target_drift(valued, targets)
     if not drift.empty:
         under = drift.dropna(subset=["drift"]).iloc[0]
+        suggested = str(under["ticker"])
         st.markdown(f"Más por debajo de su objetivo: **{under['ticker']}** — pesa "
                     f"{pct(under['weight'])} de las acciones frente a un objetivo de "
                     f"{pct(under['target_weight'])}.")
@@ -128,12 +131,79 @@ else:
     st.caption("Sin cartera objetivo escrita (`portfolio.target_weights`, entrada de usuario "
                "nº4), el panel no puede decir a qué posición va el tramo: un drift contra un "
                "objetivo inexistente parecería equilibrio.")
-st.caption("Antes de comprar: la regla de salida escrita en la `exit_ladder` de la ficha "
-           "(§2, nivel 4). Si la empresa no tiene ficha, la posición existiría antes que la "
-           "razón escrita para tenerla.")
 
-# --- 3. The deposit ---------------------------------------------------------------------
-st.subheader("3 · El depósito: de pesos a IBKR")
+# --- 3. What, and at what price ---------------------------------------------------------
+st.subheader("3 · ¿Qué, y a qué precio?")
+cards = {str(c["ticker"]): c for c in settings.researched_companies if c.get("ticker")}
+candidates = sorted(set(cards) | (set(positions["ticker"]) if not positions.empty else set())
+                    | set(targets))
+if not candidates:
+    st.caption("Sin empresas en estudio ni posiciones: nada que valorar todavía.")
+else:
+    pick = st.selectbox("Qué piensas comprar", candidates,
+                        index=candidates.index(suggested) if suggested in candidates else 0,
+                        help="Por defecto, la más por debajo de su peso objetivo, si lo hay.")
+    cik = str((cards.get(pick) or {}).get("cik") or by_ticker.get(pick) or "").zfill(10)
+    card = cards.get(pick) or {}
+    tracked = pick in {str(c["ticker"]) for c in settings.tracked_companies}
+    ladder = card.get("exit_ladder") or []
+    checks = [
+        ("✅" if tracked else "⚠️", "Ficha de tesis",
+         "escrita" if tracked else "sin ficha: la posición existiría antes que la razón escrita"),
+        ("✅" if ladder else "⚠️", "Regla de salida (`exit_ladder`)",
+         f"{len(ladder)} escrita(s)" if ladder else "sin escribir — §2 la pide ANTES de comprar"),
+    ]
+    near_pick = [n for n in near if n.startswith(pick + " ")]
+    checks.append(("⚠️" if near_pick else "✅", f"Resultados en {earnings_window} días",
+                   near_pick[0] if near_pick else "no"))
+    st.markdown("| | Comprobación | Estado |\n|---|---|---|\n"
+                + "\n".join(f"| {i} | {c} | {v} |" for i, c, v in checks))
+
+    years = int(settings.raw.get("panel", {}).get("valuation", {}).get("history_years", 5))
+    today_iso = today.date().isoformat()
+    now, hist = app_data.valuation_view(cik, pick, today_iso, years, app_data.db_mtime())
+    table = val.band(now, hist) if now.market_cap is not None else pd.DataFrame()
+    if table.empty:
+        st.caption(f"Sin banda de valoración para {pick}: hacen falta precio y fundamentales "
+                   "de la SEC con historia (una empresa que presenta en IFRS, como NU, no los "
+                   "tiene). Mira su página de Empresa.")
+    else:
+        labels = {"ev_sales": "EV / ventas", "ev_ebit": "EV / EBIT", "pe": "P / E",
+                  "p_fcf": "P / FCF", "fcf_yield": "Rend. FCF"}
+
+        def show(name: str, value: float) -> str:
+            return pct(value) if name == "fcf_yield" else f"{number(value, decimals=1)}×"
+
+        st.dataframe(pd.DataFrame({
+            "Múltiplo": table["multiple"].map(labels),
+            "Hoy": [show(m, v) for m, v in zip(table["multiple"], table["today"])],
+            f"Mínimo {years} años": [show(m, v) for m, v in zip(table["multiple"], table["low"])],
+            "Mediana": [show(m, v) for m, v in zip(table["multiple"], table["median"])],
+            "Máximo": [show(m, v) for m, v in zip(table["multiple"], table["high"])],
+            "Percentil de hoy": [f"{p * 100:.0f}" if p is not None else MISSING
+                                 for p in table["percentile"]],
+        }), hide_index=True, width="stretch")
+        rdcf = settings.raw.get("panel", {}).get("valuation", {}).get("reverse_dcf", {})
+        hurdle = settings.raw.get("panel", {}).get("level3", {}).get("hurdle_rate")
+        rate = float(hurdle) if hurdle is not None else 0.10
+        implied = val.reverse_dcf(now, [rate],
+                                  terminal_growth=float(rdcf.get("terminal_growth", 0.025)),
+                                  years=int(rdcf.get("years", 10)))["fcf"][0]
+        st.caption(
+            f"Percentil 100 = el más caro que ha estado en {years} años (en el rendimiento FCF "
+            "al revés: alto = barato). Cada punto, con lo presentado ese día. "
+            + (f"Al {pct(rate, decimals=0)} "
+               + ("(tu tasa)" if hurdle is not None else "(tasa de referencia; la tuya en "
+                  "`panel.level3.hurdle_rate`)")
+               + ", el precio descuenta que el FCF crezca "
+               + (f"**{pct(implied.growth)} al año** durante {int(rdcf.get('years', 10))} "
+                  "años." if implied.growth is not None else f"— {implied.note}."))
+            + " La banda no dice «compra»: dice si pagas más o menos que de costumbre por lo "
+              "mismo. Detalle completo en 🏢 Empresa."
+        )
+
+# --- 4. The deposit ---------------------------------------------------------------------
+st.subheader("4 · El depósito: de pesos a IBKR")
 st.markdown(
     "Dos costes viajan con cada aporte y piden hábitos opuestos:\n"
     "- **Proporcional** — el diferencial del cambio frente a la TRM. Es el mismo porcentaje "

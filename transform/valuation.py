@@ -251,6 +251,28 @@ def percentile_in_history(values: pd.Series, current: float | None) -> float | N
 # --- Reverse DCF ------------------------------------------------------------------------
 
 
+def band(now: Valuation, history: pd.DataFrame, *, min_points: int = 6) -> pd.DataFrame:
+    """Where each multiple sits today within its own history: ``[multiple, today, low,
+    median, high, percentile, points]``. Multiples with fewer than ``min_points`` months of
+    history, or no value today, are left out — a band of three points is not a band.
+
+    Read for the yields the other way round: a **high** FCF yield is a **cheap** price.
+    """
+    rows = []
+    for name in MULTIPLES:
+        today = getattr(now, name)
+        values = pd.to_numeric(history.get(name), errors="coerce").dropna() \
+            if history is not None and name in history else pd.Series(dtype=float)
+        if today is None or len(values) < min_points:
+            continue
+        rows.append({"multiple": name, "today": float(today), "low": float(values.min()),
+                     "median": float(values.median()), "high": float(values.max()),
+                     "percentile": percentile_in_history(values, today),
+                     "points": int(len(values))})
+    return pd.DataFrame(rows, columns=["multiple", "today", "low", "median", "high",
+                                       "percentile", "points"])
+
+
 def present_value(base: float, growth: float, discount: float, terminal_growth: float,
                   years: int) -> float:
     """Value of a cash flow growing at ``growth`` for ``years``, then at

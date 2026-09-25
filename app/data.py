@@ -297,3 +297,18 @@ def screen_view(mtime: float) -> pd.DataFrame:
     since = (dt.date.today() - dt.timedelta(days=20)).isoformat()
     closes = recent_closes(tickers, since, mtime)
     return sc.screen_table(frames, closes, corporate_actions(), names)
+
+
+@st.cache_data(show_spinner="Calculando la valoración…")
+def valuation_view(cik: str, ticker: str, as_of_iso: str, years: int, mtime: float):
+    """Today's valuation and its monthly history, point-in-time (``transform.valuation``).
+    Shared by the company page and the deployment page's valuation band."""
+    from transform import valuation as val  # noqa: PLC0415
+
+    obs = sec_observations()
+    prices = prices_for([ticker])
+    actions = corporate_actions()
+    now = val.assess(obs, prices, actions, cik, ticker, as_of_iso)
+    end = pd.Timestamp(as_of_iso)
+    dates = [*pd.date_range(end - pd.DateOffset(years=years), end, freq="ME"), end]
+    return now, val.history(obs, prices, actions, cik, ticker, dates)
