@@ -169,3 +169,18 @@ def test_a_company_new_to_the_public_copy_goes_up_whole(local):
     assert old <= kept(sel)
     assert ("OLD", "2010-01-01") not in kept(sel), "only the newcomer's rows, not everything"
     ps.assert_public(sel, settings, held={"TMUS"})
+
+
+def test_supervisory_data_travels_only_for_researched_institutions(local):
+    """NU's Brazilian conglomerate (sources.bcb) is not researched in this fixture: its rows
+    stay local, the Selic (context) travels, and the guard refuses a slipped row."""
+    loader.upsert_observations(local, pd.DataFrame([
+        obs("bcb_ifdata", "C0084693:equity"), obs("bcb_sgs", "BR:selic_target")]))
+    settings = settings_with_watchlist()
+    sel = ps.select(local, settings)
+    series = set(sel.observations["series_id"])
+    assert "BR:selic_target" in series and "C0084693:equity" not in series
+    sel.observations = pd.concat([sel.observations,
+                                  pd.DataFrame([obs("bcb_ifdata", "C0084693:equity")])])
+    with pytest.raises(RuntimeError, match="supervisory data"):
+        ps.assert_public(sel, settings, held={"TMUS"})

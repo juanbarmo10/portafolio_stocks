@@ -236,6 +236,8 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 | Reuniones del FOMC | Página de la Reserva Federal | copiadas a la configuración y verificadas; la ingesta avisa cuando la lista se agota |
 | Composición histórica del S&P 500 | [`fja05680/sp500`](https://github.com/fja05680/sp500) (MIT) | reconstrucción desde 1996; fiable desde 2001. Los precios de los miembros que salieron no son gratis, así que la amplitud muestra su **cobertura** y solo vale desde el 85 % (2019-12-09) |
 | Put/call ratio | — | **fuera de alcance**: CBOE no ofrece ruta pública y su `robots.txt` prohíbe la sección |
+| Datos de supervisión de bancos brasileños (para Nu Holdings, que presenta en IFRS sin XBRL trimestral) | Banco Central do Brasil, IF.data | API OData abierta; normas contables brasileñas, en reales. Sin fecha de publicación: se guarda la primera vez que se ve |
+| Meta Selic | Banco Central do Brasil, SGS | API abierta |
 | Cuenta real | IBKR Flex Web Service | token de solo lectura |
 
 **Fuera de alcance** (de pago): datos de mercado de IBKR, Bloomberg/FactSet/Refinitiv,
@@ -283,7 +285,7 @@ python run_ingest.py --force         # también lo que no toca hoy (amplitud, cr
 ```
 
 Fuentes registradas: `fred`, `macro_calendar`, `prices`, `ibkr`, `sec`, `sec_filings`,
-`short_interest`, `universe` (semanal) y `screen` (trimestral). Las dos últimas se saltan
+`short_interest`, `bcb`, `universe` (semanal) y `screen` (trimestral). Las dos últimas se saltan
 solas mientras no les toca: los datos que traen no cambian más deprisa. Una fuente sin sus
 credenciales configuradas **se omite con aviso**, no rompe el pipeline; y una unidad rota
 dentro de una fuente (una serie, un ticker, una empresa) se reporta y devuelve código de

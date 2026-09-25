@@ -45,6 +45,15 @@ PRIVATE_SOURCES = frozenset({"ibkr", "local_fx"})
 # companies' rows travel, and the guard checks every one.
 FINRA_SOURCE = "finra"
 FINRA_SERIES = ("short_interest", "days_to_cover", "short_interest:revised")
+# The Brazilian supervisor's data (RESEARCH.md §2.43): public, and only for institutions of
+# researched companies; the Selic is context and travels whole.
+BCB_IFDATA, BCB_SGS = "bcb_ifdata", "bcb_sgs"
+
+
+def researched_institutions(settings: Settings) -> set[str]:
+    researched = set(researched_tickers(settings))
+    return {str(i["code"]) for i in settings.source("bcb").get("institutions", [])
+            if str(i.get("ticker")) in researched}
 PRIVATE_TABLES = frozenset({"trades", "cash_transactions", "securities", "alerts_log",
                             "exit_ladder", "thesis_log", "universe_membership"})
 TABLES = ("companies", "filings", "events", "corporate_actions")
@@ -97,7 +106,12 @@ def select(conn: Any, settings: Settings, *, since: str | None = None,
     short = read_observations(conn, source=FINRA_SOURCE,
                               series_ids=[f"{t}:{s}" for t in researched_tickers(settings)
                                           for s in FINRA_SERIES])
-    frames = [fred, sec, prices, short]
+    supervisor = read_observations(conn, source=BCB_IFDATA)
+    if not supervisor.empty:
+        supervisor = supervisor[supervisor["series_id"].str.split(":").str[0]
+                                .isin(researched_institutions(settings))]
+    selic = read_observations(conn, source=BCB_SGS)
+    frames = [fred, sec, prices, short, supervisor, selic]
     if breadth_readings:
         frames.append(br.readings_to_observations(breadth_readings))
     everything = (pd.concat([f for f in frames if not f.empty], ignore_index=True)
@@ -150,6 +164,11 @@ def assert_public(selection: Selection, settings: Settings, held: set[str]) -> N
             leaks.append(f"prices outside the public list {sorted(tickers - allowed)}")
         shorted = {sid.split(":", 1)[0] for sid in obs.loc[obs["source"] == FINRA_SOURCE,
                                                            "series_id"]}
+        codes = {sid.split(":", 1)[0] for sid in obs.loc[obs["source"] == BCB_IFDATA,
+                                                         "series_id"]}
+        if codes - researched_institutions(settings):
+            leaks.append("supervisory data of non-researched institutions "
+                         f"{sorted(codes - researched_institutions(settings))}")
         if shorted - set(researched_tickers(settings)):
             leaks.append("short interest of non-researched tickers "
                          f"{sorted(shorted - set(researched_tickers(settings)))}")

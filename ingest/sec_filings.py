@@ -190,6 +190,38 @@ def earnings_dates(submissions: Mapping[str, Any]) -> list[dict[str, str]]:
     return sorted(out, key=lambda row: row["date"], reverse=True)
 
 
+# A foreign issuer (20-F / 6-K) files no 8-K. Its results come as SEVERAL 6-Ks on one day —
+# press release, financial statements, presentation — all for the quarter just closed
+# (Nu Holdings: 3-4 on each results day, 2025-2026). That pattern is the fact the SEC records.
+FOREIGN_MIN_REPORTS = 3
+FOREIGN_LAG_DAYS = (15, 100)     # a results filing lands weeks after the quarter, not years
+
+
+def foreign_earnings_dates(submissions: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Results days of a foreign issuer, newest first: ``[{date, accession}]``.
+
+    A day with at least ``FOREIGN_MIN_REPORTS`` 6-Ks whose report date is the same quarter
+    end, filed ``FOREIGN_LAG_DAYS`` after it. Inferred from a pattern, not read from an item
+    code — the event's payload says so.
+    """
+    recent = submissions.get("filings", {}).get("recent", {})
+    groups: dict[tuple[str, str], list[str]] = {}
+    for index, form in enumerate(recent.get("form", [])):
+        if (form or "").upper() != "6-K":
+            continue
+        filed = recent["filingDate"][index]
+        period = (recent.get("reportDate") or [""] * (index + 1))[index] or ""
+        if len(period) != 10 or period[5:] not in ("03-31", "06-30", "09-30", "12-31"):
+            continue
+        lag = (dt.date.fromisoformat(filed) - dt.date.fromisoformat(period)).days
+        if FOREIGN_LAG_DAYS[0] <= lag <= FOREIGN_LAG_DAYS[1]:
+            groups.setdefault((filed, period), []).append(recent["accessionNumber"][index])
+    out = [{"date": filed, "accession": accessions[0]}
+           for (filed, _period), accessions in groups.items()
+           if len(accessions) >= FOREIGN_MIN_REPORTS]
+    return sorted(out, key=lambda row: row["date"], reverse=True)
+
+
 def estimate_next_earnings(
     announcements: Sequence[Mapping[str, str]]
 ) -> tuple[str, str] | None:
@@ -239,6 +271,10 @@ def event_rows(
     instead of leaving a trail of stale predictions.
     """
     announcements = earnings_dates(submissions)
+    source = "8-K item 2.02"
+    if not announcements:
+        announcements = foreign_earnings_dates(submissions)
+        source = f"6-K: {FOREIGN_MIN_REPORTS}+ el mismo día sobre el trimestre (inferido)"
     if not announcements:
         return []
 
@@ -252,7 +288,7 @@ def event_rows(
             "is_estimated": 0,
             "label": f"{ticker}: resultados publicados",
             "payload": json.dumps({"accession": announcement["accession"],
-                                   "source": "8-K item 2.02"}),
+                                   "source": source}),
         })
 
     estimate = estimate_next_earnings(announcements)

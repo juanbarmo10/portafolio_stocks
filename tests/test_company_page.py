@@ -399,10 +399,20 @@ def test_a_foreign_issuer_is_explained_not_sent_to_rerun_the_ingest(tmp_path, mo
          "filed_date": "2026-04-08", "is_amended": 0, "url": None},
         {"accession": "a2", "cik": "0001691493", "form": "6-K", "period_end": "2026-06-30",
          "filed_date": "2026-08-13", "is_amended": 0, "url": None}])
+    # The Brazilian supervisor's figures (sources.bcb): what the page shows instead.
+    loader.upsert_observations(conn, pd.DataFrame([
+        {"source": "bcb_ifdata", "series_id": f"C0084693:{key}", "ts": "2026-06-30",
+         "ts_release": "2026-09-01", "value": value}
+        for key, value in [("total_assets", 300.0), ("credit_portfolio", 150.0),
+                           ("problem_assets", 12.0), ("exposure_total", 100.0)]]))
     conn.close()
     monkeypatch.setattr(app_data, "db_path", lambda: db_path)
     st.cache_data.clear()
     infos = " ".join(i.value for i in render().info)
     assert "Emisor extranjero" in infos and "IFRS" in infos
     assert "--only sec sec_filings" not in infos, "rerunning the SEC ingest fixes nothing"
+    app = render()
+    assert any("Banco Central do Brasil" in m.value for m in app.markdown)
+    metrics = {m.label: m.value for m in app.metric}
+    assert metrics["Activos problemáticos"] == "12,0 %"
     st.cache_data.clear()

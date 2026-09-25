@@ -81,6 +81,7 @@ sources:
       - WALCL         # activos totales de la Fed (millones USD, semanal)
       - WTREGEN       # cuenta general del Tesoro en la Fed (millones USD, semanal)
       - WLRRAL        # repos inversos, nivel del miércoles (millones USD, semanal)
+      - DEXBZUS       # reales por dólar (H.10, diaria): contexto de NU (§2.43)
     # Historia ANTERIOR al archivo de vintages (ALFRED), con fecha de publicación DERIVADA.
     # Solo para series que NO se revisan, verificado y no supuesto (RESEARCH.md §2.30): el
     # 2026-09-24, la primera publicación coincide con el valor actual en 4.012 de 4.012
@@ -383,6 +384,52 @@ sources:
     # vuelve al panel algo conservador. Cuando una fecha derivada tiene que equivocarse,
     # tiene que equivocarse TARDE.
     publication_lag_business_days: 8
+
+  # --- Banco Central do Brasil (ingest/bcb.py, RESEARCH.md §2.43) -----------------------
+  # Para las empresas que la SEC no deja leer: Nu Holdings presenta IFRS en 20-F/6-K sin
+  # XBRL trimestral. Su negocio en Brasil lo supervisa el BCB, que publica cada trimestre
+  # los datos de cada institución (IF.data, API OData abierta, sin clave). Normas contables
+  # brasileñas (COSIF), en REALES, solo Brasil: no cuadra con el 6-K ni debe.
+  bcb:
+    ifdata_url: https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata/
+    sgs_url: https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code}/dados
+    first_quarter: 2019q4
+    institutions:
+      - ticker: NU
+        code: C0084693             # "NU PAGAMENTOS - PRUDENCIAL", conglomerado prudencial
+        tipo: 1                    # TipoInstituicao de IF.data para conglomerados prudenciales
+    # Informe → {columna del BCB (texto antes del salto de línea) → clave}. Verificadas
+    # contra la API el 2026-09-25. Los informes de cartera por nivel de riesgo (8) llegan
+    # solo hasta 2023; desde 2025 la Res. 4.966 los sustituye por el 16.
+    reports:
+      "1":
+        "Ativo Total": total_assets
+        "Carteira de Crédito": credit_portfolio                    # desde 2025 (Res. 4.966)
+        "Carteira de Crédito Classificada": credit_portfolio_classified   # hasta 2024
+        # Dos bases de medida distintas: NO se empalman en una serie (§9.8). La página
+        # las pinta seguidas y marca el cambio.
+        "Captações": deposits
+        "Patrimônio Líquido": equity
+        "Lucro Líquido": net_income_semester   # ⚠️ ACUMULADO DEL SEMESTRE (medido)
+        "Índice de Basileia": basel_ratio
+      "5":
+        "Índice de Capital Principal": cet1_ratio
+      "10":
+        "Quantidade de clientes com operações ativas": credit_clients
+      "16":
+        "Ativos problemáticos": problem_assets # Res. 4.966: >90 días, reestructurado o
+        "Inadimplência": delinquent            # con indicios de no recuperarse
+        "Total Geral": exposure_total
+    # ⚠️ IF.data NO dice cuándo publicó cada trimestre, y el BCB no tiene calendario
+    # público (buscado). Así que ts_release es: la PRIMERA VEZ que el panel ve el trimestre
+    # (observado, cota superior: se equivoca tarde), y para lo que ya existía en la primera
+    # ingesta, cierre + este rezago (DERIVADO). Una sola medida: el 2T-2026 estaba publicado
+    # a los 87 días. 120 deja margen; las primeras vistas futuras irán midiendo el real.
+    derived_lag_days: 120
+    # Contexto de Brasil (SGS). La meta Selic se RELLENA HACIA EL FUTURO hasta el siguiente
+    # Copom: solo se guardan fechas hasta el día de la ingesta.
+    sgs_series:
+      432: selic_target
 
   ibkr_flex:
     base_url: https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService

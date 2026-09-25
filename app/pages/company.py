@@ -40,6 +40,7 @@ from app.format import (
     reported_amount,
 )
 from core.config import load_settings
+from transform import bcb
 from transform import fundamentals as fun
 from transform import portfolio as port
 from transform import thesis as th
@@ -490,6 +491,77 @@ if not screen_table.empty:
             "para una empresa pequeña son los **grandes del sector**, no sus pares de tamaño. "
             "«Por encima de» dice dónde cae, no si es bueno: más SBC o más crecimiento no se "
             "leen en la misma dirección."
+        )
+
+# The supervisor's figures, for a bank the SEC cannot read (RESEARCH.md §2.43): Nu Holdings
+# files IFRS without quarterly XBRL, and the Banco Central do Brasil publishes its Brazilian
+# conglomerate every quarter. Shown for any company with an institution in sources.bcb.
+bcb_institution = next((i for i in settings.source("bcb").get("institutions", [])
+                        if str(i.get("ticker")) == ticker), None)
+if bcb_institution:
+    supervisor = bcb.assess(app_data.observations("bcb_ifdata", app_data.db_mtime()),
+                            str(bcb_institution["code"]), as_of_iso)
+    if supervisor is not None:
+        dated = "observada: la primera vez que el panel la vio" if supervisor.observed else \
+            "derivada: cierre + 120 días, tarde a propósito"
+        st.markdown(f"**Datos del supervisor · Banco Central do Brasil** · trimestre al "
+                    f"{supervisor.quarter} (fecha de publicación {dated})")
+        row = st.columns(4)
+        row[0].metric("Cartera de crédito (R$)", compact_amount(supervisor.credit_portfolio),
+                      delta=None if supervisor.credit_growth is None
+                      else f"{pct(supervisor.credit_growth)} interanual",
+                      help=f"Base: {supervisor.credit_basis}. El crecimiento solo se calcula "
+                           "dentro de la misma base: en 2025 cambió la norma (Res. 4.966).")
+        row[1].metric("Clientes con crédito activo", compact_amount(supervisor.credit_clients))
+        row[2].metric("Índice de Basilea", pct(supervisor.basel),
+                      help="Capital regulatorio sobre activos ponderados por riesgo.")
+        row[3].metric("Capital principal", pct(supervisor.cet1))
+        row = st.columns(4)
+        row[0].metric("Activos problemáticos", pct(supervisor.problem_share),
+                      help="Sobre la exposición total. Definición del regulador (Res. 4.966): "
+                           "más de 90 días de atraso, reestructurados o con indicios de no "
+                           "recuperarse. NO es la morosidad 90+ que publica la empresa.")
+        row[1].metric("Inadimplência (BCB)", pct(supervisor.delinquent_share),
+                      help="Sobre la exposición total, con la etiqueta y definición del BCB.")
+        row[2].metric("Beneficio del trimestre (R$)",
+                      compact_amount(supervisor.net_income_quarter),
+                      help="El BCB lo publica acumulado en el semestre; el trimestre se deriva "
+                           "(2T = semestre − 1T).")
+        row[3].metric("ROE anualizado (aprox.)", pct(supervisor.roe_annualized),
+                      help="4 × beneficio del trimestre / patrimonio del conglomerado en Brasil. "
+                           "No es el ROE del grupo que publica la empresa.")
+        credit = supervisor.history.dropna(subset=["credit"])
+        if len(credit) > 2:
+            altair_chart(
+                alt.Chart(credit.assign(date=pd.to_datetime(credit["date"]))).mark_bar().encode(
+                    x=alt.X("date:T", title=None),
+                    y=alt.Y("credit:Q", title="Cartera de crédito, R$"),
+                    color=alt.Color("basis:N", legend=alt.Legend(orient="top", title="Base"),
+                                    scale=alt.Scale(range=["#9aa5b1", SERIES_COLORS[0]])),
+                    tooltip=[alt.Tooltip("date:T", title="Trimestre"),
+                             alt.Tooltip("credit:Q", title="R$", format=",.0f"),
+                             alt.Tooltip("basis:N", title="Base")],
+                ).properties(height=200),
+                width="stretch",
+            )
+        sgs = app_data.observations("bcb_sgs", app_data.db_mtime())
+        selic = bcb.series(sgs, "BR:selic_target", as_of_iso)
+        brl = bcb.series(app_data.fred_observations(), "DEXBZUS", as_of_iso)
+        context = []
+        if not selic.empty:
+            year_ago = selic[selic.index <= pd.Timestamp(as_of_iso) - pd.DateOffset(years=1)]
+            context.append(f"meta Selic **{number(selic.iloc[-1])} %**"
+                           + (f" (hace un año {number(year_ago.iloc[-1])} %)"
+                              if len(year_ago) else ""))
+        if not brl.empty:
+            year_ago = brl[brl.index <= pd.Timestamp(as_of_iso) - pd.DateOffset(years=1)]
+            context.append(f"**{number(brl.iloc[-1])} reales por dólar**"
+                           + (f" ({pct(brl.iloc[-1] / year_ago.iloc[-1] - 1)} en un año; "
+                              "positivo = el real se debilitó)" if len(year_ago) else ""))
+        st.caption(
+            ("Contexto: " + " · ".join(context) + ". " if context else "")
+            + "Normas contables brasileñas (COSIF), en reales y **solo Brasil**: no cuadra con "
+            "los 6-K en IFRS y no debe. Es la mirada del supervisor, que la empresa no elige."
         )
 
 # --- 3. Valuation ---------------------------------------------------------------------
