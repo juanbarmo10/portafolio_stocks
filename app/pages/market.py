@@ -53,27 +53,10 @@ public = settings.public_mode
 L2 = settings.raw["panel"]["level2"]
 R, B, SB = L2["regime"], L2["breadth"], L2["sector_breadth"]
 EW, ROT = L2["equal_weight"], L2["rotation"]
-ETFS = rg.regime_tickers(L2)
 
 st.title("📈 Mercado")
 st.caption("Nivel 2 — ¿está sano el mercado o es un rally estrecho? — y el semáforo que lo "
            "combina con el nivel 1. Resolución diaria; nada se actualiza solo (§2).")
-
-
-@st.cache_data(show_spinner="Calculando el semáforo…")
-def regime_view(mtime: float) -> dict | None:
-    """Everything the light needs, cached until the database changes."""
-    built = rg.build(app_data.fred_observations(), app_data.prices_for(ETFS),
-                     app_data.corporate_actions(), L2)
-    if built is None:
-        return None
-    return {
-        "reading": rg.reading_at(built.calendar[-1], built.rules, built.components,
-                                 built.votes, built.frame),
-        "frame": built.frame[["verdict", "available"]],
-        "evaluation": rg.evaluate(built.frame, built.benchmark),
-        "closes": built.closes, "splits": built.splits,
-    }
 
 
 @st.cache_data(show_spinner="Calculando la amplitud por empresas…")
@@ -96,7 +79,7 @@ def constituent_view(mtime: float) -> list | None:
     )
 
 
-view = regime_view(app_data.db_mtime())
+view = app_data.regime_view(app_data.db_mtime())
 
 if view is None:
     st.info(
@@ -193,7 +176,7 @@ st.caption(
     "múltiples, y tras el verde se ganó algo *menos* que la media. Lo que sí hace es "
     "activarse antes de caídas más hondas en el mes siguiente, y a quien aporta cada mes le "
     "ha costado prácticamente nada. Es un freno de disciplina, no una fuente de "
-    "rentabilidad (RESEARCH.md §2.29-2.30)."
+    "rentabilidad (README, «Resultado de la validación»)."
 )
 
 # The index is named, so renaming a column called "index" did nothing and "date" never
@@ -318,7 +301,8 @@ with right:
             width="stretch",
         )
     st.caption("Sube = los defensivos baten a los cíclicos: el mercado descuenta "
-               "desaceleración. Medias geométricas, no suma de precios (THEORY.md §2.3).")
+               "desaceleración. Medias geométricas, no suma de precios: el precio de cada ETF "
+               "no pondera.")
 
 # --- 5. Volatility ----------------------------------------------------------------------------
 
@@ -364,7 +348,7 @@ if not public:
         st.caption(
             "FINRA, dos veces al mes. **La fecha de publicación es derivada**: FINRA no la "
             "publica, y se estima con el rezago máximo medido en su calendario (8 días "
-            "hábiles), tarde a propósito (THEORY.md §7.4)."
+            "hábiles), tarde a propósito: una fecha derivada tiene que equivocarse tarde."
         )
     else:
         st.caption("Sin interés corto todavía: `python run_ingest.py --only short_interest`.")

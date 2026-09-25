@@ -258,7 +258,9 @@ def read_observations(
     rows = conn.execute(sql, params).fetchall()
     if not rows:
         return pd.DataFrame(columns=columns)
-    return pd.DataFrame([dict(zip(columns, r)) for r in rows])
+    # From tuples directly: a dict per row cost seconds on the ~1.5 M member closes the
+    # breadth and the public sync read.
+    return pd.DataFrame.from_records(rows, columns=columns)
 
 
 # Tables readable row-by-row, with their columns and the column to order by. Declared here
@@ -334,7 +336,7 @@ def read_table(conn: Any, table: str) -> "pd.DataFrame":
     ).fetchall()
     if not rows:
         return pd.DataFrame(columns=columns)
-    return pd.DataFrame([dict(zip(columns, r)) for r in rows])
+    return pd.DataFrame.from_records(rows, columns=columns)
 
 
 def read_account_table(conn: Any, table: str) -> "pd.DataFrame":

@@ -103,7 +103,7 @@ class Ingester(ABC):
     to assert the output honors the loader column contract before handing it over.
     """
 
-    #: Source label written to observations.source (e.g. 'fred', 'sec', 'stooq').
+    #: Source label written to observations.source (e.g. 'fred', 'sec', 'yfinance').
     source: str = ""
 
     @abstractmethod

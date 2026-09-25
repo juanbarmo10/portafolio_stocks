@@ -149,7 +149,7 @@ def test_the_page_shows_the_thesis_and_its_own_numbers(company_app):
 
     assert "Costes de cambio altos" in text, "the thesis is not shown"
     assert "Conversión a caja por debajo de 0,6" in text, "the invalidation text is not shown"
-    assert "331,84 mil millones USD" in text, "TTM revenue did not reach the page"
+    assert "331,84 mil M" in text, "TTM revenue did not reach the page"
     assert "no lo interpreta" in text, "the page must say it does not judge the prose"
 
 
@@ -189,7 +189,7 @@ def test_public_mode_hides_the_position_but_keeps_the_company(company_app, monke
 
     text = rendered_text(render())
 
-    assert "331,84 mil millones USD" in text, "public filings must stay visible"
+    assert "331,84 mil M" in text, "public filings must stay visible"
     assert "Tu posición" not in text, "the holding block leaked into the public view"
     assert "1.000,00 USD" not in text, "the position value leaked"
     assert "Vista pública" in text

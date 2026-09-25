@@ -19,7 +19,7 @@ PRAGMA foreign_keys = ON;
 --   date unknown / not applicable" is encoded as the empty string (db.loader.TS_RELEASE_UNKNOWN).
 --   Read it back with NULLIF(ts_release, '') when SQL-level NULL semantics are wanted.
 CREATE TABLE IF NOT EXISTS observations (
-    source      TEXT NOT NULL,              -- 'fred' | 'sec' | 'stooq' | 'finra' | 'cboe' | 'ibkr'
+    source      TEXT NOT NULL,              -- 'fred' | 'sec' | 'yfinance' | 'finra' | 'ibkr' | 'equitydash' (derived) | local fx
     series_id   TEXT NOT NULL,              -- 'CPIAUCSL' | '0000320193:Revenues' | 'SPY:close_raw'
     ts          TEXT NOT NULL,              -- ISO8601 UTC — REFERENCE date of the datum
     ts_release  TEXT NOT NULL DEFAULT '',   -- ISO8601 UTC — PUBLICATION date ('' = unknown)

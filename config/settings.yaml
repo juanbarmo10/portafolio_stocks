@@ -5,7 +5,8 @@
 # archivo (deep merge). Los secretos van en config/.env.
 
 database:
-  path: equitydash.db          # relativo a la raíz del repo; DATABASE_URL lo sustituye (fase 5)
+  path: equitydash.db          # relativo a la raíz; la base LOCAL, completa. DATABASE_URL solo
+                               # la usa la versión pública (Streamlit Cloud → PostgreSQL)
 
 logging:
   level: INFO
@@ -523,7 +524,7 @@ panel:
       - series_id: BAA10Y
         label: Prima crédito Baa − 10a
         unit: pp
-        note: sustituto con histórico largo del spread HY (desde 1986)
+        note: sustituto del spread HY — serie desde 1986, point-in-time desde 2014
       - series_id: T10Y2Y
         label: Curva 10a − 2a
         unit: pp
@@ -563,7 +564,7 @@ panel:
       - series_id: PAYEMS
         label: Nóminas no agrícolas
         unit: miles
-        note: se revisa; el panel muestra la versión vigente en cada fecha
+        note: se revisa; el panel guarda la PRIMERA publicación (lo que se sabía ese día)
 
     # Gráficas. Series de la MISMA unidad en cada una: dos escalas en un mismo eje
     # es la forma más común de mentir con una gráfica.

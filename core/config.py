@@ -47,6 +47,9 @@ _SECRET_KEYS = (
     # Section 8 phase 5: the PUBLIC copy's database. Deliberately not DATABASE_URL, which
     # would switch the whole local pipeline to it — the local base stays SQLite and full.
     "PUBLIC_DATABASE_URL",
+    # Read by db.database directly; listed here so its value is redacted like any other
+    # secret wherever the settings' secrets are used (logs, Telegram).
+    "DATABASE_URL",
 )
 
 # Required theses fields (section 5.2). `invalidation` is listed here *and* enforced
@@ -81,7 +84,7 @@ class Settings:
     secrets: dict[str, str] = field(default_factory=dict)
     public_mode: bool = False
 
-    # --- Universe (section 5.1): three concentric circles ---------------------
+    # --- Universe (section 5.1): four concentric circles ----------------------
 
     @property
     def market_references(self) -> list[str]:

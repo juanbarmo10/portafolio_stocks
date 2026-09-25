@@ -688,14 +688,18 @@ class IbkrFlexIngester(Ingester):
             "base_delay_s": float(cfg.get("poll_base_delay_s", 3.0)),
             "max_delay_s": float(cfg.get("poll_max_delay_s", 60.0)),
         }
-        # ticker -> CIK from the written universe. The SEC ticker↔CIK map is phase 2; until
-        # then an untracked ticker resolves to NULL, which section 9.3 prefers to a guess.
+        # ticker -> CIK from everything written down (tracked AND under study), completed in
+        # attach_database() with the `companies` registry the SEC filings ingester keeps —
+        # which resolves the held positions through the SEC's own ticker map. Until
+        # 2026-09-25 only `tracked` was read, and with no thesis written yet every trade,
+        # dividend and security was stored with a NULL CIK. A ticker in none of them still
+        # resolves to NULL, which section 9.3 prefers to a guess.
         # zfill to ten digits, exactly as the SEC ingesters normalize it: otherwise the
         # same company is keyed "789019" in trades and "0000789019" in observations, and
         # nothing joins (section 9.3).
         self._cik_by_ticker = {
             str(company["ticker"]): str(company["cik"]).zfill(10)
-            for company in settings.tracked_companies
+            for company in settings.researched_companies
             if company.get("ticker") and company.get("cik")
         }
         # Cash tolerance for the StmtFunds cross-check. Half a cent: the ledger and the
@@ -706,6 +710,22 @@ class IbkrFlexIngester(Ingester):
         self._tables: dict[str, list[dict[str, Any]]] = {}
         self._failures: list[str] = []
         self._unresolved: set[str] = set()
+
+    def attach_database(self, conn: Any) -> None:
+        """Complete the ticker -> CIK map with the ``companies`` registry (section 9.3).
+
+        That table holds the SEC-resolved CIK of every researched company and every held
+        position (``ingest/sec_filings.py``). What config names wins on a conflict: it is the
+        user's explicit statement. A fresh database without the table is not a failure.
+        """
+        try:
+            rows = conn.execute("SELECT ticker, cik FROM companies").fetchall()
+        except Exception as exc:  # noqa: BLE001 — no registry yet means nothing to add
+            log.debug("No companies registry to read: %s", exc)
+            return
+        for ticker, cik in rows:
+            if ticker and cik:
+                self._cik_by_ticker.setdefault(str(ticker), str(cik).zfill(10))
 
     @staticmethod
     def is_available(settings: Settings) -> bool:
@@ -791,7 +811,8 @@ class IbkrFlexIngester(Ingester):
             # would bury the run. The CIK stays NULL in the database either way.
             log.warning(
                 "%d ticker(s) did not resolve to a CIK and were stored as NULL: %s. Add "
-                "them to the tracked universe in settings.local.yaml (section 9.3).",
+                "them to universe.watchlist (ticker and CIK) in settings.local.yaml, or let "
+                "sec_filings register a held one (section 9.3).",
                 len(self._unresolved), sorted(self._unresolved), extra={"source": SOURCE},
             )
 

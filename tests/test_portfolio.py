@@ -393,3 +393,66 @@ def test_the_commission_shares_add_up_to_the_realized_result():
     assert row["sell_commission"] == pytest.approx(-0.5)
     assert row["proceeds"] - row["cost"] + row["buy_commission"] + row["sell_commission"] \
         == pytest.approx(row["realized_pnl"])
+
+
+# --- Performance against the market, net of contributions (2026-09-25) ------------------
+
+
+def _nav(values, start="2026-01-05"):
+    days = pd.bdate_range(start, periods=len(values))
+    return pd.DataFrame({"ts": [d.date().isoformat() for d in days], "value": values})
+
+
+def test_a_deposit_is_not_a_return():
+    """The NAV jumps 100 → 150 because 50 came in: the account made nothing."""
+    nav = _nav([100.0, 150.0, 150.0])
+    flows = pd.Series({pd.Timestamp("2026-01-06"): 50.0})
+    bench = pd.Series(100.0, index=pd.bdate_range("2026-01-01", periods=10))
+    summary, curves = portfolio.performance(nav, flows, bench)
+    assert summary.twr == pytest.approx(0.0)
+    assert summary.contributions == pytest.approx(50.0)
+    assert curves["account"].iloc[-1] == pytest.approx(100.0)
+
+
+def test_the_shadow_portfolio_buys_the_index_with_every_contribution():
+    """Start 100 with the index at 100, deposit 50 when it is at 125, end at 150:
+    1 unit + 0,4 units = 1,4 units × 150 = 210. The account ended at 200: behind."""
+    nav = _nav([100.0, 180.0, 200.0])
+    flows = pd.Series({pd.Timestamp("2026-01-06"): 50.0})
+    bench = pd.Series([100.0, 125.0, 150.0], index=pd.bdate_range("2026-01-05", periods=3))
+    summary, _ = portfolio.performance(nav, flows, bench)
+    assert summary.shadow_end == pytest.approx(210.0)
+    assert summary.benchmark_return == pytest.approx(0.5)
+    # TWR: 180-50=130 → +30 %, then 200/180 → +11,1 %: 1,3 × 1,111 − 1 = 44,4 %.
+    assert summary.twr == pytest.approx(1.3 * 200 / 180 - 1)
+    assert summary.excess == pytest.approx(summary.twr - 0.5)
+
+
+def test_a_deposit_before_the_first_nav_is_already_in_it():
+    nav = _nav([100.0, 150.0])                        # Mon 5, Tue 6
+    flows = pd.Series({pd.Timestamp("2026-01-03"): 50.0})   # Saturday, before the window
+    bench = pd.Series(100.0, index=pd.bdate_range("2025-12-29", periods=10))
+    summary, _ = portfolio.performance(nav, flows, bench)
+    assert summary.contributions == 0.0, "a flow before the first NAV is already in it"
+
+
+def test_without_enough_data_there_is_no_performance():
+    bench = pd.Series(100.0, index=pd.bdate_range("2026-01-01", periods=5))
+    assert portfolio.performance(_nav([100.0]), pd.Series(dtype=float), bench)[0] is None
+    assert portfolio.performance(_nav([100.0, 101.0]), pd.Series(dtype=float),
+                                 pd.Series(dtype=float))[0] is None
+
+
+def test_deposits_are_read_from_the_cash_rows():
+    cash = pd.DataFrame([
+        {"ts": "2025-09-22T04:00:00+00:00", "kind": "deposit", "amount": 128.1},
+        {"ts": "2025-09-22T04:00:00+00:00", "kind": "dividend", "amount": 1.0},
+    ])
+    flows = portfolio.external_flows(cash)
+    assert flows.to_dict() == {pd.Timestamp("2025-09-22"): 128.1}
+
+
+def test_the_reconciliation_sentence_uses_spanish_notation():
+    """The sentence used English notation ("1,234.50") until 2026-09-25."""
+    assert portfolio._es(1234.5) == "1.234,50"
+    assert portfolio._es(-0.004, sign=True) == "-0,00"

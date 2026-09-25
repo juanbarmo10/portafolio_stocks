@@ -1,1 +1,1 @@
-"""Event-driven alerts with deduplication via alerts_log. Filled in by phase 4."""
+"""Event-driven alerts, declared in config, deduplicated via alerts_log (section 8, phase 4)."""

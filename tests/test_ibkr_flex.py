@@ -647,3 +647,21 @@ def test_the_master_joins_the_movements_by_the_stable_key(tmp_path):
         assert isin == "US5949181045"
     finally:
         conn.close()
+
+
+def test_the_companies_registry_resolves_what_config_does_not(tmp_path):
+    """Until 2026-09-25 only `tracked` cards were read, and with none written every trade
+    was stored with a NULL CIK — though the registry already knew the held companies."""
+    from db import loader
+
+    conn = loader.init_db(tmp_path / "registry.db")
+    try:
+        loader.upsert_companies(conn, [{"cik": "1283699", "ticker": "TMUS", "name": "T-Mobile",
+                                        "sector": None, "thesis_category": None,
+                                        "first_seen": "2026-09-24", "status": "active"}])
+        ingester = IbkrFlexIngester(settings_for(tmp_path), statement=FIXTURE)
+        ingester.attach_database(conn)
+    finally:
+        conn.close()
+    assert ingester._resolve_cik("TMUS") == "0001283699"
+    assert ingester._resolve_cik("NOPE") is None, "never a guess"

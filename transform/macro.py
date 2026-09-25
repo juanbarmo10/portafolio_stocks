@@ -12,9 +12,8 @@ hand a backtest a month and a half of information nobody had — and the bias is
 always in favor of the simulated strategy, never against it.
 
 This module reports levels, changes and staleness. It does **not** score, rank or combine
-them into a verdict: the regime traffic light is phase 3 (``transform/regime.py``), with
-fixed equal weights and thresholds in config, and building it early is exactly the
-overfitting route section 9.7 warns about.
+them into a verdict: that is ``transform/regime.py``, with fixed equal weights and rules
+written in config before any result was seen (section 9.7).
 """
 
 from __future__ import annotations

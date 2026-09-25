@@ -68,7 +68,8 @@ def test_today_page_renders_the_level_1_table(app_db):
     at = _run()
     table = at.dataframe[0].value
     assert "Curva 10a − 2a" in set(table["Serie"])
-    assert float(table.loc[table["Serie"] == "Curva 10a − 2a", "Valor"].iloc[0]) == 0.39
+    # Spanish notation, like the rest of the panel (it read 0.390 until 2026-09-25).
+    assert table.loc[table["Serie"] == "Curva 10a − 2a", "Valor"].iloc[0] == "0,390"
 
 
 def test_a_series_with_no_data_is_a_visible_hole(app_db):
@@ -86,7 +87,7 @@ def test_a_series_with_no_data_is_a_visible_hole(app_db):
     table = at.dataframe[0].value
     missing = table[table["Serie"] == "VIX"]
     assert len(missing) == 1, "the series vanished instead of showing as a hole"
-    assert pd.isna(missing["Valor"].iloc[0])
+    assert missing["Valor"].iloc[0] == "—", "a hole is shown as a hole, never as a zero"
 
 
 def test_portfolio_page_says_what_is_missing_instead_of_showing_nothing(app_db):
@@ -241,3 +242,72 @@ def test_a_new_ingest_reaches_a_running_panel(app_db):
 
     assert len(first) == 1
     assert len(second) == 2, "the cache served the old read after a new ingest"
+
+
+def test_charts_speak_spanish():
+    """Axis numbers and months in Spanish, like every other figure on the panel."""
+    import altair as alt
+
+    from app.format import enable_spanish_charts
+
+    enable_spanish_charts()
+    spec = alt.Chart(pd.DataFrame({"x": [1]})).mark_point().encode(x="x:Q").to_dict()
+    assert spec["config"]["locale"]["number"]["decimal"] == ","
+    assert "septiembre" in spec["config"]["locale"]["time"]["months"]
+
+
+# --- The landing page summarizes the rest of the checklist (2026-09-25) -----------------
+
+
+def _seed_upcoming(db_path):
+    """A macro release in three days, and results of a held company with no card."""
+    import json
+
+    today = pd.Timestamp.now(tz="UTC").normalize()
+    conn = loader.init_db(db_path)
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            {"source": "fred", "series_id": "T10Y2Y", "ts": "2026-08-27",
+             "ts_release": "2026-08-28", "value": 0.39},
+            {"source": "ibkr", "series_id": "ZZHELD:position_qty",
+             "ts": today.date().isoformat(), "ts_release": today.date().isoformat(),
+             "value": 1.0},
+        ]))
+        loader.upsert_companies(conn, [{"cik": "0000000042", "ticker": "ZZHELD", "name": "Z",
+                                        "sector": None, "thesis_category": None,
+                                        "first_seen": "2026-01-01", "status": "active"}])
+        loader.upsert_events(conn, [
+            {"event_id": "fred:10:x", "category": "macro", "cik": None,
+             "ts": (today + pd.Timedelta(days=3, hours=12)).isoformat(), "is_estimated": 0,
+             "label": "CPI (inflación)",
+             "payload": json.dumps({"calendar_as_of": today.date().isoformat(), "release_id": 10})},
+            {"event_id": "0000000042:earnings:next", "category": "earnings",
+             "cik": "0000000042", "ts": (today + pd.Timedelta(days=5)).date().isoformat(),
+             "is_estimated": 1, "label": "ZZHELD", "payload": "{}"},
+        ])
+    finally:
+        conn.close()
+
+
+def test_the_landing_page_says_what_is_coming(app_db):
+    """It read "sin construir" for three built levels until 2026-09-25."""
+    _seed_upcoming(app_db)
+    at = _run()
+    text = " ".join(m.value for m in at.markdown)
+    assert "sin construir" not in text.lower()
+    upcoming = pd.DataFrame(at.dataframe[-1].value)
+    assert "CPI (inflación)" in set(upcoming["Qué"])
+    assert "Resultados de ZZHELD" in set(upcoming["Qué"]), "a held company's results"
+
+
+def test_publicly_the_landing_page_names_no_position(app_db, monkeypatch):
+    """The earnings of a company held without a card would name the position."""
+    from core import config
+
+    _seed_upcoming(app_db)
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    config.load_settings.cache_clear()
+    at = _run()
+    upcoming = pd.DataFrame(at.dataframe[-1].value)
+    assert "CPI (inflación)" in set(upcoming["Qué"])
+    assert not any("ZZHELD" in str(v) for v in upcoming.to_numpy().ravel())

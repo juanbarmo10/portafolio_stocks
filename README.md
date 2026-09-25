@@ -230,7 +230,9 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 | Mapa ticker↔CIK | SEC `company_tickers.json` | sin clave |
 | Precios diarios OHLC y acciones corporativas | yfinance | sin clave |
 | Short interest | FINRA | API pública sin credenciales (quincenal; la fuente no publica fecha de difusión, así que se deriva — tarde a propósito) |
-| VIX y VIX3M | FRED (`VIXCLS`, `VXVCLS`) | misma clave que el resto de la macro |
+| VIX y VIX3M | FRED (`VIXCLS`, `VXVCLS`) | misma clave; antes del archivo de *vintages* (2010 y 2014), con fecha de publicación **derivada** — solo porque se midió que no se revisan |
+| Calendario macro (CPI, PCE, empleo) | FRED `release/dates` | calendario oficial de las agencias, fechas futuras incluidas |
+| Reuniones del FOMC | Página de la Reserva Federal | copiadas a la configuración y verificadas; la ingesta avisa cuando la lista se agota |
 | Composición histórica del S&P 500 | [`fja05680/sp500`](https://github.com/fja05680/sp500) (MIT) | reconstrucción desde 1996; fiable desde 2001. Los precios de los miembros que salieron no son gratis, así que la amplitud muestra su **cobertura** y solo vale desde el 85 % (2019-12-09) |
 | Put/call ratio | — | **fuera de alcance**: CBOE no ofrece ruta pública y su `robots.txt` prohíbe la sección |
 | Cuenta real | IBKR Flex Web Service | token de solo lectura |
@@ -241,8 +243,10 @@ históricos de índices con fecha de efectividad.
 
 Esa última ausencia tiene consecuencias: calcular amplitud con la lista de constituyentes de
 **hoy** aplicada al pasado sobreestima la salud del mercado, porque las empresas que quebraron
-o fueron expulsadas no están. El panel documenta esa limitación de forma visible, no en un
-comentario del código.
+o fueron expulsadas no están. Por eso el panel usa la composición **histórica** gratuita de
+arriba, y como los precios de los que salieron tampoco son gratis, cada lectura lleva su
+cobertura en pantalla. Para juzgar el pasado, el semáforo usa la amplitud por sectores (nueve
+ETF, sin ese sesgo).
 
 ---
 
@@ -352,8 +356,9 @@ Nada está hardcodeado.
 falta escribir lo que se quiera sobrescribir. Las variables de entorno tienen prioridad sobre
 el `.env`, que a su vez la tiene sobre los YAML.
 
-Variables de runtime: `LOG_LEVEL`, `PUBLIC_MODE` (oculta la cuenta real y la capa fiscal) y
-`DATABASE_URL` (cambia SQLite por PostgreSQL sin tocar código).
+Variables de runtime: `LOG_LEVEL`, `PUBLIC_MODE` (oculta la cuenta real y la capa fiscal),
+`DATABASE_URL` (cambia SQLite por PostgreSQL sin tocar código; la usa la versión pública) y
+`PUBLIC_DATABASE_URL` (destino de la copia pública, que sube la máquina local).
 
 ---
 
@@ -364,18 +369,23 @@ ingest/     fetch() -> DataFrame [source, series_id, ts, ts_release, value]
               │
 db/loader   upsert idempotente (ON CONFLICT DO UPDATE)
               │
-db/         SQLite (fases 0-4) o PostgreSQL (fase 5) vía DATABASE_URL
+db/         SQLite local, completa; copia pública filtrada en PostgreSQL (db/public_sync.py)
               │
 transform/  funciones puras, sin red — entrada faltante -> None
               ajuste por acciones corporativas A UNA FECHA DE CORTE, nunca "la de hoy"
               │
 app/        Streamlit multipágina (st.navigation)
-              ├── 🏠 Hoy       nivel 1, macro point-in-time
+              ├── 🏠 Hoy       nivel 1 point-in-time + resumen del checklist y lo que viene
               ├── 📈 Mercado   nivel 2 y el semáforo de régimen, con el voto de cada señal
               ├── 🏢 Empresa   nivel 3, una empresa a fondo contra su propia tesis
-              └── 🔬 Cartera   nivel 4, posiciones y reconciliación contra el NAV
+              ├── 🔬 Cartera   nivel 4: posiciones, reconciliación contra el NAV y
+              │                rentabilidad sin aportes frente al S&P 500 (solo local)
+              └── 🧾 Fiscal    la cuenta en moneda local, todo ESTIMADO (solo local)
+fiscal/     lotes y ventas en moneda local, parte del activo / parte de la divisa
 alerts/     Telegram, con deduplicación vía alerts_log
 validation/ retornos forward + bootstrap por permutación + FDR Benjamini-Hochberg
+
+run_daily.py (temporizador systemd, 06:30): ingesta → alertas → copia pública
 ```
 
 El almacenamiento usa **formato largo**: `observations(source, series_id, ts, ts_release,

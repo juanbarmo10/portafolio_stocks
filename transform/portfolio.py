@@ -499,14 +499,25 @@ def reconcile_nav(
     relative = difference / reported if reported else None
     agrees = abs(relative) <= tolerance if relative is not None else None
     detail = (
-        f"Cartera valorada en {computed:,.2f} frente a {reported:,.2f} que reporta IBKR "
-        f"el {as_of[:10]}: {difference:+,.2f} ({relative:+.2%})."
+        f"Cartera valorada en {_es(computed)} USD frente a {_es(reported)} USD que reporta "
+        f"IBKR el {as_of[:10]}: {_es(difference, sign=True)} USD "
+        f"({_es(relative * 100, sign=True)} %)."
         if relative is not None else
         "IBKR reporta un NAV de posiciones nulo; no hay base para el porcentaje."
     )
     return Reconciliation(
         as_of, computed, reported, difference, relative, tolerance, agrees, detail
     )
+
+
+def _es(value: float, *, sign: bool = False) -> str:
+    """Spanish notation for the Spanish prose this module writes (1.234,56).
+
+    The panel formats in ``app.format``, which ``transform`` must not import; the one
+    sentence built here used English notation ("1,234.50") until 2026-09-25.
+    """
+    text = f"{value:+,.2f}" if sign else f"{value:,.2f}"
+    return text.replace(",", "\u00a0").replace(".", ",").replace("\u00a0", ".")
 
 
 def _prices_as_of(observations: pd.DataFrame, as_of: str) -> pd.DataFrame:
@@ -577,3 +588,104 @@ def thesis_metadata(tracked: Sequence[Mapping[str, Any]] | None) -> dict[str, di
         for card in (tracked or [])
         if card.get("ticker")
     }
+
+
+# --- Performance against the market, net of contributions ------------------------------
+
+
+@dataclass(frozen=True)
+class Performance:
+    """How the account did, and what the same money would have done in the benchmark.
+
+    Attributes:
+        start / end: The window, first and last NAV dates.
+        twr: Time-weighted return — the daily NAV changes chained with each contribution
+            taken out, so money coming in is not mistaken for money made. Measures the
+            decisions, not the deposits.
+        benchmark_return: The benchmark's total return over the same window.
+        excess: ``twr − benchmark_return``. Positive = beat it, over this window only.
+        nav_end: Last NAV.
+        shadow_end: What the starting NAV plus every contribution, each invested in the
+            benchmark on its own date, would be worth at the end — "if I had just bought
+            the index". The money-weighted comparison, in the account's currency.
+        contributions: Net external flows over the window (deposits − withdrawals).
+    """
+
+    start: str
+    end: str
+    twr: float
+    benchmark_return: float
+    excess: float
+    nav_end: float
+    shadow_end: float
+    contributions: float
+
+
+def external_flows(cash_transactions: pd.DataFrame) -> pd.Series:
+    """Deposits (and withdrawals, negative) per calendar day, from the Flex cash rows."""
+    if cash_transactions is None or cash_transactions.empty:
+        return pd.Series(dtype=float)
+    rows = cash_transactions[cash_transactions["kind"] == "deposit"]
+    if rows.empty:
+        return pd.Series(dtype=float)
+    days = pd.to_datetime(rows["ts"].str[:10])
+    return rows["amount"].astype(float).groupby(days.to_numpy()).sum()
+
+
+def performance(
+    nav: pd.DataFrame, flows: pd.Series, benchmark: pd.Series
+) -> tuple[Performance | None, pd.DataFrame]:
+    """The account against a total-return benchmark, contributions removed.
+
+    Args:
+        nav: ``[ts, value]`` daily NAV (``nav_series``).
+        flows: Output of :func:`external_flows`. A flow is taken as arriving **before**
+            that day's close, which is how the NAV jumps in the statement (verified against
+            the real account: the NAV rises by the deposit on the deposit's own date).
+        benchmark: Total-return index (dividends added on their dates, section 9.1),
+            indexed by date. The benchmark on each NAV date is its latest close at or before.
+
+    Returns:
+        ``(summary, curves)`` — ``curves`` has ``[date, account, benchmark]`` rebased to 100
+        on the first NAV date, both net of contributions. ``(None, empty)`` when there is
+        not enough data; a partial window is not passed off as the full one (section 12).
+    """
+    empty = pd.DataFrame(columns=["date", "account", "benchmark"])
+    if nav is None or len(nav) < 2 or benchmark is None or benchmark.dropna().empty:
+        return None, empty
+    series = pd.Series(nav["value"].astype(float).to_numpy(),
+                       index=pd.to_datetime(nav["ts"].str[:10]))
+    series = series[~series.index.duplicated(keep="last")].sort_index()
+    bench = benchmark.dropna().sort_index()
+    bench_on = bench.reindex(series.index, method="ffill")
+    if bench_on.isna().iloc[0]:
+        return None, empty
+    daily_flows = flows.reindex(series.index, fill_value=0.0) if not flows.empty \
+        else pd.Series(0.0, index=series.index)
+    # A flow dated outside the NAV calendar (a weekend deposit) lands on the next NAV day.
+    if not flows.empty:
+        stray = flows[~flows.index.isin(series.index)]
+        for day, amount in stray.items():
+            later = series.index[series.index > day]
+            if len(later):
+                daily_flows.loc[later[0]] += float(amount)
+
+    previous = series.shift(1)
+    ratio = ((series - daily_flows) / previous).where(previous > 0)
+    account_index = ratio.fillna(1.0).cumprod()
+    bench_index = bench_on / bench_on.iloc[0]
+
+    units = series.iloc[0] / bench_on.iloc[0]
+    for day, amount in daily_flows.iloc[1:].items():
+        if amount:
+            units += amount / bench_on.loc[day]
+    summary = Performance(
+        start=series.index[0].date().isoformat(), end=series.index[-1].date().isoformat(),
+        twr=float(account_index.iloc[-1] - 1), benchmark_return=float(bench_index.iloc[-1] - 1),
+        excess=float(account_index.iloc[-1] - bench_index.iloc[-1]),
+        nav_end=float(series.iloc[-1]), shadow_end=float(units * bench_on.iloc[-1]),
+        contributions=float(daily_flows.iloc[1:].sum()),
+    )
+    curves = pd.DataFrame({"date": series.index, "account": account_index.to_numpy() * 100,
+                           "benchmark": bench_index.to_numpy() * 100})
+    return summary, curves

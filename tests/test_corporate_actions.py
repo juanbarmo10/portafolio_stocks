@@ -228,3 +228,27 @@ def test_a_stored_timestamp_ex_date_is_shown_as_a_plain_day():
     note = data_quality_notes(actions)[0]
 
     assert note.ex_date == "2016-09-19"
+
+
+# --- Only events that happened while the position was held (found 2026-09-25) -------------
+
+
+def test_an_event_before_the_position_existed_is_not_a_flag():
+    """A split twelve years before the purchase was a permanent red flag: IBKR cannot
+    corroborate what predates its statement, and it never touched this portfolio."""
+    actions = [{"ticker": "ZZA", "kind": "split", "ex_date": "2013-05-01T00:00:00+00:00",
+                "ratio": 0.5, "amount": None, "source": "yfinance"}]
+    assert review_positions(actions, positions("ZZA"), since={"ZZA": "2025-06-02"}) == []
+    flagged = review_positions(actions, positions("ZZA"), since={"ZZA": None})
+    assert [r.ticker for r in flagged] == ["ZZA"], "unknown start: every event is checked"
+
+
+def test_the_start_is_only_known_when_the_lots_explain_the_whole_position():
+    from transform.corporate_actions import held_since
+
+    held = pd.DataFrame([{"ticker": "ZZA", "quantity": 1.0}, {"ticker": "ZZB", "quantity": 3.0}])
+    lots = pd.DataFrame([
+        {"ticker": "ZZA", "ts": "2025-06-02T15:00:00+00:00", "quantity": 1.0},
+        {"ticker": "ZZB", "ts": "2025-07-01T15:00:00+00:00", "quantity": 2.0},
+    ])
+    assert held_since(lots, held) == {"ZZA": "2025-06-02", "ZZB": None}

@@ -210,11 +210,34 @@ def reconcile_ticker(
     return sorted(findings, key=lambda f: (order.get(f.reason, 9), str(f.ex_date)))
 
 
+def held_since(open_lots: pd.DataFrame, positions: pd.DataFrame) -> dict[str, str | None]:
+    """The date each held position started, when the data can prove it; else ``None``.
+
+    Proven means the open lots account for the **whole** quantity held. A statement covers
+    a limited window (365 days), so a position bought before it has lots the data never saw;
+    its start is then unknown, and ``None`` makes :func:`review_positions` check every event
+    rather than assume the position is younger than it is.
+    """
+    out: dict[str, str | None] = {}
+    if positions is None or positions.empty:
+        return out
+    for row in positions.to_dict("records"):
+        ticker = str(row["ticker"])
+        lots = open_lots[open_lots["ticker"] == ticker] if not open_lots.empty else open_lots
+        covered = float(lots["quantity"].sum()) if len(lots) else 0.0
+        if len(lots) and abs(covered - float(row["quantity"])) <= 1e-6:
+            out[ticker] = str(min(lots["ts"]))[:10]
+        else:
+            out[ticker] = None
+    return out
+
+
 def review_positions(
     actions: Sequence[Mapping[str, Any]] | pd.DataFrame | None,
     positions: pd.DataFrame | Sequence[str] | None,
     *,
     unmapped: Sequence[str] = (),
+    since: Mapping[str, str | None] | None = None,
 ) -> list[PositionReview]:
     """The ``needs_review`` flag of section 9.2, per held position.
 
@@ -226,6 +249,11 @@ def review_positions(
         unmapped: Labels the IBKR ingester could not map to a known kind, from its
             ``partial_failures()``. They arrive already flagged as needing review, and are
             carried through rather than re-derived so the two paths cannot disagree.
+        since: ``{ticker: first day held}`` (see :func:`held_since`). An event before the
+            position existed did not happen to *this* portfolio, and IBKR cannot corroborate
+            what predates its statement — without this, a split twelve years before the
+            purchase was a permanent red flag (found 2026-09-25). ``None`` for a
+            ticker, or no mapping at all, reviews every event.
 
     Returns:
         One :class:`PositionReview` per held ticker that has something to look at.
@@ -252,9 +280,16 @@ def review_positions(
             ),
         ))
 
+    frame = as_frame(actions)
     out: list[PositionReview] = []
     for ticker in held:
-        findings = [*carried.get(ticker, []), *reconcile_ticker(actions, ticker)]
+        start = (since or {}).get(ticker)
+        relevant = frame
+        if start and not frame.empty:
+            relevant = frame[[
+                (d := as_date(x)) is None or d >= as_date(start) for x in frame["ex_date"]
+            ]]
+        findings = [*carried.get(ticker, []), *reconcile_ticker(relevant, ticker)]
         if findings:
             out.append(PositionReview(ticker=ticker, needs_review=True, reviews=findings))
     return out

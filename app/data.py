@@ -220,3 +220,26 @@ def price_observations(tickers: tuple[str, ...], mtime: float) -> pd.DataFrame:
 def prices_for(tickers: list[str]) -> pd.DataFrame:
     """Raw closes for the held tickers, cache-invalidated by the database mtime."""
     return price_observations(tuple(sorted(tickers)), db_mtime())
+
+
+@st.cache_data(show_spinner="Calculando el semáforo…")
+def regime_view(mtime: float) -> dict | None:
+    """The regime light and its history, cached until the database changes.
+
+    Shared by the market page and the landing page, so both read the same verdict and it
+    is computed once per data version (``transform.regime.build`` is not cheap).
+    """
+    from transform import regime as rg  # noqa: PLC0415 — keeps page imports light
+
+    level2 = load_settings().raw["panel"]["level2"]
+    built = rg.build(fred_observations(), prices_for(rg.regime_tickers(level2)),
+                     corporate_actions(), level2)
+    if built is None:
+        return None
+    return {
+        "reading": rg.reading_at(built.calendar[-1], built.rules, built.components,
+                                 built.votes, built.frame),
+        "frame": built.frame[["verdict", "available"]],
+        "evaluation": rg.evaluate(built.frame, built.benchmark),
+        "closes": built.closes, "splits": built.splits,
+    }

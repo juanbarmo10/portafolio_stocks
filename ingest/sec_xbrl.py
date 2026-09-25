@@ -33,6 +33,8 @@ force on its simulated date.
 fetch() -> DataFrame[source, series_id, ts, ts_release, value]
     series_id = "{cik}:{metric}"         balance-sheet instants
               | "{cik}:{metric}:q"       ~quarterly flows
+              | "{cik}:{metric}:ytd2"    6-month cumulative (derives Q2 in transform/)
+              | "{cik}:{metric}:ytd3"    9-month cumulative (derives Q3 in transform/)
               | "{cik}:{metric}:fy"      ~annual flows
               | "<any of the above>:src" which preference produced that value
 """
@@ -308,8 +310,8 @@ class SecXbrlIngester(Ingester):
                     unresolved.append(metric)
                 elif stats["unclassified_period"]:
                     log.debug(
-                        "CIK %s %s: skipped %d fact(s) whose duration is neither a "
-                        "quarter nor a year (year-to-date cumulatives).",
+                        "CIK %s %s: skipped %d fact(s) whose duration matches no configured "
+                        "window (quarter, 6- or 9-month cumulative, year).",
                         cik, metric, stats["unclassified_period"], extra={"source": SOURCE},
                     )
                 company_records.extend(metric_records)

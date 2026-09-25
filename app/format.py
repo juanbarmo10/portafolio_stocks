@@ -138,6 +138,23 @@ def reported_amount(value: float | None, *, unit: str = "USD") -> str:
     return f"{_spanish(f'{value:,.2f}')} {unit}"
 
 
+def compact_amount(value: float | None) -> str:
+    """A public-filing figure short enough for a metric tile: ``2,58 mil M``, ``-142,03 M``.
+
+    ``st.metric`` cuts long values ("2,58 mil mill…", seen 2026-09-25), so the tile carries
+    the number and the unit goes in the label. "M" is millones and "mil M" is miles de
+    millones: unambiguous in Spanish, unlike "MM" or "B" (see :func:`reported_amount`,
+    whose full wording goes in the tile's help). Not gated, for the same reason.
+    """
+    if value is None or pd.isna(value):
+        return MISSING
+    magnitude = abs(value)
+    for limit, scale in ((1e12, "bill."), (1e9, "mil M"), (1e6, "M")):
+        if magnitude >= limit:
+            return f"{_spanish(f'{value / limit:,.2f}')} {scale}"
+    return _spanish(f"{value:,.2f}")
+
+
 def number(value: float | None, *, decimals: int = 2) -> str:
     """A plain figure in Spanish notation: ``14.21`` -> ``14,21``. Safe in both modes.
 
@@ -217,3 +234,34 @@ def drop_absolute_columns(
     if not public:
         return frame
     return frame.drop(columns=[column for column in columns if column in frame.columns])
+
+
+# d3's Spanish locale for every chart: comma decimals, point thousands, Spanish months.
+# Until 2026-09-25 every axis read "2,500,000,000" and "April / July" next to text that
+# reads "2,58 mil M" and "abril" — the same number in two notations on one screen.
+SPANISH_LOCALE = {
+    "number": {"decimal": ",", "thousands": ".", "grouping": [3], "currency": ["", " USD"]},
+    "time": {
+        "dateTime": "%A, %e de %B de %Y, %X", "date": "%d/%m/%Y", "time": "%H:%M:%S",
+        "periods": ["AM", "PM"],
+        "days": ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"],
+        "shortDays": ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"],
+        "months": ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+                   "septiembre", "octubre", "noviembre", "diciembre"],
+        "shortMonths": ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep",
+                        "oct", "nov", "dic"],
+    },
+}
+
+
+def enable_spanish_charts() -> None:
+    """Register and enable an Altair theme carrying :data:`SPANISH_LOCALE`. Idempotent.
+
+    A theme rather than ``.configure()`` on each chart: one call in ``app/main.py`` covers
+    every page, and a chart added later cannot forget it. Verified inside Streamlit.
+    """
+    import altair as alt  # noqa: PLC0415 — the format helpers stay importable without it
+
+    @alt.theme.register("equitydash_es", enable=True)
+    def _theme() -> alt.theme.ThemeConfig:
+        return alt.theme.ThemeConfig({"config": {"locale": SPANISH_LOCALE}})

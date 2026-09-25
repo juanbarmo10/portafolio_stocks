@@ -22,6 +22,7 @@ from app.format import PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE, money, pct, rebase_
 from core.config import load_settings
 from transform import corporate_actions as reorg
 from transform import portfolio
+from transform.adjustments import total_return_index
 
 # Categorical slot 1 of the reference palette, as on the macro page.
 LINE_COLOR = "#2a78d6"
@@ -165,7 +166,8 @@ if not public:
 # Section 9.2: an unrecognized or contradicted corporate action puts the quantity and the
 # cost base of that position in doubt, so it is raised here — next to the other reasons a
 # number below might not mean what it says — and never resolved automatically.
-for review in reorg.review_positions(app_data.corporate_actions(), positions):
+for review in reorg.review_positions(app_data.corporate_actions(), positions,
+                                     since=reorg.held_since(open_lots, positions)):
     st.error(
         f"**{review.ticker} — revisar.** "
         + " ".join(finding.detail for finding in review.reviews)
@@ -195,9 +197,18 @@ if notes:
 
 # --- 2. Positions --------------------------------------------------------------------
 
+cash_series = portfolio.nav_series(account, "NAV:cash")
+cash_now = float(cash_series["value"].iloc[-1]) if not cash_series.empty else None
+shares_value = float(valued["market_value"].sum(skipna=True)) if not valued.empty else 0.0
+account_total = shares_value + cash_now if cash_now is not None else None
+
 st.subheader("Posiciones")
 
 table = valued.merge(costs[["ticker", "avg_cost"]], on="ticker", how="left")
+# Rounded before display: the "localized" format shows up to three decimals, and a cost of
+# "216,949" reads as two hundred thousand to a Spanish eye.
+for column in ("avg_cost", "price", "market_value", "unrealized_pnl"):
+    table[column] = table[column].round(2)
 if public:
     display = pd.DataFrame({
         "Posición": table["ticker"],
@@ -210,8 +221,8 @@ if public:
     column_config = {
         "Peso": st.column_config.NumberColumn(format="percent"),
         "Retorno no realizado": st.column_config.NumberColumn(format="percent"),
-        "Precio": st.column_config.NumberColumn(format="%.2f"),
-        "Coste medio": st.column_config.NumberColumn(format="%.2f"),
+        "Precio": st.column_config.NumberColumn(format="localized"),
+        "Coste medio": st.column_config.NumberColumn(format="localized"),
     }
 else:
     display = pd.DataFrame({
@@ -223,19 +234,30 @@ else:
         "PnL no realizado": table["unrealized_pnl"],
         "Retorno": table["unrealized_return"],
         "Peso": table["weight"],
+        "Peso en el patrimonio": table["market_value"] / account_total
+        if account_total else float("nan"),
         "Fecha precio": table["price_ts"].str[:10],
     })
     column_config = {
-        "Cantidad": st.column_config.NumberColumn(format="%.4f"),
-        "Coste medio": st.column_config.NumberColumn(format="%.2f"),
-        "Precio": st.column_config.NumberColumn(format="%.2f"),
-        "Valor": st.column_config.NumberColumn(format="%.2f"),
-        "PnL no realizado": st.column_config.NumberColumn(format="%+.2f"),
+        "Cantidad": st.column_config.NumberColumn(format="localized"),
+        "Coste medio": st.column_config.NumberColumn(format="localized"),
+        "Precio": st.column_config.NumberColumn(format="localized"),
+        "Valor": st.column_config.NumberColumn(format="localized"),
+        "PnL no realizado": st.column_config.NumberColumn(format="localized"),
         "Retorno": st.column_config.NumberColumn(format="percent"),
-        "Peso": st.column_config.NumberColumn(format="percent"),
+        "Peso": st.column_config.NumberColumn(format="percent",
+                                              help="Sobre las acciones, sin el efectivo."),
+        "Peso en el patrimonio": st.column_config.NumberColumn(
+            format="percent", help="Sobre el total: acciones más efectivo."),
     }
 
 st.dataframe(display, hide_index=True, width="stretch", column_config=column_config)
+if not public and cash_now is not None and account_total:
+    # The weights above add up to 100 % of the shares. Until 2026-09-25 that was the only
+    # weight shown, while most of the account was cash — a concentrated-looking portfolio
+    # that was a small fraction of what the account holds.
+    st.caption(f"Efectivo: {money(cash_now, public=False)}, el "
+               f"{pct(cash_now / account_total)} del patrimonio.")
 
 # In public mode the quantity is left out on purpose: prices are public, so a quantity is
 # a position size in disguise.
@@ -303,7 +325,7 @@ else:
         pd.DataFrame(columns), hide_index=True, width="stretch",
         column_config={
             "Peso": st.column_config.NumberColumn(format="percent"),
-            "Valor": st.column_config.NumberColumn(format="%.2f"),
+            "Valor": st.column_config.NumberColumn(format="localized"),
         },
     )
     if "sin clasificar" in set(grouped["group"]):
@@ -346,8 +368,49 @@ else:
     )
     st.caption(
         "Incluye aportes: una curva que sube porque entró dinero no es rentabilidad. "
-        "El desglose aporte-vs-rendimiento llega con la atribución de la fase 5."
+        "Sin aportes, y contra el mercado, justo debajo."
     )
+
+# --- 5b. Against the market ----------------------------------------------------------
+
+st.subheader("¿Batiendo al mercado?")
+spy_rows = app_data.prices_for(["SPY"])
+spy = total_return_index(spy_rows.assign(ts=spy_rows["ts"].str[:10]), app_data.corporate_actions(),
+                         "SPY", "2099-01-01") if not spy_rows.empty else pd.DataFrame()
+benchmark = (pd.Series(spy["value"].to_numpy(), index=pd.to_datetime(spy["ts"]))
+             if not spy.empty else pd.Series(dtype=float))
+perf, curves = portfolio.performance(nav, portfolio.external_flows(cash), benchmark)
+if perf is None:
+    st.info("Sin NAV o sin precios de SPY suficientes para comparar.")
+else:
+    cols = st.columns(3)
+    cols[0].metric("Tu rentabilidad (sin aportes)", pct(perf.twr),
+                   help="Ponderada en el tiempo: encadena los días quitando cada aporte, así "
+                        "que mide las decisiones y no el dinero que entró.")
+    cols[1].metric("S&P 500 con dividendos (SPY)", pct(perf.benchmark_return))
+    cols[2].metric("Diferencia", pct(perf.excess),
+                   help="Tu rentabilidad menos la del índice, en esta ventana. Positiva = "
+                        "lo batiste; con menos de varios años es sobre todo ruido.")
+    long = curves.melt("date", var_name="Serie", value_name="valor")
+    long["Serie"] = long["Serie"].map({"account": "Tu cuenta", "benchmark": "SPY"})
+    st.altair_chart(
+        alt.Chart(long).mark_line(strokeWidth=2).encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y("valor:Q", title="Base 100, sin aportes", scale=alt.Scale(zero=False)),
+            color=alt.Color("Serie:N", legend=alt.Legend(orient="top", title=None),
+                            scale=alt.Scale(domain=["Tu cuenta", "SPY"],
+                                            range=[LINE_COLOR, "#eb6834"])),
+        ).properties(height=240),
+        width="stretch",
+    )
+    if not public:
+        st.caption(
+            f"Del {perf.start} al {perf.end}. **Si el saldo inicial y cada aporte "
+            f"({money(perf.contributions, public=False)} en total) hubieran ido a SPY el "
+            f"mismo día, hoy tendrías {money(perf.shadow_end, public=False)}**; tienes "
+            f"{money(perf.nav_end, public=False)}. Es la comparación honesta con "
+            "«comprar el índice». Una ventana de un año dice poco sobre la habilidad."
+        )
 
 # --- 6. Income, costs and realized PnL ------------------------------------------------
 
@@ -377,14 +440,14 @@ else:
         st.dataframe(
             pd.DataFrame({
                 "Posición": realized["ticker"],
-                "PnL realizado": realized["realized_pnl"],
+                "PnL realizado": realized["realized_pnl"].round(2),
                 "Cantidad vendida": realized["quantity_sold"],
                 "Ventas": realized["disposals"],
             }),
             hide_index=True, width="stretch",
             column_config={
-                "PnL realizado": st.column_config.NumberColumn(format="%+.2f"),
-                "Cantidad vendida": st.column_config.NumberColumn(format="%.4f"),
+                "PnL realizado": st.column_config.NumberColumn(format="localized"),
+                "Cantidad vendida": st.column_config.NumberColumn(format="localized"),
             },
         )
 

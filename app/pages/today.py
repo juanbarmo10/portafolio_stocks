@@ -5,8 +5,10 @@ on the selected date, never as they were later revised (section 9.4). That is wh
 table carries a publication column and a staleness column — a CPI print is six weeks old
 by construction, and a panel that hides that invites reading it as today's inflation.
 
-The other three questions of section 2 are listed but not answered yet: their state says
-which phase builds them. An empty chart would be worse than an explicit hole.
+Below it, the landing page summarizes the rest of the checklist — the regime verdict, the
+written universe, and what is coming in the next two weeks — so the one page opened first
+says what needs attention. (Until 2026-09-25 that block still read "sin construir" for
+three levels that had been built long before.)
 """
 
 from __future__ import annotations
@@ -17,15 +19,21 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from app import data as app_data
 from app.data import last_ingest, macro_observations
+from app.format import MISSING, number
 from core.config import load_settings
+from ingest.macro_calendar import current_calendar
 from transform import macro
+from transform import portfolio as port
+from transform import regime as rg
 
 # Categorical slots 1 and 2 of the reference palette — a validated adjacent pair.
 # Colour carries series identity only; every number on the page wears text ink.
 SERIES_COLORS = ["#2a78d6", "#eb6834"]
 
 settings = load_settings()
+public = settings.public_mode
 level1 = settings.raw.get("panel", {}).get("level1", {})
 readings_cfg = level1.get("readings", [])
 charts_cfg = level1.get("charts", [])
@@ -72,11 +80,19 @@ units = {r["series_id"]: r.get("unit") for r in readings_cfg}
 notes = {r["series_id"]: r.get("note") for r in readings_cfg}
 
 snapshot = macro.snapshot(df, series_ids, as_of, lookback_days=lookback_days)
+def signed(value: float | None) -> str:
+    """Change with its sign, in Spanish notation."""
+    if value is None or pd.isna(value):
+        return MISSING
+    return ("+" if value >= 0 else "") + number(value, decimals=3)
+
+
+# Formatted as text so the table reads 2,730 like the rest of the panel, not 2.730.
 table = pd.DataFrame([
     {
         "Serie": labels[r.series_id],
-        "Valor": r.value,
-        f"Cambio {lookback_days}d": r.change,
+        "Valor": number(r.value, decimals=3),
+        f"Cambio {lookback_days}d": signed(r.change),
         "Unidad": units.get(r.series_id),
         "Fecha de referencia": r.ts,
         "Publicado": r.ts_release,
@@ -91,11 +107,9 @@ st.dataframe(
     hide_index=True,
     width="stretch",
     column_config={
-        "Valor": st.column_config.NumberColumn(format="%.3f"),
-        f"Cambio {lookback_days}d": st.column_config.NumberColumn(
-            format="%+.3f",
+        f"Cambio {lookback_days}d": st.column_config.TextColumn(
             help="Cambio absoluto en las unidades de la serie, con ambos extremos "
-                 "tomados point-in-time. Vacío = no hay punto de comparación.",
+                 "tomados point-in-time. «—» = no hay punto de comparación.",
         ),
         "Antigüedad (d)": st.column_config.NumberColumn(
             help="Días entre la fecha de referencia del dato y la fecha del panel.",
@@ -188,23 +202,71 @@ for chart_cfg in charts_cfg:
 st.caption(
     "⚠️ El spread HY (BAMLH0A0HYM2) solo existe en FRED desde el 2023-08-29: es una "
     "ventana rodante por licencia de ICE, no un límite del point-in-time. La prima "
-    "Baa − 10a cubre el histórico largo (desde 1986) para lo que necesite serie larga."
+    "Baa − 10a tiene serie desde 1986, pero su historia point-in-time empieza en 2014."
 )
 
 # --- The rest of the checklist -------------------------------------------------------
 st.divider()
-st.subheader("Resto del checklist")
-st.markdown(
-    """
-| Pregunta | Estado |
-|---|---|
-| **2 · ¿El mercado está sano o es un rally estrecho?** | Sin construir — fase 3 (amplitud, RSP/SPY, rotación, estructura VIX) |
-| **3 · ¿La tesis de la empresa sigue viva?** | Sin construir — fase 2 (fundamentales SEC XBRL, dilución, earnings) |
-| **4 · ¿Toca ejecutar según el plan?** | Sin construir — falta conectar la cuenta de IBKR (ver *Cartera*) |
-"""
-)
+st.subheader("El resto del checklist")
+
+view = app_data.regime_view(app_data.db_mtime())
+if view is None:
+    regime_state = "sin datos para el semáforo todavía"
+else:
+    r = view["reading"]
+    # verdict_label already carries its icon (it read "🟡 🟡 Mixto" with one added here).
+    regime_state = (f"{rg.verdict_label(r.verdict)} al {r.date}: {r.on} a favor, "
+                    f"{r.off} en contra, {r.neutral} neutros")
+researched = settings.researched_companies
+theses = f"{len(settings.tracked_companies)} tesis escritas, " \
+         f"{len(settings.watchlist_companies)} empresas en estudio"
+rows = [
+    ("2 · ¿El mercado está sano o es un rally estrecho?", f"{regime_state} — 📈 Mercado"),
+    ("3 · ¿La tesis de la empresa sigue viva?", f"{theses} — 🏢 Empresa"),
+]
+if not public:
+    rows.append(("4 · ¿Toca ejecutar según el plan?", "posiciones, coste y resultados — 🔬 Cartera"))
+st.markdown("| Pregunta | Estado |\n|---|---|\n"
+            + "\n".join(f"| **{q}** | {a} |" for q, a in rows))
 st.caption(
-    "Regla dura de §2: si los niveles 1 y 2 están claramente en rojo, no se compra "
-    "aunque el nivel 3 sea perfecto. Con el nivel 2 sin construir, esa regla todavía "
-    "no se puede aplicar entera."
+    "Regla dura de §2: si los niveles 1 y 2 están claramente en rojo, no se compra aunque "
+    "el nivel 3 sea perfecto. Es un freno de disciplina: la validación (fase 4) mostró que "
+    "no anticipa la rentabilidad, pero sí caídas más hondas en el mes siguiente."
 )
+
+# --- What is coming ------------------------------------------------------------------
+st.subheader("Lo que viene — 14 días")
+events = app_data.events()
+horizon = pd.Timestamp(as_of) + pd.Timedelta(days=14)
+upcoming = []
+calendar = current_calendar(events)
+for row in calendar.to_dict("records"):
+    when = pd.Timestamp(row["ts"])
+    if pd.Timestamp(as_of, tz="UTC") <= when <= horizon.tz_localize("UTC"):
+        upcoming.append((when.tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M"),
+                         row["label"], "hora de Nueva York"))
+# Results of the researched companies, and — privately — of what is held: publicly the
+# list of positions is exactly what must not show (RESEARCH.md §2.33).
+ciks = {str(c["cik"]).zfill(10): str(c.get("ticker")) for c in researched if c.get("cik")}
+if not public:
+    companies = app_data.companies()
+    by_ticker = dict(zip(companies["ticker"], companies["cik"])) if not companies.empty else {}
+    for ticker in port.latest_positions(app_data.account_observations())["ticker"]:
+        if by_ticker.get(ticker):
+            ciks.setdefault(by_ticker[ticker], ticker)
+if not events.empty:
+    earnings = events[(events["category"] == "earnings") & events["cik"].isin(ciks)]
+    for row in earnings.to_dict("records"):
+        day = pd.Timestamp(str(row["ts"])[:10])
+        if pd.Timestamp(as_of) <= day <= horizon:
+            kind = "estimada" if int(row.get("is_estimated") or 0) else "confirmada"
+            upcoming.append((day.strftime("%Y-%m-%d"), f"Resultados de {ciks[row['cik']]}",
+                             f"fecha {kind}"))
+if upcoming:
+    st.dataframe(pd.DataFrame(sorted(upcoming), columns=["Cuándo", "Qué", "Nota"]),
+                 hide_index=True, width="stretch")
+    st.caption("Con un dato macro de alto impacto en las 48 h siguientes, §2 propone "
+               "posponer el aporte; con resultados en 5 días, no abrir posición sin decisión "
+               "explícita. Las alertas de Telegram avisan de ambos.")
+else:
+    st.caption("Nada de alto impacto en los próximos 14 días.")

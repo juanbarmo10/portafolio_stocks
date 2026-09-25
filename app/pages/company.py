@@ -28,7 +28,15 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING, PUBLIC_NOTE, money, pct, quantity, reported_amount
+from app.format import (
+    MISSING,
+    PUBLIC_NOTE,
+    compact_amount,
+    money,
+    pct,
+    quantity,
+    reported_amount,
+)
 from core.config import load_settings
 from transform import fundamentals as fun
 from transform import portfolio as port
@@ -154,7 +162,17 @@ accrual = va.assess(observations, cik, as_of_iso, hurdle_rate=hurdle)
 if public:
     st.caption(PUBLIC_NOTE)
 
-st.subheader(f"{ticker} · {card.get('sector') or 'sector sin definir'}")
+# The SEC's registered name from the companies registry, and the sector only when a card
+# wrote one (the SIC code is not GICS, section 5.3). It read "HIMS · sector sin definir"
+# for every company under study until 2026-09-25.
+registry = app_data.companies()
+registered = registry.loc[registry["cik"] == cik, "name"] if not registry.empty else []
+title = [ticker]
+if len(registered) and registered.iloc[0]:
+    title.append(str(registered.iloc[0]))
+if card.get("sector"):
+    title.append(str(card["sector"]))
+st.subheader(" · ".join(title))
 header = [f"CIK `{cik}`"]
 if card.get("thesis_category"):
     header.append(f"categoría de tesis: **{card['thesis_category']}**")
@@ -244,9 +262,12 @@ st.caption(
 )
 
 row = st.columns(4)
-row[0].metric("Ingresos (TTM)", reported_amount(snapshot.revenue_ttm))
-row[1].metric("Beneficio neto (TTM)", reported_amount(snapshot.net_income_ttm))
-row[2].metric("Flujo de caja libre (TTM)", reported_amount(snapshot.fcf_ttm))
+row[0].metric("Ingresos (TTM, USD)", compact_amount(snapshot.revenue_ttm),
+              help=reported_amount(snapshot.revenue_ttm))
+row[1].metric("Beneficio neto (TTM, USD)", compact_amount(snapshot.net_income_ttm),
+              help=reported_amount(snapshot.net_income_ttm))
+row[2].metric("Flujo de caja libre (TTM, USD)", compact_amount(snapshot.fcf_ttm),
+              help=reported_amount(snapshot.fcf_ttm))
 row[3].metric(
     "Crecimiento de ingresos",
     pct(snapshot.revenue_growth_yoy),
@@ -338,16 +359,23 @@ row[3].metric(
 )
 
 row = st.columns(4)
-row[0].metric("Recompras brutas (TTM)", reported_amount(accrual.buybacks_ttm))
-row[1].metric("Recompras netas (TTM)", reported_amount(accrual.net_buybacks_ttm),
-              help="Recompras − emisión. La bruta engaña si el SBC la anula.")
+row[0].metric("Recompras brutas (TTM, USD)", compact_amount(accrual.buybacks_ttm),
+              help=reported_amount(accrual.buybacks_ttm))
+row[1].metric("Recompras netas (TTM, USD)", compact_amount(accrual.net_buybacks_ttm),
+              help="Recompras − emisión. La bruta engaña si el SBC la anula. "
+                   + reported_amount(accrual.net_buybacks_ttm))
+# The count grew for most companies that pay in stock: a tile reading "retired: −21 M"
+# made the reader do the sign. The label says which way it went.
+issued = accrual.shares_removed is not None and accrual.shares_removed < 0
 row[2].metric(
-    "Acciones retiradas",
-    reported_amount(accrual.shares_removed, unit="acciones"),
+    "Acciones emitidas netas (año)" if issued else "Acciones retiradas (año)",
+    compact_amount(abs(accrual.shares_removed) if issued else accrual.shares_removed),
+    help="Variación del recuento diluido medio en un año. Emitidas netas = la emisión "
+         "(SBC, conversiones, ampliaciones) superó a las recompras.",
 )
 row[3].metric(
-    "Coste por acción retirada",
-    reported_amount(accrual.buyback_per_share_removed),
+    "Coste por acción retirada (USD)",
+    compact_amount(accrual.buyback_per_share_removed),
     help="Recompra neta dividida por la caída real del recuento. Si es mucho mayor que el "
          "precio de mercado, la recompra está compensando dilución, no devolviendo capital.",
 )
