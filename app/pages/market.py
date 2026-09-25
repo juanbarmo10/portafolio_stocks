@@ -200,16 +200,21 @@ st.caption(
 # existed; Altair does not check fields, and the strip drew nothing. Name it explicitly.
 history = view["frame"].rename_axis("date").reset_index()
 history["Veredicto"] = history["verdict"].map(VERDICT_SHORT)
-# Each session's band runs to the next session. A rect with only its start on a time axis
-# has no width, and the strip rendered as a legend over an empty chart (seen on the public
-# deployment, 2026-09-24).
+# Each session's band runs to the next session, and spans a fixed 0-1 invisible y axis.
+# Without both, the strip drew nothing (seen on the public deployment, 2026-09-24): a rect
+# with only its start on a time axis has no width, and with nothing on the y axis Streamlit
+# fits legend and axis into the height first and leaves the bands ~0 px. The height is also
+# given to st.altair_chart, which is the one Streamlit honours.
 history["end"] = history["date"].shift(-1).fillna(history["date"].iloc[-1] + pd.Timedelta(days=1))
+history["bottom"], history["top"] = 0.0, 1.0
 history = history[history["verdict"] != rg.INSUFFICIENT]
 if not history.empty:
     st.altair_chart(
         alt.Chart(history).mark_rect().encode(
             x=alt.X("date:T", title=None),
             x2="end:T",
+            y=alt.Y("bottom:Q", axis=None, scale=alt.Scale(domain=[0, 1])),
+            y2="top:Q",
             color=alt.Color(
                 "Veredicto:N",
                 scale=alt.Scale(domain=[VERDICT_SHORT[k] for k in VERDICT_COLORS],
@@ -217,8 +222,9 @@ if not history.empty:
                 legend=alt.Legend(orient="top", title=None),
             ),
             tooltip=[alt.Tooltip("date:T", title="Sesión"), "Veredicto:N"],
-        ).properties(height=60),
+        ),
         width="stretch",
+        height=130,
     )
 
 # --- 3. Breadth ----------------------------------------------------------------------------

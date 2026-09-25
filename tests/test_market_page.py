@@ -209,7 +209,8 @@ def page_text(app: AppTest) -> str:
 
 def test_the_verdict_strip_has_data_and_width(market_db):
     """Found on the public deployment: the strip rendered its legend over nothing. Its
-    field did not exist (a named index) and its bands had no end. Altair checks neither."""
+    field did not exist (a named index), its bands had no end, and with nothing on the y
+    axis Streamlit gave them no height. Altair checks none of the three."""
     import pyarrow as pa
 
     seed(market_db, healthy=True)
@@ -221,3 +222,6 @@ def test_the_verdict_strip_has_data_and_width(market_db):
     data = pa.ipc.open_stream(strips[0].proto.datasets[0].data.data).read_pandas()
     assert {"date", "end", "Veredicto"} <= set(data.columns)
     assert len(data) > 0 and (pd.to_datetime(data["end"]) > pd.to_datetime(data["date"])).all()
+    # Height: with nothing on the y axis Streamlit left the bands ~0 px tall. The bands
+    # span an explicit 0-1 axis instead.
+    assert '"y2"' in strips[0].proto.spec and {"bottom", "top"} <= set(data.columns)
