@@ -282,6 +282,15 @@ python run_alerts.py --test-message  # comprueba la configuración del bot
 python run_validation.py             # informe de validación del semáforo (reproducible)
 ```
 
+Para ejecutarlo todo cada día (ingesta y luego alertas, aunque la ingesta falle) hay un
+temporizador systemd de usuario, a las 06:30 hora local:
+
+```bash
+./deploy/install_timer.sh                      # instala o actualiza el temporizador
+systemctl --user list-timers equitydash-daily  # próxima ejecución
+journalctl --user -u equitydash-daily          # qué pasó
+```
+
 Sin `TELEGRAM_TOKEN` y `TELEGRAM_CHAT_ID` las alertas se registran como no entregadas y
 salen, si siguen siendo ciertas, en cuanto el bot esté configurado. Una fuente que falla en
 la ingesta también llega como alerta: es como se entera uno de que el token de IBKR caducó.
@@ -365,7 +374,7 @@ o a medias.
 | 2 | Nivel 3: fundamentales SEC XBRL, normalización de taxonomía, dilución y captura de valor, página por empresa | ✅ |
 | 3 | Nivel 2: amplitud, rotación sectorial, semáforo de régimen | ✅ construida; aceptación parcial: el semáforo acierta 5 de 6 correcciones desde mediados de 2011 con 0,8 % de falsas alarmas, pero confirma más que anticipa, y antes no hay datos point-in-time para juzgarlo |
 | 4 | Alertas Telegram y validación estadística | ✅ La validación no encontró ninguna señal que prediga rentabilidad; el freno sí protege y apenas cuesta (abajo) |
-| 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | pendiente |
+| 5 | Capa fiscal, PostgreSQL, orquestación y despliegue | en curso: ejecución diaria local con systemd ✅; falta el resto |
 
 El semáforo de régimen de la fase 3 usa **pesos iguales y fijos**, no optimizados sobre el
 histórico, con el voto de cada componente visible. Bloquea decisiones; nunca es un gatillo de

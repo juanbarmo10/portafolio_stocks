@@ -1,0 +1,14 @@
+# Plantilla: deploy/install_timer.sh sustituye @REPO@ por la ruta del repositorio.
+[Unit]
+Description=equitydash: ingesta diaria y alertas
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/.venv/bin/python @REPO@/run_daily.py
+# La ingesta completa tarda ~10 min (el universo del S&P 500 son ~5). Un tope evita que
+# una fuente colgada deje la unidad "activa" para siempre y bloquee la del día siguiente.
+TimeoutStartSec=45min
+# Tarea de fondo: que no compita con el uso normal del equipo.
+Nice=10
+IOSchedulingClass=idle

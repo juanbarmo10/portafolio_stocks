@@ -1,0 +1,15 @@
+[Unit]
+Description=equitydash: una vez al día, antes de la apertura de EE. UU.
+
+[Timer]
+# 06:30 hora local. En Bogotá (UTC-5, sin horario de verano) son las 11:30 UTC: el cierre
+# del día anterior ya está completo en Yahoo — ejecutarlo al cierre dejó la sesión del día
+# casi vacía el 2026-09-24 —, FRED ya publicó lo de la noche, y el aviso de "no aportes
+# hoy" llega antes de que abra el mercado (13:30 UTC).
+OnCalendar=*-*-* 06:30:00
+# Si el equipo estaba apagado a esa hora, se ejecuta al encenderlo.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
