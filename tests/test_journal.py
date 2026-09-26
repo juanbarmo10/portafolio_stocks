@@ -94,6 +94,11 @@ def test_the_page_flags_a_decision_without_a_reason_and_hands_the_template(tmp_p
     assert any("Venta AAA" in label and "sin razón escrita" in label for label in labels)
     assert any("Compra AAA" in label and "toca revisar" in label for label in labels)
     assert any("ticker: AAA" in c.value for c in app.code), "the template, prefilled"
+    mirror = next(pd.DataFrame(d.value) for d in app.dataframe
+                  if "Lo que hizo la cuenta" in pd.DataFrame(d.value).columns)
+    rows = dict(zip(mirror["Qué"], mirror["Lo que hizo la cuenta"]))
+    assert rows["Qué se vende"].startswith("1 ventas con ganancia y 0 con pérdida")
+    assert rows["Razones escritas"] == "1 de 2 decisiones"
     st.cache_data.clear()
     config.load_settings.cache_clear()
 

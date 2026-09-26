@@ -710,6 +710,12 @@ panel:
   # settings.local.yaml (`journal`); aquí solo cómo se emparejan con las operaciones.
   journal:
     tolerance_days: 3            # la nota puede escribirse la víspera o unos días después
+  # Espejo de conducta (📓 Diario, transform/behavior.py). min_holding_days es el
+  # horizonte mínimo del plan (§1: "trimestres a años" → un trimestre); cámbialo si escribes
+  # otro en tu política.
+  behavior:
+    window_days: 365
+    min_holding_days: 90
   # Riesgo y modos de fallo (Cartera, transform/risk.py). No optimizados contra nada.
   risk:
     window_days: 365             # rendimientos diarios para volatilidad y correlación

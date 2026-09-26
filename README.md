@@ -396,7 +396,9 @@ app/        Streamlit multipágina (st.navigation)
               │                valoración y el coste medido de llevar el dinero al
               │                bróker (solo local)
               ├── 📓 Diario    cada decisión de la cuenta con su razón escrita, el
-              │                semáforo de ese día y lo que pasó después (solo local)
+              │                semáforo de ese día y lo que pasó después, y el espejo
+              │                de conducta: rotación, tenencia, efecto disposición y
+              │                lo que costó vender, frente al plan (solo local)
               └── 🧾 Fiscal    la cuenta en moneda local, todo ESTIMADO (solo local)
 fiscal/     lotes y ventas en moneda local, parte del activo / parte de la divisa
 alerts/     Telegram, con deduplicación vía alerts_log

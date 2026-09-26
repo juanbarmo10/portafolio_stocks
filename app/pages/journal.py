@@ -15,7 +15,9 @@ import streamlit as st
 from app import data as app_data
 from app.format import MISSING, money, number, pct
 from core.config import load_settings
+from transform import behavior as bh
 from transform import journal as jr
+from transform import portfolio as port
 from transform import regime as rg
 from transform.adjustments import total_return_index
 from transform.price_action import as_series
@@ -62,6 +64,69 @@ spy = total_return("SPY")
 executed = table[table["side"] != "sin ejecutar"]
 unwritten = executed[executed["entry"].isna()]
 due = [row for row in table.to_dict("records") if jr.review_due(row["entry"], today)]
+# --- The behaviour mirror (§15.4 point 5): the plan against what the account did --------
+BEHAVIOR = dict(settings.raw.get("panel", {}).get("behavior") or {})
+account = app_data.account_observations()
+positions = port.latest_positions(account)
+valued = port.valuation(positions, port.latest_prices(prices)) if not positions.empty \
+    else pd.DataFrame()
+look = bh.mirror(app_data.trades(), port.nav_series(account),
+                 port.nav_series(account, port.NAV_CASH), valued,
+                 {t: total_return(t) for t in tickers}, today,
+                 window_days=int(BEHAVIOR.get("window_days", 365)),
+                 min_holding_days=int(BEHAVIOR.get("min_holding_days", 90)))
+written = len(executed) - len(unwritten)
+st.subheader("🪞 Tu conducta, medida")
+st.dataframe(pd.DataFrame([
+    {"Qué": "Horizonte",
+     "Lo que dice el plan": f"Trimestres a años (§1); mínimo escrito: {look.min_holding_days} días",
+     "Lo que hizo la cuenta": (f"lo vendido se mantuvo {number(look.holding_median_days, decimals=0)}"
+                               f" días de mediana; el {pct(look.sold_before_horizon, decimals=0)} "
+                               f"del importe vendido, menos de {look.min_holding_days}")
+     if look.holding_median_days is not None else "sin ventas en la ventana"},
+    {"Qué": "Rotación",
+     "Lo que dice el plan": "Diseñar contra el exceso de operaciones (§2): quien aporta y no "
+                            "vende rota ~0",
+     "Lo que hizo la cuenta": f"{number(look.turnover, decimals=1)}× el patrimonio medio en el año"
+     if look.turnover is not None else MISSING},
+    {"Qué": "Qué se vende",
+     "Lo que dice el plan": "Se vende cuando la tesis muere o salta una regla de salida "
+                            "escrita antes (§2, §5.2)",
+     "Lo que hizo la cuenta": f"{look.sells_at_gain} ventas con ganancia y {look.sells_at_loss} "
+                              f"con pérdida; hoy {look.open_at_loss} posición(es) abierta(s) en "
+                              f"pérdida y {look.open_at_gain} en ganancia"},
+    {"Qué": "Lo que costó vender",
+     "Lo que dice el plan": "—",
+     "Lo que hizo la cuenta": (
+         (f"después de venderlo, lo vendido ganó {money(look.after_sale, public=False)} más"
+          if look.after_sale >= 0 else
+          f"después de venderlo, lo vendido perdió {money(-look.after_sale, public=False)}: "
+          "vender lo evitó")
+         + (f"; ese dinero en SPY habría hecho {money(look.after_sale_spy, public=False)}"
+            if look.after_sale_spy is not None else ""))
+     if look.after_sale is not None else MISSING},
+    {"Qué": "Efectivo",
+     "Lo que dice el plan": "No fija cuánto efectivo; solo frena compras con el semáforo en "
+                            "rojo (§2). Una regla de despliegue es tuya",
+     "Lo que hizo la cuenta": f"{pct(look.cash_share_average, decimals=0)} de media en el año; "
+                              f"{pct(look.cash_share_now, decimals=0)} hoy"},
+    {"Qué": "Comisiones",
+     "Lo que dice el plan": "Verificadas antes de cada orden (§2, nivel 4)",
+     "Lo que hizo la cuenta": f"{pct(look.commission_drag, decimals=2)} del patrimonio medio"},
+    {"Qué": "Razones escritas",
+     "Lo que dice el plan": "Toda decisión con su porqué antes de ejecutarla (📓)",
+     "Lo que hizo la cuenta": f"{written} de {len(executed)} decisiones"},
+]), hide_index=True, width="stretch")
+st.caption(
+    f"Del {look.start} al {look.end}, solo con los datos de la cuenta. Rotación = menor entre "
+    "compras y ventas sobre el patrimonio medio (la definición estándar: el dinero que entra y "
+    "se invierte no cuenta). Tenencia: lotes FIFO vendidos, ponderados por importe. «Qué se "
+    "vende»: vender lo que gana pronto y quedarse lo que pierde es el sesgo más estudiado del "
+    "inversor particular (efecto disposición); con pocas ventas es un patrón que mirar, no una "
+    "estadística. «Lo que costó vender»: lo que hicieron después las acciones vendidas, con "
+    "dividendos, hasta hoy. Nada aquí es un juicio: es el espejo."
+)
+
 cols = st.columns(3)
 cols[0].metric("Decisiones registradas", len(executed))
 cols[1].metric("Sin razón escrita", len(unwritten),
