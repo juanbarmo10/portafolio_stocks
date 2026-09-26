@@ -236,3 +236,38 @@ def test_a_thin_industry_widens_the_code_and_says_so():
 def test_without_enough_peers_there_is_no_comparison():
     table, sics = peer_table(3, "7372")
     assert sc.peer_comparison(table, table["cik"][0], sics) is None
+
+
+# --- EV convention and financials (2026-09-25) --------------------------------------------
+
+
+def test_the_screen_ev_matches_the_company_page_convention():
+    obs = pd.DataFrame(frames(CIK_A, revenue=1000.0, operating_income=100.0,
+                              diluted_shares=100.0, cash=50.0, long_term_debt=200.0)
+                       + [{"source": "sec_frames", "series_id": f"{CIK_A}:short_term_investments:CY2025Q4I",
+                           "ts": "2025-12-31", "ts_release": "", "value": 30.0}])
+    row = sc.screen_table(obs, pd.DataFrame(closes("AAA", 20.0)), [], REGISTRY).iloc[0]
+    assert row["ev_ebit"] == pytest.approx((2000 + 200 - 50 - 30) / 100)
+
+
+def test_hidden_debt_leaves_the_ev_empty_instead_of_cheap():
+    instants = [{"source": "sec_frames", "series_id": f"{CIK_A}:{m}:CY2025Q4I",
+                 "ts": "2025-12-31", "ts_release": "", "value": v}
+                for m, v in [("assets", 100.0), ("liabilities", 300.0),
+                             ("liabilities_current", 20.0)]]
+    obs = pd.DataFrame(frames(CIK_A, revenue=1000.0, operating_income=100.0,
+                              diluted_shares=100.0, cash=50.0) + instants)
+    row = sc.screen_table(obs, pd.DataFrame(closes("AAA", 20.0)), [], REGISTRY).iloc[0]
+    assert row["debt_unidentified"] and not row["debt_missing"]
+    assert pd.isna(row["ev_ebit"]) and pd.isna(row["ev_sales"])
+
+
+def test_financials_are_set_apart_before_any_rule():
+    table = pd.DataFrame({"dilution": [0.0, 0.0, 0.10], "sbc_over_revenue": [0.01] * 3,
+                          "fcf_margin": [0.1] * 3, "market_cap": [5e9] * 3,
+                          "financial": [True, False, None]})
+    result = sc.apply_filters(table, {"max_dilution": 0.02}, exclude_financials=True)
+    assert result.excluded_financials == 1 and len(result.table) == 1
+    assert result.failed == 1, "the bank neither passes nor fails"
+    assert sc.is_financial("6021") and not sc.is_financial("7372")
+    assert sc.is_financial(None) is None

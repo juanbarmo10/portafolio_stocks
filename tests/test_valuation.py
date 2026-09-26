@@ -114,3 +114,35 @@ def test_the_band_places_today_within_its_own_history_and_skips_thin_ones():
     assert band.loc["ev_sales", "today"] == pytest.approx(1.0)
     assert band.loc["ev_sales", "median"] == pytest.approx(1.75)
     assert band.loc["ev_sales", "percentile"] == pytest.approx(2 / 6)
+
+
+def _bases(**extra):
+    base = {"shares": 100.0, "shares_date": "2025-01-01", "debt": None, "cash": 50.0,
+            "revenue": 1000.0, "ebit": 100.0, "net_income": 80.0, "fcf": 30.0, "sbc": 0.0}
+    return base | extra
+
+
+def _close():
+    return pd.DataFrame([{"series_id": "X:close_raw", "ts": "2025-06-02", "value": 10.0}])
+
+
+def test_the_ev_subtracts_the_same_liquidity_as_the_balance_sheet():
+    v = val.combine(_bases(debt=200.0, short_term_investments=30.0), _close(), [], "X",
+                    "2025-06-02")
+    assert v.enterprise_value == pytest.approx(1000 + 200 - 50 - 30)
+
+
+def test_debt_under_the_companys_own_tags_makes_the_ev_incomplete_not_debt_free():
+    """ImmunityBio: no debt concept, non-current liabilities 2,5× its assets."""
+    hidden = _bases(assets=600.0, liabilities=1700.0, liabilities_current=100.0)
+    v = val.combine(hidden, _close(), [], "X", "2025-06-02")
+    assert v.debt_unidentified and v.enterprise_value is None and v.ev_sales is None
+    assert v.market_cap == pytest.approx(1000.0) and v.p_fcf is not None, \
+        "what does not need the debt still stands"
+
+
+def test_leases_alone_do_not_hide_debt():
+    """Nautilus: no debt concept, non-current liabilities 15 % of assets — leases."""
+    leases = _bases(assets=160.0, liabilities=40.0, liabilities_current=16.0)
+    v = val.combine(leases, _close(), [], "X", "2025-06-02")
+    assert not v.debt_unidentified and v.enterprise_value == pytest.approx(950.0)

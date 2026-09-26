@@ -596,11 +596,12 @@ else:
                        f"{now.shares_date} ({compact_amount(now.shares)}), ajustadas por "
                        "splits posteriores. No es el recuento de portada: las empresas con "
                        "varias clases de acciones no lo publican en los datos de la SEC.")
-    row[2].metric("EV aprox. (USD)", compact_amount(now.enterprise_value),
+    row[2].metric("EV aprox. (USD)",
+                  "incompleto" if now.debt_unidentified else compact_amount(now.enterprise_value),
                   help="Valor de empresa: capitalización + deuda a largo plazo (convertibles "
-                       "incluidos) − caja. "
-                       "No incluye la deuda a corto plazo, las inversiones financieras, los "
-                       "arrendamientos ni los minoritarios.")
+                       "incluidos) − caja e inversiones a corto (la misma liquidez del "
+                       "balance). No incluye la deuda a corto plazo, los arrendamientos ni "
+                       "los minoritarios.")
     row[3].metric("EV / ventas", multiple(now.ev_sales))
     row = st.columns(4)
     row[0].metric("EV / EBIT", multiple(now.ev_ebit))
@@ -616,7 +617,13 @@ else:
                        "vuelta el SBC, que es un coste real pagado en acciones.")
     row[2].metric("Rend. del beneficio", pct(now.earnings_yield),
                   help="Beneficio neto / capitalización (la inversa del P/E, con signo).")
-    if now.debt is None:
+    if now.debt_unidentified:
+        st.warning("**EV incompleto:** la empresa no presenta ningún concepto estándar de "
+                   "deuda, pero su pasivo no corriente supera con mucho lo normal para "
+                   "arrendamientos: la deuda existe con etiquetas propias. Tomarla como cero "
+                   "daría un EV y un EV/ventas más bajos de lo real, así que no se calculan. "
+                   "La capitalización, el P/FCF y los rendimientos sí valen.")
+    elif now.debt is None:
         row[3].caption("Sin deuda a largo plazo registrada: el EV la toma como cero.")
 
     # History: the multiple on each month-end, and where today sits in it.

@@ -30,7 +30,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from transform.valuation import split_factor_between
+from transform.valuation import UNIDENTIFIED_DEBT_SHARE, debt_unidentified, split_factor_between
 
 PERIOD = re.compile(r"^CY(\d{4})$")
 
@@ -80,8 +80,23 @@ def last_closes(closes: pd.DataFrame) -> dict[str, tuple[float, str]]:
     return {r.ticker: (float(r.value), r.day) for r in frame.itertuples()}
 
 
+FINANCIAL_SIC = (6000, 6799)   # banks, insurers, brokers, REITs: their "FCF" is not an
+#                                industrial's (deposits and loans run through operations)
+
+
+def is_financial(sic: Any) -> bool | None:
+    """Whether an SEC SIC code is in the finance division; ``None`` when unknown."""
+    try:
+        code = int(str(sic))
+    except (TypeError, ValueError):
+        return None
+    return FINANCIAL_SIC[0] <= code <= FINANCIAL_SIC[1]
+
+
 def screen_table(frames: pd.DataFrame, closes: pd.DataFrame, actions: Any,
-                 registry: Mapping[str, tuple[str, str | None]]) -> pd.DataFrame:
+                 registry: Mapping[str, tuple[str, str | None]],
+                 sics: Mapping[str, Any] | None = None, *,
+                 unidentified_debt_share: float = UNIDENTIFIED_DEBT_SHARE) -> pd.DataFrame:
     """One row per company with its metrics for the newest fiscal year in ``frames``.
 
     Args:
@@ -89,6 +104,11 @@ def screen_table(frames: pd.DataFrame, closes: pd.DataFrame, actions: Any,
         closes: Recent raw closes, ``[series_id, ts, value]``.
         actions: ``corporate_actions`` rows, for the split between filing and price.
         registry: ``{cik: (ticker, name)}``.
+        sics: ``{cik: SIC code}``, for the finance flag.
+
+    The EV follows ``transform.valuation`` exactly: cash **and** short-term investments are
+    subtracted, and a missing debt concept with non-current liabilities above
+    ``unidentified_debt_share`` of assets leaves the EV incomplete (``None``).
     """
     year = latest_year(frames)
     if year is None:
@@ -104,6 +124,11 @@ def screen_table(frames: pd.DataFrame, closes: pd.DataFrame, actions: Any,
         sbc, shares = _value(row, "sbc"), _value(row, "diluted_shares")
         net_income, ebit = _value(row, "net_income"), _value(row, "operating_income")
         debt, cash = _value(row, "long_term_debt"), _value(row, "cash")
+        bases = {"debt": debt, "assets": _value(row, "assets"),
+                 "liabilities": _value(row, "liabilities"),
+                 "liabilities_current": _value(row, "liabilities_current")}
+        hidden_debt = debt_unidentified(bases, unidentified_debt_share)
+        investments = _value(row, "short_term_investments")
 
         # The membership list writes class shares with a dot (BRK.B), the price source with
         # a dash (BRK-B).
@@ -115,8 +140,8 @@ def screen_table(frames: pd.DataFrame, closes: pd.DataFrame, actions: Any,
             market_cap = price * shares * factor
         # No long-term debt concept filed is read as none — the convention of
         # transform.valuation, flagged in its own column; missing cash leaves EV unknown.
-        enterprise_value = (None if market_cap is None or cash is None
-                            else market_cap + (debt or 0.0) - cash)
+        enterprise_value = (None if market_cap is None or cash is None or hidden_debt
+                            else market_cap + (debt or 0.0) - cash - (investments or 0.0))
         rows.append({
             "cik": cik, "ticker": ticker, "name": name, "fiscal_year": year,
             "revenue": revenue,
@@ -135,7 +160,10 @@ def screen_table(frames: pd.DataFrame, closes: pd.DataFrame, actions: Any,
                                     else _ratio(fcf - sbc, market_cap)),
             "ev_ebit": _ratio(enterprise_value, ebit),
             "ev_sales": _ratio(enterprise_value, revenue),
-            "debt_missing": debt is None,
+            "debt_missing": debt is None and not hidden_debt,
+            "debt_unidentified": hidden_debt,
+            "sic": (sics or {}).get(cik),
+            "financial": is_financial((sics or {}).get(cik)),
             "price_date": price_day,
         })
     return pd.DataFrame(rows)
@@ -148,6 +176,7 @@ class Filtered:
     table: pd.DataFrame
     failed: int
     unknown: dict[str, int]
+    excluded_financials: int = 0
 
 
 # column → (direction, parameter name in config `screen.defaults`)
@@ -160,7 +189,7 @@ FILTERS = {
 
 
 def apply_filters(table: pd.DataFrame, limits: Mapping[str, float | None], *,
-                  keep_unknown: bool = False) -> Filtered:
+                  keep_unknown: bool = False, exclude_financials: bool = False) -> Filtered:
     """Keep the rows that pass every limit set (``None`` = limit off).
 
     A row a rule cannot judge (its value is missing) is neither kept nor counted as failed
@@ -169,6 +198,12 @@ def apply_filters(table: pd.DataFrame, limits: Mapping[str, float | None], *,
     """
     if table.empty:
         return Filtered(table, 0, {})
+    excluded = 0
+    if exclude_financials and "financial" in table:
+        # Out of the ranking before any rule, and counted apart: FCF metrics do not describe
+        # them (FINANCIAL_SIC), so they neither pass nor fail.
+        financial = table["financial"].astype("boolean").fillna(False).astype(bool)
+        excluded, table = int(financial.sum()), table[~financial]
     keep = pd.Series(True, index=table.index)
     failed = pd.Series(False, index=table.index)
     missing_by: dict[str, pd.Series] = {}
@@ -184,7 +219,7 @@ def apply_filters(table: pd.DataFrame, limits: Mapping[str, float | None], *,
         keep &= passes | (missing & keep_unknown)
     # Unknown to a rule and failing no other: the ones the data, not the rules, left out.
     unknown = {c: int((m & ~failed).sum()) for c, m in missing_by.items()}
-    return Filtered(table[keep], int(failed.sum()), unknown)
+    return Filtered(table[keep], int(failed.sum()), unknown, excluded)
 
 
 # --- Peers (§15.1.4, 2026-09-25) ------------------------------------------------------------

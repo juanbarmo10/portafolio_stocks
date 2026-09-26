@@ -296,7 +296,13 @@ def screen_view(mtime: float) -> pd.DataFrame:
                            | {t.replace(".", "-") for t, _ in names.values()}))
     since = (dt.date.today() - dt.timedelta(days=20)).isoformat()
     closes = recent_closes(tickers, since, mtime)
-    return sc.screen_table(frames, closes, corporate_actions(), names)
+    from transform import valuation as val  # noqa: PLC0415
+
+    sics = dict(zip(registry["cik"], registry["sic"])) if "sic" in registry else {}
+    share = float(load_settings().raw.get("panel", {}).get("valuation", {})
+                  .get("unidentified_debt_share", val.UNIDENTIFIED_DEBT_SHARE))
+    return sc.screen_table(frames, closes, corporate_actions(), names, sics,
+                           unidentified_debt_share=share)
 
 
 @st.cache_data(show_spinner="Calculando la valoración…")
@@ -308,7 +314,11 @@ def valuation_view(cik: str, ticker: str, as_of_iso: str, years: int, mtime: flo
     obs = sec_observations()
     prices = prices_for([ticker])
     actions = corporate_actions()
-    now = val.assess(obs, prices, actions, cik, ticker, as_of_iso)
+    share = float(load_settings().raw.get("panel", {}).get("valuation", {})
+                  .get("unidentified_debt_share", val.UNIDENTIFIED_DEBT_SHARE))
+    now = val.assess(obs, prices, actions, cik, ticker, as_of_iso,
+                     unidentified_debt_share=share)
     end = pd.Timestamp(as_of_iso)
     dates = [*pd.date_range(end - pd.DateOffset(years=years), end, freq="ME"), end]
-    return now, val.history(obs, prices, actions, cik, ticker, dates)
+    return now, val.history(obs, prices, actions, cik, ticker, dates,
+                            unidentified_debt_share=share)

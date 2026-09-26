@@ -17,8 +17,15 @@ data already in the database and under the same rules as the rest:
   when the company loses money. Yields are shown whatever their sign, because a negative
   FCF yield *is* readable — the company burns cash.
 - **EV is approximate**: market cap + long-term debt (convertibles included) − cash and
-  equivalents. It leaves out the current portion of debt, marketable securities, leases and
-  minority interests, and says so.
+  short-term investments (the same liquidity the balance sheet shows; until 2026-09-25 it
+  subtracted cash alone, 0,23 billion off for HIMS). It leaves out the current portion of
+  debt, leases and minority interests, and says so.
+- **A missing debt concept is not "no debt" when the liabilities say otherwise.** A company
+  may file its debt under its own tags (ImmunityBio: 1,6 billion of non-current liabilities,
+  no standard debt concept). When no debt is filed and non-current liabilities exceed
+  ``unidentified_debt_share`` of total assets, the EV is ``None`` — incomplete — instead of
+  an EV that takes the debt as zero. Below it, the liabilities are the usual leases and
+  deferred items, and zero debt is the honest reading (NAUT 15 %, DUOL 4 %, IBRX 254 %).
 
 The reverse DCF takes no discount rate of its own. The rate is the investor's (section 12),
 so it answers for a grid of rates and marks the user's ``hurdle_rate`` when set.
@@ -37,6 +44,7 @@ from transform import fundamentals as fun
 from transform.adjustments import as_date, as_frame
 
 MULTIPLES = ("ev_sales", "ev_ebit", "pe", "p_fcf", "fcf_yield")
+UNIDENTIFIED_DEBT_SHARE = 0.25   # config: panel.valuation.unidentified_debt_share
 
 
 @dataclass(frozen=True)
@@ -67,6 +75,8 @@ class Valuation:
     debt: float | None
     cash: float | None
     enterprise_value: float | None
+    short_term_investments: float | None
+    debt_unidentified: bool
     revenue_ttm: float | None
     operating_income_ttm: float | None
     net_income_ttm: float | None
@@ -162,6 +172,12 @@ def fundamentals_at(observations: pd.DataFrame, cik: str, as_of: Any) -> dict[st
         "shares": shares, "shares_date": shares_date,
         "debt": fun.latest_instant(observations, cik, "long_term_debt", as_of_iso),
         "cash": fun.latest_instant(observations, cik, "cash", as_of_iso),
+        "short_term_investments": fun.latest_instant(observations, cik,
+                                                     "short_term_investments", as_of_iso),
+        "assets": fun.latest_instant(observations, cik, "assets", as_of_iso),
+        "liabilities": fun.latest_instant(observations, cik, "liabilities", as_of_iso),
+        "liabilities_current": fun.latest_instant(observations, cik, "liabilities_current",
+                                                  as_of_iso),
         "revenue": fun.ttm_at(observations, cik, "revenue", as_of_iso),
         "ebit": fun.ttm_at(observations, cik, "operating_income", as_of_iso),
         "net_income": fun.ttm_at(observations, cik, "net_income", as_of_iso),
@@ -170,8 +186,22 @@ def fundamentals_at(observations: pd.DataFrame, cik: str, as_of: Any) -> dict[st
     }
 
 
+def debt_unidentified(bases: Mapping[str, Any],
+                      threshold: float = UNIDENTIFIED_DEBT_SHARE) -> bool:
+    """No debt concept filed, yet non-current liabilities above ``threshold`` of assets: the
+    debt exists under the company's own tags, and zero would be a plausible wrong number."""
+    if bases.get("debt") is not None:
+        return False
+    total, current, assets = (bases.get("liabilities"), bases.get("liabilities_current"),
+                              bases.get("assets"))
+    if total is None or current is None or not assets or assets <= 0:
+        return False
+    return (total - current) / assets > threshold
+
+
 def combine(bases: Mapping[str, Any], prices: pd.DataFrame, actions: Any, ticker: str,
-            as_of: Any) -> Valuation:
+            as_of: Any, *, unidentified_debt_share: float = UNIDENTIFIED_DEBT_SHARE
+            ) -> Valuation:
     """A valuation from filed bases and the close of ``as_of``."""
     as_of_iso = as_date(as_of).isoformat()
     price, price_date = price_at(prices, ticker, as_of_iso)
@@ -180,17 +210,21 @@ def combine(bases: Mapping[str, Any], prices: pd.DataFrame, actions: Any, ticker
         shares *= split_factor_between(actions, ticker, shares_date, price_date)
     market_cap = price * shares if price is not None and shares is not None else None
     debt, cash = bases["debt"], bases["cash"]
+    investments = bases.get("short_term_investments")
+    hidden_debt = debt_unidentified(bases, unidentified_debt_share)
     # No long-term debt concept filed is read as no long-term debt — a debt-free company does
-    # not tag one — and the page says so next to the EV (``debt is None``). Missing cash
+    # not tag one — unless the liabilities say otherwise (module docstring). Missing cash
     # leaves the EV unknown.
-    enterprise_value = (market_cap + (debt or 0.0) - cash
-                        if market_cap is not None and cash is not None else None)
+    enterprise_value = (market_cap + (debt or 0.0) - cash - (investments or 0.0)
+                        if market_cap is not None and cash is not None and not hidden_debt
+                        else None)
     revenue, ebit, net_income = bases["revenue"], bases["ebit"], bases["net_income"]
     fcf, sbc = bases["fcf"], bases["sbc"]
     return Valuation(
         as_of=as_of_iso, price=price, price_date=price_date,
         shares=shares, shares_date=shares_date, market_cap=market_cap,
         debt=debt, cash=cash, enterprise_value=enterprise_value,
+        short_term_investments=investments, debt_unidentified=hidden_debt,
         revenue_ttm=revenue, operating_income_ttm=ebit, net_income_ttm=net_income,
         fcf_ttm=fcf, sbc_ttm=sbc,
         ev_sales=_positive_ratio(enterprise_value, revenue),
@@ -206,15 +240,17 @@ def combine(bases: Mapping[str, Any], prices: pd.DataFrame, actions: Any, ticker
 
 def assess(
     observations: pd.DataFrame, prices: pd.DataFrame, actions: Any,
-    cik: str, ticker: str, as_of: Any,
+    cik: str, ticker: str, as_of: Any, *,
+    unidentified_debt_share: float = UNIDENTIFIED_DEBT_SHARE,
 ) -> Valuation:
     """The valuation reading on ``as_of``. Every missing input leaves its figures ``None``."""
-    return combine(fundamentals_at(observations, cik, as_of), prices, actions, ticker, as_of)
+    return combine(fundamentals_at(observations, cik, as_of), prices, actions, ticker, as_of,
+                   unidentified_debt_share=unidentified_debt_share)
 
 
 def history(
     observations: pd.DataFrame, prices: pd.DataFrame, actions: Any, cik: str, ticker: str,
-    dates: Sequence[Any],
+    dates: Sequence[Any], *, unidentified_debt_share: float = UNIDENTIFIED_DEBT_SHARE,
 ) -> pd.DataFrame:
     """The multiples on each date, each one point-in-time. ``[date, *MULTIPLES]``.
 
@@ -235,7 +271,8 @@ def history(
     for day in days:
         while index + 1 < len(snapshots) and snapshots[index + 1][0] <= day:
             index += 1
-        v = combine(snapshots[index][1], prices, actions, ticker, day)
+        v = combine(snapshots[index][1], prices, actions, ticker, day,
+                    unidentified_debt_share=unidentified_debt_share)
         rows.append({"date": v.as_of, **{m: getattr(v, m) for m in MULTIPLES}})
     return pd.DataFrame(rows, columns=columns)
 

@@ -225,7 +225,13 @@ sources:
         # NO se incluye OperatingLeaseLiabilityNoncurrent: tratar los arrendamientos
         # operativos como deuda es una decisión discutible, y `invested_capital()` ya se
         # declara una aproximación tosca.
-        tags: [LongTermDebtNoncurrent, LongTermDebt, ConvertibleDebtNoncurrent]
+        # 2026-09-25: LongTermDebtAndCapitalLeaseObligations (deuda a largo + arrendamientos
+        # financieros, nombre anterior a ASC 842 que sigue en uso) resolvía 30 de 36 empresas
+        # del S&P que el cribado tomaba SIN deuda — KHC, CSX, CVS… con el EV infravalorado.
+        # SeniorLongTermNotes: VeriSign. NO DebtInstrumentCarryingAmount: es un desglose que
+        # suma instrumentos y puede incluir la parte corriente.
+        tags: [LongTermDebtNoncurrent, LongTermDebt, LongTermDebtAndCapitalLeaseObligations,
+               SeniorLongTermNotes, ConvertibleDebtNoncurrent]
       # --- Tabla trimestral y balance (§15.1.3, 2026-09-25). Verificados contra los
       # companyfacts de MSFT, HIMS y AT&T antes de escribirlos, no de memoria.
       # Margen bruto SOLO de `GrossProfit`: no se deriva restando el coste de ventas, porque
@@ -261,7 +267,8 @@ sources:
       debt_current:
         kind: instant
         unit: USD
-        tags: [LongTermDebtCurrent, DebtCurrent, ConvertibleNotesPayableCurrent]
+        tags: [LongTermDebtCurrent, DebtCurrent, LongTermDebtAndCapitalLeaseObligationsCurrent,
+               ConvertibleNotesPayableCurrent]
       # Para cuando la deuda no se puede identificar: ImmunityBio presenta la mayor parte de
       # la suya (notas convertibles con partes vinculadas) con etiquetas PROPIAS; los
       # conceptos estándar solo ven `SecuredLongTermDebt` 415 M de ~1.600 M de pasivo no
@@ -504,6 +511,11 @@ panel:
   # Valoración — "¿a qué precio?" (CLAUDE.md §15.1; transform/valuation.py).
   valuation:
     history_years: 5          # historia de múltiplos; 5 años evita, en HIMS, la etapa SPAC
+    # Sin concepto de deuda y con pasivo no corriente por encima de esta fracción de los
+    # activos, la deuda existe con etiquetas propias: EV "incompleto", no EV sin deuda.
+    # Medido el 2026-09-25: IBRX 254 % (deuda oculta), NAUT 15 %, DUOL 4 % (arrendamientos).
+    # No optimizado contra nada: separa dos órdenes de magnitud, no un caso frontera.
+    unidentified_debt_share: 0.25
     # DCF inverso: qué crecimiento del flujo durante `years` justifica el precio. La tasa de
     # descuento es TUYA (§12): se muestra una rejilla, y se marca panel.level3.hurdle_rate si
     # la escribes. El crecimiento terminal es una CONVENCIÓN (≈ crecimiento nominal de largo
@@ -826,7 +838,8 @@ public_sync:
 screen:
   run_every_days: 90
   metrics: [revenue, operating_income, net_income, operating_cash_flow, capex, sbc,
-            diluted_shares, cash, long_term_debt, equity]
+            diluted_shares, cash, long_term_debt, equity,
+            short_term_investments, assets, liabilities, liabilities_current]
   # Sin `buybacks`: la recompra bruta engaña si el SBC la anula (§2); la dilución es la
   # medida neta y ya está.
   # Filtros por defecto de la página (editables allí). Son PUNTOS DE PARTIDA de lectura, no
@@ -836,3 +849,6 @@ screen:
     max_sbc_over_revenue: 0.05
     min_fcf_margin: 0.0
     min_market_cap: 2000000000   # 2 mil M; escrito entero: PyYAML lee `2.0e9` como texto
+    # Bancos, aseguradoras, brókeres y REIT (SIC 6000-6799) fuera de la ordenación: su
+    # "flujo de caja libre" mezcla depósitos y préstamos. Se cuentan aparte, no se esconden.
+    exclude_financials: true

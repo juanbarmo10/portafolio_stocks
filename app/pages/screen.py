@@ -79,12 +79,20 @@ limits = {
 keep_unknown = st.checkbox(
     "Conservar las empresas que un filtro no puede juzgar (dato faltante)", value=False,
     help="Desconocido no es aprobar ni suspender. Por defecto quedan fuera, pero se cuentan.")
-result = sc.apply_filters(table, limits, keep_unknown=keep_unknown)
+exclude_financials = st.checkbox(
+    "Excluir bancos, aseguradoras y REIT (SIC 6000-6799)",
+    value=bool(defaults.get("exclude_financials", True)),
+    help="Su «flujo de caja libre» mezcla depósitos y préstamos: encabezarían la ordenación "
+         "por rentabilidad FCF sin que signifique lo mismo que en una industrial.")
+result = sc.apply_filters(table, limits, keep_unknown=keep_unknown,
+                          exclude_financials=exclude_financials)
 
 unknown = {k: v for k, v in result.unknown.items() if v}
 labels = {"dilution": "dilución", "sbc_over_revenue": "SBC", "fcf_margin": "margen FCF",
           "market_cap": "capitalización"}
 line = f"**{len(result.table)}** pasan · {result.failed} no pasan"
+if result.excluded_financials:
+    line += f" · {result.excluded_financials} financieras aparte"
 if unknown and not keep_unknown:
     line += (" · fuera por falta de dato: "
              + ", ".join(f"{v} ({labels[k]})" for k, v in unknown.items()))
@@ -129,6 +137,7 @@ display = pd.DataFrame({
     "VE / EBIT": shown["ev_ebit"],
     "VE / ventas": shown["ev_sales"],
     "Sin deuda LP": shown["debt_missing"],
+    "Deuda oculta": shown["debt_unidentified"],
 })
 percent = st.column_config.NumberColumn(format="percent")
 multiple = st.column_config.NumberColumn(format="%.1f×")
@@ -145,8 +154,12 @@ st.dataframe(
                                    "dilución en vez de la empresa en efectivo."),
         "FCF / beneficio": multiple, "VE / EBIT": multiple, "VE / ventas": multiple,
         "Sin deuda LP": st.column_config.CheckboxColumn(
-            help="La empresa no presentó ningún concepto de deuda a largo plazo: el valor "
-                 "de empresa la cuenta como cero, igual que la página de Empresa."),
+            help="La empresa no presentó ningún concepto de deuda a largo plazo y su pasivo "
+                 "no corriente es pequeño: el valor de empresa la cuenta como cero."),
+        "Deuda oculta": st.column_config.CheckboxColumn(
+            help="Sin concepto de deuda pero con un pasivo no corriente grande frente a sus "
+                 "activos: la deuda va con etiquetas propias. VE y sus múltiplos quedan "
+                 "vacíos en vez de calcularse con deuda cero."),
     },
 )
 st.caption("Ordenada por rentabilidad FCF después del SBC; pulsa una cabecera para "
