@@ -850,6 +850,60 @@ insider_study:
   # dos mitades. Si no, el panel no la enseña como señal.
   decision_horizons: [90, 180]
 
+# --- Estudio de factores: calidad, devengos, momentum (CLAUDE.md §15.4 punto 9) ---------
+# Escrito el 2026-09-26 ANTES de descargar los fundamentales de los miembros y de calcular
+# nada. Una sola ejecución: `python run_validation.py --factors`. Pregunta: ¿ordenar el
+# cribado por alguna de estas tres cifras habría ayudado a elegir dentro del S&P 500?
+factor_study:
+  # Cada señal con el SIGNO que la literatura espera, escrito antes. El panel orienta la
+  # cifra para que el quintil "de arriba" sea siempre el que debería ganar.
+  signals:
+    gross_profitability:     # Novy-Marx (2013): beneficio bruto / activos totales
+      expected: positive
+      # SOLO `GrossProfit` presentado, igual que el panel: no se resta el coste de ventas
+      # (AT&T lo presenta sin amortización y el "bruto" no sería comparable). Las empresas
+      # que no lo presentan quedan FUERA de esta señal, y se cuentan.
+      numerator: gross_profit
+      exclude_financials: true
+    accruals:                # Sloan (1996), en la versión de flujos (Hribar y Collins, 2002)
+      expected: negative     # MENOS beneficio sin caja detrás → más rentabilidad
+      # (beneficio neto − flujo operativo) / media de los activos al inicio y al final
+      exclude_financials: true
+    momentum:                # Jegadeesh y Titman (1993): 12 meses, saltándose el último
+      expected: positive
+      lookback_days: 365
+      skip_days: 30          # el último mes tiende a revertir: se excluye
+      exclude_financials: false
+  # Fundamentales: el último ejercicio ANUAL cuya presentación existía a la fecha, en la
+  # versión vigente ese día (§9.4). Un ejercicio cerrado hace más de 480 días es un dato
+  # viejo (15 meses + margen de presentación): la empresa queda sin señal ese día.
+  max_fiscal_age_days: 480
+  # Universo: miembro del S&P 500 ese día, con precio. CIK por el mapa de tickers de HOY de
+  # la SEC (company_tickers.json): un miembro que ya no cotiza no tiene fundamentales.
+  first_date: "2018-01-02"   # un año después del primer cierre de los miembros (2017)
+  returns: total             # con los dividendos sumados en su fecha (§9.1), no de precio
+  horizons_days: [30, 90, 180]
+  # Rejilla DISJUNTA por horizonte: cada fecha empieza donde acabó la anterior. n = número
+  # de periodos, no de empresas — las empresas de una misma fecha no son independientes.
+  groups: 5                  # quintiles, formados en cada fecha entre las que tienen señal
+  min_names: 50              # una fecha con menos empresas con señal no cuenta
+  # Dos pruebas por señal y horizonte, en cada periodo:
+  #   long   = quintil de arriba − media de todas las empresas con señal (lo que puede usar
+  #            quien solo compra: ¿elegir el primer quintil bate a elegir al azar?)
+  #   spread = quintil de arriba − quintil de abajo (la cifra de la literatura)
+  # p-valor: cambio de signo aleatorio sobre los T periodos (bilateral), 10.000 veces.
+  permutations: 10000
+  seed: 0
+  fdr_alpha: 0.10            # BH sobre las 18 pruebas (3 señales × 3 horizontes × 2)
+  halves_split: "2021-12-31" # estabilidad del signo: 2018-2021 frente a 2022-hoy
+  # Regla de decisión, escrita antes: una señal se considera VALIDADA solo si la prueba
+  # `long` es significativa tras BH a 90 o 180 días, con el signo esperado, y el mismo signo
+  # en las dos mitades. Solo entonces se propone ordenar el cribado por ella; si no, la
+  # columna no se añade como criterio (a lo sumo como dato, dicho así).
+  decision_horizons: [90, 180]
+  decision_test: long
+  calendar_ticker: SPY       # las sesiones del estudio son las de SPY (no los días con huecos)
+
 # --- Ejecución diaria (§3, §8 fase 5) ------------------------------------------------
 # La HORA vive en deploy/equitydash-daily.timer (la lee systemd, no Python). Aquí solo lo
 # que usa run_daily.py.

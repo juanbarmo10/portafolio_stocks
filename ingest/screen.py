@@ -32,7 +32,7 @@ import datetime as dt
 import json
 import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 import requests
@@ -88,6 +88,40 @@ def frame_rows(payload: Mapping[str, Any], metric: str, period: str,
                         "ts": str(row["end"]), "ts_release": TS_RELEASE_UNKNOWN,
                         "value": float(row["val"]), "_preference": preference}
     return out
+
+
+def sic_map(ciks: Iterable[str], path: Path, *, base_url: str, user_agent: str,
+            delay_s: float, failures: list[str]) -> dict[str, list[Any]]:
+    """``{cik: [sic, description, fetched_iso]}`` from the SEC submissions, cached in
+    ``path`` and fetched again only after ``SIC_REFRESH_DAYS``. A failed company is
+    appended to ``failures`` and left out, never guessed. Shared with the factor study."""
+    cached: dict[str, list[Any]] = {}
+    if path.exists():
+        cached = json.loads(path.read_text(encoding="utf-8"))
+    cutoff = (dt.date.today() - dt.timedelta(days=SIC_REFRESH_DAYS)).isoformat()
+    wanted = set(ciks)
+    stale = sorted(c for c in wanted if c not in cached or cached[c][2] < cutoff)
+    for i, cik in enumerate(stale):
+        url = SUBMISSIONS_URL.format(base=base_url, cik=cik)
+        try:
+            response = retry(lambda u=url: requests.get(
+                u, headers={"User-Agent": user_agent}, timeout=60),
+                exceptions=(requests.RequestException,))
+            response.raise_for_status()
+            body = response.json()
+            cached[cik] = [str(body.get("sic") or "") or None,
+                           body.get("sicDescription") or None, dt.date.today().isoformat()]
+        except Exception as exc:  # noqa: BLE001 — one company must not sink the run
+            failures.append(f"SIC {cik}: {exc}")
+        time.sleep(delay_s)
+        if i % 100 == 99:   # progress survives an interruption
+            path.write_text(json.dumps(cached), encoding="utf-8")
+    if stale:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cached), encoding="utf-8")
+        log.info("SIC fetched for %d compan(ies); %d from cache.", len(stale),
+                 len(wanted) - len(stale), extra={"source": SOURCE})
+    return cached
 
 
 class ScreenIngester(Ingester):
@@ -169,32 +203,9 @@ class ScreenIngester(Ingester):
 
     def _sic_map(self, ciks: set[str]) -> dict[str, list[Any]]:
         """``{cik: [sic, description, fetched_iso]}``, fetching only what is missing or old."""
-        cached: dict[str, list[Any]] = {}
-        if self._sic_path.exists():
-            cached = json.loads(self._sic_path.read_text(encoding="utf-8"))
-        cutoff = (dt.date.today() - dt.timedelta(days=SIC_REFRESH_DAYS)).isoformat()
-        stale = sorted(c for c in ciks if c not in cached or cached[c][2] < cutoff)
-        for i, cik in enumerate(stale):
-            url = SUBMISSIONS_URL.format(base=self._base_url, cik=cik)
-            try:
-                response = retry(lambda u=url: requests.get(
-                    u, headers={"User-Agent": self._user_agent}, timeout=60),
-                    exceptions=(requests.RequestException,))
-                response.raise_for_status()
-                body = response.json()
-                cached[cik] = [str(body.get("sic") or "") or None,
-                               body.get("sicDescription") or None, dt.date.today().isoformat()]
-            except Exception as exc:  # noqa: BLE001 — one company must not sink the screen
-                self._failures.append(f"SIC {cik}: {exc}")
-            time.sleep(self._delay_s)
-            if i % 100 == 99:   # progress survives an interruption
-                self._sic_path.write_text(json.dumps(cached), encoding="utf-8")
-        if stale:
-            self._sic_path.parent.mkdir(parents=True, exist_ok=True)
-            self._sic_path.write_text(json.dumps(cached), encoding="utf-8")
-            log.info("SIC fetched for %d compan(ies); %d from cache.", len(stale),
-                     len(ciks) - len(stale), extra={"source": SOURCE})
-        return cached
+        return sic_map(ciks, self._sic_path, base_url=self._base_url,
+                       user_agent=self._user_agent, delay_s=self._delay_s,
+                       failures=self._failures)
 
     def fetch(self) -> pd.DataFrame:
         if self._skip_reason:

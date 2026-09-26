@@ -8,6 +8,7 @@ Usage:
     python run_validation.py                    # print the report
     python run_validation.py --out informe.md   # also write it to a file
     python run_validation.py --insiders         # the insider-purchase study
+    python run_validation.py --factors          # quality, accruals and momentum
 """
 
 from __future__ import annotations
@@ -32,12 +33,18 @@ def main(argv: list[str] | None = None) -> int:
                         help="Run the brake study (RESEARCH.md §2.30) instead of the battery.")
     parser.add_argument("--insiders", action="store_true",
                         help="Run the insider-purchase study (settings.yaml insider_study).")
+    parser.add_argument("--factors", action="store_true",
+                        help="Run the factor study (settings.yaml factor_study).")
+    parser.add_argument("--refresh", action="store_true",
+                        help="With --factors: download the members' companyfacts again.")
     args = parser.parse_args(argv)
 
     settings = load_settings()
     configure_logging(settings.log_level, settings.secrets.values())
     if args.insiders:
         return insider_study(settings, args.out)
+    if args.factors:
+        return factor_study(settings, args.out, refresh=args.refresh)
     level2 = settings.raw["panel"]["level2"]
     cfg = settings.raw.get("validation", {})
 
@@ -124,6 +131,80 @@ def insider_study(settings, out: str | None) -> int:
         conn.close()
     outcome = study.study(purchases, closes, actions, intervals, cfg)
     text = study.report(outcome, cfg, date.today().isoformat())
+    print(text)
+    if out:
+        with open(out, "w", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    return 0
+
+
+def factor_study(settings, out: str | None, *, refresh: bool = False) -> int:
+    """Download what is missing (companyfacts subsets, SIC codes), run the pre-registered
+    study once, report."""
+    import datetime as dt  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import pandas as pd  # noqa: PLC0415
+    import requests  # noqa: PLC0415
+
+    from ingest import member_facts  # noqa: PLC0415
+    from ingest.screen import sic_map  # noqa: PLC0415
+    from ingest.sec_filings import normalize_ticker, ticker_map  # noqa: PLC0415
+    from validation import factors as study  # noqa: PLC0415
+
+    cfg = settings.raw["factor_study"]
+    sec = settings.source("sec")
+    agent = settings.secret(str(sec.get("user_agent_env", "SEC_USER_AGENT")))
+    if not agent:
+        log.error("SEC_USER_AGENT is not set: the SEC refuses anonymous requests.")
+        return 1
+    base_url = str(sec.get("base_url", "https://data.sec.gov")).rstrip("/")
+    delay_s = 1.0 / float(sec.get("rate_limit_rps", 8) or 8)
+    cache = Path(str(sec.get("cache_dir", ".cache/sec")))
+    concepts = {m: sec["concepts"][m] for m in study.METRICS}
+    tags = sorted({t for spec in concepts.values() for t in spec["tags"]})
+
+    lookback = int(cfg["signals"]["momentum"]["lookback_days"])
+    since = (pd.Timestamp(cfg["first_date"]) - pd.Timedelta(days=lookback)).date().isoformat()
+    conn = open_connection(settings.db_path)
+    try:
+        intervals = read_table(conn, "universe_membership")
+        touching = intervals[intervals["end_date"].isna()
+                             | (intervals["end_date"].astype(str) > since)]
+        tickers = sorted(set(touching["ticker"]))
+        closes = read_observations(conn, series_ids=[f"{t}:close_raw" for t in tickers]
+                                   + [f"{cfg['calendar_ticker']}:close_raw"])
+        actions = read_table(conn, "corporate_actions")
+    finally:
+        conn.close()
+    priced = sorted({s.rsplit(":", 1)[0] for s in closes["series_id"].unique()}
+                    - {str(cfg["calendar_ticker"])})
+
+    response = requests.get(str(sec.get("ticker_map_url")), headers={"User-Agent": agent},
+                            timeout=60)
+    response.raise_for_status()
+    mapping = ticker_map(response.json())
+    cik_of = {t: mapping[normalize_ticker(t)] for t in priced
+              if normalize_ticker(t) in mapping}
+    ciks = sorted(set(cik_of.values()))
+    log.info("Factor study: %d priced members, %d with a CIK today.", len(priced), len(cik_of))
+
+    failures: list[str] = []
+    sics = {cik: row[0] for cik, row in sic_map(
+        ciks, cache / "sic_map.json", base_url=base_url, user_agent=agent, delay_s=delay_s,
+        failures=failures).items() if cik in set(ciks)}
+    facts, fact_failures = member_facts.load_all(
+        ciks, tags, cache / "member_facts", base_url=base_url, user_agent=agent,
+        delay_s=delay_s, refresh=refresh)
+    failures += fact_failures
+    for failure in failures:
+        log.warning("Left out of the study: %s", failure)
+
+    outcome = study.study(facts, cik_of, sics, closes, actions, intervals, concepts,
+                          sec["duration_windows"], cfg, dt.date.today().isoformat())
+    text = study.report(outcome, cfg, dt.date.today().isoformat())
+    if failures:
+        text += f"\n- Empresas que no se pudieron descargar: {len(failures)} (fuera del estudio)."
     print(text)
     if out:
         with open(out, "w", encoding="utf-8") as handle:

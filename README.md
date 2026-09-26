@@ -306,6 +306,7 @@ python run_alerts.py --dry-run       # enseña qué dispararía, sin enviar ni r
 python run_alerts.py --test-message  # comprueba la configuración del bot
 python run_validation.py             # informe de validación del semáforo (reproducible)
 python run_validation.py --insiders  # estudio de compras de directivos
+python run_validation.py --factors   # calidad, devengos y momentum en el S&P 500
 ```
 
 Para ejecutarlo todo cada día (ingesta y luego alertas, aunque la ingesta falle) hay un
@@ -497,6 +498,22 @@ compran después de caídas fuertes (12-14 puntos peor que el índice en los tre
 la debilidad sigue. La señal no se enseña, y tampoco se convierte en señal de venta: sería una
 hipótesis nueva elegida después de ver los datos. Las empresas pequeñas, donde la literatura
 sitúa el efecto, quedan sin probar.
+
+### Calidad, devengos y momentum: tampoco pasan en el S&P 500
+
+Tres de las anomalías más citadas que se pueden calcular con datos gratuitos — rentabilidad
+bruta sobre activos (Novy-Marx), devengos (Sloan) y momentum 12-1 — se probaron antes de dejar
+que el cribado ordene por ellas. Protocolo escrito antes de descargar nada; fundamentales de
+`companyfacts` tal como estaban **presentados** en cada fecha (la API `frames` no sirve para
+esto: no trae fecha de presentación y devuelve la última versión de cada periodo); miembros del
+S&P 500 de cada fecha desde 2018; quintiles en periodos que no se solapan, con la muestra
+contada en periodos y no en empresas; corrección por las 18 pruebas.
+
+Ninguna pasa. La rentabilidad bruta y el momentum cambian de signo entre 2018-2021 y
+2022-2026. Los devengos bajos son lo único consistente —el primer quintil batió al índice en
+todos los horizontes y en las dos mitades, +1 punto por trimestre— pero no superan la
+corrección por comparaciones múltiples y se debilitan con el tiempo. El cribado no ordena por
+ninguna.
 
 ## Licencia
 

@@ -82,6 +82,28 @@ def permutation_pvalue(
     return (extreme + 1) / (n + 1)
 
 
+def sign_flip_pvalue(values: Sequence[float], *, n: int = 10_000, seed: int = 0
+                     ) -> float | None:
+    """Two-sided randomization p-value that the mean of ``values`` is zero.
+
+    For a sample of per-period differences (a long-short return, one per period): under
+    "no effect" each period's value is as likely to come out positive as negative, so the
+    signs are flipped at random ``n`` times and the p-value is the share of flips whose
+    absolute mean reaches the observed one (+1 correction, as above). The sample is the
+    periods, not the stocks inside them — those share the market's move on the same dates.
+    ``None`` when empty.
+    """
+    x = np.asarray(values, dtype=float)
+    if x.size == 0:
+        return None
+    observed = abs(x.mean())
+    rng = np.random.default_rng(seed)
+    signs = rng.choice(np.array([-1.0, 1.0]), size=(n, x.size))
+    means = np.abs((signs * x).mean(axis=1))
+    extreme = int((means >= observed - 1e-12).sum())
+    return (extreme + 1) / (n + 1)
+
+
 def benjamini_hochberg(pvalues: Sequence[float], alpha: float = 0.10) -> list[tuple[float, bool]]:
     """Benjamini-Hochberg over a family of p-values: ``(qvalue, significant)`` per input.
 
