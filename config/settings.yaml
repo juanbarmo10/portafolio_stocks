@@ -184,6 +184,15 @@ sources:
         kind: average
         unit: shares
         tags: [WeightedAverageNumberOfDilutedSharesOutstanding]
+      # ⚠️ Con PÉRDIDA, las diluidas se igualan a las básicas por norma (ASC 260: incluir
+      # opciones y convertibles "reduciría" la pérdida por acción). La serie diluida SALTA
+      # cada vez que la empresa pasa de ganar a perder: HIMS de 258 M a 228 M en 2026 sin
+      # recomprar nada. La básica (acciones en circulación, de media) no salta: es la que
+      # mide la emisión a lo largo del tiempo (transform/per_share.py, §9.15). 2026-09-25.
+      basic_shares:
+        kind: average
+        unit: shares
+        tags: [WeightedAverageNumberOfSharesOutstandingBasic]
       issuance:                   # emisión: lo que hay que restar a la recompra bruta (§2)
         kind: duration
         unit: USD
@@ -710,6 +719,13 @@ panel:
   # settings.local.yaml (`journal`); aquí solo cómo se emparejan con las operaciones.
   journal:
     tolerance_days: 3            # la nota puede escribirse la víspera o unos días después
+  # Crecimiento por acción (Empresa §5, transform/per_share.py). Un salto de más de
+  # jump_threshold en el recuento entre dos periodos es una salida a bolsa, un SPAC o una
+  # fusión, no dilución: la ventana que lo cruza queda sin cifra por acción. Medido:
+  # HIMS +333 %, DUOL +124 %, NAUT +125 % (salidas a bolsa); IBRX +32 % (emisión real).
+  per_share:
+    horizons: [3, 5]
+    jump_threshold: 0.5
   # Espejo de conducta (📓 Diario, transform/behavior.py). min_holding_days es el
   # horizonte mínimo del plan (§1: "trimestres a años" → un trimestre); cámbialo si escribes
   # otro en tu política.

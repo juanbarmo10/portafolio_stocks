@@ -38,7 +38,7 @@ from transform import fundamentals as fun
 
 # Metrics that are a period average rather than something that accumulates. Summing or
 # subtracting them is always wrong (see the module docstring).
-AVERAGE_METRICS = frozenset({"diluted_shares"})
+AVERAGE_METRICS = frozenset({"diluted_shares", "basic_shares"})
 
 
 @dataclass(frozen=True)

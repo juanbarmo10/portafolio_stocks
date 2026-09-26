@@ -46,7 +46,7 @@ THREE_QUARTERS = "ytd3"  # cumulative, three quarters in
 # one is not a quarter's share count, it is nothing at all. Defined here rather than in
 # value_accrual because this is the layer that does the arithmetic and therefore the layer
 # that has to refuse (section 9.11).
-AVERAGE_METRICS = frozenset({"diluted_shares"})
+AVERAGE_METRICS = frozenset({"diluted_shares", "basic_shares"})
 
 # A fiscal quarter is ~91 days. Anything outside this is a gap in the data, a fiscal-year
 # change, or a company that reports on a different calendar — never something to smooth over.

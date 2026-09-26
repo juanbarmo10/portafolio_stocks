@@ -191,7 +191,7 @@ mover la entrada y completarla.
 
 ## Convenciones contables que el panel implementa
 
-Tres reconstrucciones que un panel ingenuo hace mal, y en las tres el resultado equivocado
+Cuatro reconstrucciones que un panel ingenuo hace mal, y en las cuatro el resultado equivocado
 es **plausible a la vista** — que es lo que las hace peligrosas.
 
 **No existe el 10-Q del cuarto trimestre.** El Q4 solo aparece dentro del 10-K, así que un
@@ -212,6 +212,13 @@ trae el acumulado.
 llega como concepto de duración, pero es un promedio del periodo: sumar cuatro trimestres
 lo multiplica por cuatro y derivar el Q4 restando da un número negativo. La configuración
 las marca `kind: average` y solo se leen por una vía que se niega a sumarlas.
+
+**Con pérdida, las acciones diluidas son las básicas.** Una norma contable (ASC 260) iguala
+las diluidas a las básicas en los periodos con pérdida, así que la serie diluida salta cada
+vez que la empresa cruza entre pérdida y beneficio sin que cambie una acción (una empresa del
+panel pasa de 258 a 228 millones en dos trimestres). El crecimiento por acción usa las
+básicas; con solo diluidas, no compara periodos a distinto lado de cero, y aparta los saltos de
+salidas a bolsa y fusiones, que tampoco son dilución.
 
 Cada derivación se valida contra la realidad, no contra sí misma: se deriva una métrica que
 la empresa **sí** reporta suelta y se compara con lo reportado.

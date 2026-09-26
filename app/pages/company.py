@@ -42,6 +42,7 @@ from app.format import (
 from core.config import load_settings
 from transform import bcb
 from transform import filing_signals as fs
+from transform import per_share
 from transform import fundamentals as fun
 from transform import portfolio as port
 from transform import thesis as th
@@ -831,17 +832,84 @@ st.caption(
     "acción si diluye 35%. Esta sección es el análogo de la vista de unlocks."
 )
 
+PS = dict(settings.raw.get("panel", {}).get("per_share") or {})
+growth_ps = per_share.assess(observations, cik, as_of_iso,
+                             horizons=tuple(PS.get("horizons", (3, 5))),
+                             jump_threshold=float(PS.get("jump_threshold",
+                                                         per_share.JUMP_THRESHOLD)))
+
 row = st.columns(4)
 row[0].metric(
-    "Dilución interanual", pct(accrual.dilution_yoy, decimals=2),
-    help="Positivo = más acciones para la misma empresa. Negativo = el recuento baja.",
+    "Dilución interanual (diluidas)", pct(accrual.dilution_yoy, decimals=2),
+    help="Acciones diluidas medias del ejercicio frente al anterior. Incluye opciones y "
+         "convertibles… solo en los años con beneficio: con pérdida, la norma las iguala a "
+         "las básicas (§9.15), así que salta al cruzar de pérdida a ganancia.",
 )
-row[1].metric("SBC / ingresos", pct(accrual.sbc_over_revenue))
-row[2].metric(
+row[1].metric(
+    "Acciones en circulación, interanual",
+    pct(growth_ps.shares_yoy, decimals=2) if growth_ps.basis == "basic_shares" else MISSING,
+    help="Acciones básicas medias, fechas emparejadas a un año: la emisión real, sin el "
+         "vaivén de las diluidas. Vacía si la empresa no presenta la básica al día.",
+)
+row[2].metric("SBC / ingresos", pct(accrual.sbc_over_revenue))
+row[3].metric(
     "SBC / FCF", pct(accrual.sbc_over_fcf),
     help="Cuánto del efectivo que genera el negocio ya está comprometido con empleados.",
 )
-row[3].metric(
+
+# Growth of the business against growth per share (§2, the gap this page exists for).
+labels_ps = {"revenue": "Ingresos", "fcf": "Flujo de caja libre", "net_income": "Beneficio neto"}
+horizons_ps = sorted({int(y) for y in growth_ps.table["years"]})
+grid_ps = {}
+for metric_ps, label_ps in labels_ps.items():
+    rows_ps = growth_ps.table[growth_ps.table["metric"] == metric_ps].set_index("years")
+    grid_ps[label_ps] = {}
+    for y in horizons_ps:
+        grid_ps[label_ps][f"{y} años · empresa"] = pct(rows_ps.at[y, "total"])
+        grid_ps[label_ps][f"{y} años · por acción"] = pct(rows_ps.at[y, "per_share"])
+grid_ps["Acciones (" + ("básicas" if growth_ps.basis == "basic_shares" else "diluidas") + ")"] = {
+    **{f"{y} años · empresa": pct(growth_ps.shares.get(y)) for y in horizons_ps},
+    **{f"{y} años · por acción": "" for y in horizons_ps}}
+st.markdown("**Crecimiento del negocio frente a crecimiento por acción** — anual compuesto")
+st.dataframe(pd.DataFrame(grid_ps).T.replace({"None": MISSING}), width="stretch")
+notes_ps = []
+if any(growth_ps.jumps.values()):
+    notes_ps.append("Una ventana cruza un **salto de más del 50 % en el recuento** en un solo "
+                    "trimestre (salida a bolsa, SPAC o fusión): antes, las preferentes que "
+                    "luego convierten no cuentan, y comparar daría una dilución que no lo es. "
+                    "Esa ventana queda sin cifra por acción.")
+if any(growth_ps.flips.values()):
+    notes_ps.append("Con el recuento diluido, una ventana **pasa de pérdida a beneficio**: en "
+                    "pérdida las diluidas no cuentan opciones (§9.15), así que no se comparan.")
+st.caption(
+    "Crecimiento compuesto de los doce meses (TTM), emparejando fechas; «por acción» divide "
+    "cada punto por las acciones "
+    + ("**básicas** medias del mismo periodo (las diluidas saltan cuando la empresa cruza de "
+       "pérdida a ganancia)" if growth_ps.basis == "basic_shares" else
+       "**diluidas** medias del mismo periodo (la empresa no presenta la básica al día)")
+    + ". La diferencia entre las dos columnas es el crecimiento que se llevaron los nuevos "
+      "accionistas. Vacío = base negativa o sin historia suficiente: el crecimiento no está "
+      "definido, no es cero. " + " ".join(notes_ps)
+)
+if len(growth_ps.chart) > 2:
+    long_ps = growth_ps.chart.melt("date", var_name="Serie", value_name="valor")
+    long_ps["Serie"] = long_ps["Serie"].map({"total": "Ingresos de la empresa",
+                                             "per_share": "Ingresos por acción"})
+    altair_chart(
+        alt.Chart(long_ps).mark_line(strokeWidth=2).encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y("valor:Q", title="Índice (inicio = 100), escala log.",
+                    scale=alt.Scale(type="log")),
+            color=alt.Color("Serie:N", legend=alt.Legend(orient="top", title=None),
+                            scale=alt.Scale(domain=["Ingresos de la empresa",
+                                                    "Ingresos por acción"],
+                                            range=SERIES_COLORS)),
+        ).properties(height=200),
+        width="stretch",
+    )
+
+row = st.columns(4)
+row[0].metric(
     "ROIC (aprox.)", pct(accrual.roic),
     help="NOPAT sobre capital invertido, con la tasa impositiva OBSERVADA en los filings, "
          "no la estatutaria. Capital invertido = patrimonio + deuda largo plazo − caja.",
