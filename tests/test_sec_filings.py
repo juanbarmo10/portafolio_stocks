@@ -33,7 +33,7 @@ from ingest.sec_filings import (
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "sec_submissions_msft.json"
 CIK = "0000789019"
-FORMS = ["10-K", "10-Q", "8-K", "20-F", "40-F", "DEF 14A", "S-1"]
+FORMS = ["10-K", "10-Q", "8-K", "20-F", "40-F", "DEF 14A", "S-1", "S-3", "424B5", "NT 10-Q"]
 
 
 @pytest.fixture(scope="module")
@@ -358,3 +358,12 @@ def test_an_off_cycle_announcement_does_not_count_as_a_quarter():
     date, method = estimate_next_earnings([{"date": d, "accession": "x"} for d in dates])
     assert date == "2026-11-04"
     assert "año anterior" in method
+
+
+def test_an_8k_keeps_its_item_codes_and_other_forms_do_not(submissions):
+    """The governance signals read them: 4.02 (non-reliance), 3.01 (delisting) and so on."""
+    rows = filing_rows(submissions, CIK, FORMS)
+    eight_k = [r for r in rows if r["form"] == "8-K"]
+    assert eight_k and any(r["items"] and "2.02" in r["items"] for r in eight_k)
+    assert all(r["items"] is None for r in rows if not r["form"].startswith("8-K")), \
+        "an 8-K/A keeps its items too"

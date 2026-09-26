@@ -293,3 +293,37 @@ def test_secrets_are_redacted_before_a_message_leaves(monkeypatch):
 
 def test_redact_leaves_short_values_alone():
     assert redact("chat 42", ["42", ""]) == "chat 42"
+
+
+# --- filing_signal (2026-09-25) --------------------------------------------------------------
+
+BURNER = "0001808805"   # shaped like NAUT: burns cash
+
+
+def _fcf(cik, ocf, capex):
+    rows = []
+    for end in ("2025-12-31", "2026-03-31", "2026-06-30", "2026-09-30"):
+        rows += [{"source": "sec", "series_id": f"{cik}:operating_cash_flow:q", "ts": end,
+                  "ts_release": end, "value": ocf},
+                 {"source": "sec", "series_id": f"{cik}:capex:q", "ts": end,
+                  "ts_release": end, "value": capex}]
+    return rows
+
+
+def test_a_sale_by_a_company_burning_cash_is_a_dilution_warning_and_a_bond_is_not():
+    filings = pd.DataFrame([
+        filing("s1", "424B5", "2026-10-15", cik=BURNER),
+        filing("s2", "424B5", "2026-10-15", cik=TMUS),     # a cash generator: likely debt
+        filing("s3", "NT 10-Q", "2026-10-16", cik=TMUS),   # late: red whatever the cash
+        filing("s4", "424B5", "2026-08-01", cik=BURNER),   # old news
+    ] + [filing("s5", "8-K", "2026-10-17", cik=TMUS) | {"items": "4.02,9.01"}])
+    fundamentals = pd.DataFrame(_fcf(BURNER, -10.0, 2.0) + _fcf(TMUS, 50.0, 10.0))
+    alerts = ar.filing_signal(snap(filings=filings, held={"TMUS": TMUS},
+                                   researched={BURNER: "NAUT"}, fundamentals=fundamentals),
+                              {"lookback_days": 14})
+    texts = sorted(a.text for a in alerts)
+    assert len(alerts) == 3
+    assert any("NAUT" in t and "acciones nuevas" in t for t in texts)
+    assert any("TMUS" in t and "tardía" in t for t in texts)
+    assert any("TMUS" in t and "4.02" in t for t in texts)
+    assert not any("TMUS" in t and "424B5" in t for t in texts), "a bond is not dilution"

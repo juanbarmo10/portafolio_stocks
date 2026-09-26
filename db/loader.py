@@ -46,7 +46,8 @@ OBSERVATION_COLUMNS = ["source", "series_id", "ts", "ts_release", "value"]
 # whether the table carries an ingested_at stamp). Mirrors db/schema.sql.
 COMPANY_COLUMNS = ["cik", "ticker", "name", "sector", "thesis_category", "first_seen", "status",
                    "sic", "sic_description"]
-FILING_COLUMNS = ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url"]
+FILING_COLUMNS = ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url",
+                  "items"]
 CORPORATE_ACTION_COLUMNS = [
     "action_id", "cik", "ticker", "kind", "ex_date", "ratio", "amount", "currency", "source",
 ]
@@ -201,6 +202,8 @@ LATE_COLUMNS: dict[str, dict[str, str]] = {
     "cash_transactions": {"conid": "TEXT"},
     # 2026-09-25: the SEC industry code, for comparing a company with its peers.
     "companies": {"sic": "TEXT", "sic_description": "TEXT"},
+    # 2026-09-25: the 8-K item codes, for the governance signals (4.02, 3.01, 4.01…).
+    "filings": {"items": "TEXT"},
 }
 
 

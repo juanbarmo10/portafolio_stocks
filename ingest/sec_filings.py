@@ -153,6 +153,9 @@ def filing_rows(
             "filed_date": recent["filingDate"][index],
             "is_amended": 1 if form.endswith("/A") else 0,
             "url": _archive_url(cik, accession, recent["primaryDocument"][index]),
+            # 8-K item codes (governance signals read them); None for every other form.
+            "items": ((recent.get("items") or [""] * len(accessions))[index] or None)
+            if base_form == "8-K" else None,
         })
     return rows
 

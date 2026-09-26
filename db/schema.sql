@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS filings (
     period_end  TEXT,
     filed_date  TEXT NOT NULL,
     is_amended  INTEGER DEFAULT 0,          -- 10-K/A, 10-Q/A -> possible restatement (9.6)
-    url         TEXT
+    url         TEXT,
+    items       TEXT                        -- 8-K item codes, e.g. '2.02,9.01' (2026-09-25)
 );
 CREATE INDEX IF NOT EXISTS idx_filings_cik_filed ON filings(cik, filed_date DESC);
 

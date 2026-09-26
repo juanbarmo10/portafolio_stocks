@@ -282,7 +282,8 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
         ["tx_id", "conid", "cik", "ticker", "ts", "kind", "amount", "currency"], "ts",
     ),
     "filings": (
-        ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url"],
+        ["accession", "cik", "form", "period_end", "filed_date", "is_amended", "url",
+         "items"],
         "filed_date",
     ),
     "events": (

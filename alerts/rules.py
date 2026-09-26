@@ -15,6 +15,9 @@ invalidation_crossed   a held company's structured invalidation rule is met
 review_overdue         a written thesis passed its ``review_date``
 exit_ladder_triggered  a held company's structured exit rule is met
 amended_filing         a held company filed an amended 10-K/10-Q → possible restatement
+filing_signal          a held or studied company filed something actionable: late filing,
+                       non-reliance, delisting notice, auditor change, impairment, or a
+                       shelf / sale while burning cash (transform/filing_signals.py)
 (ingest failure)       not a rule: ``run_ingest.py`` raises it from its own failure list
 =====================  ==================================================================
 
@@ -74,6 +77,7 @@ class Snapshot:
     regime_labels: dict[str, str] = field(default_factory=dict)
     earnings_window_days: int = th.EARNINGS_WINDOW_DAYS
     hurdle_rate: float | None = None
+    researched: dict[str, str] = field(default_factory=dict)   # CIK → ticker (studied)
 
     @property
     def today(self) -> str:
@@ -313,6 +317,42 @@ def amended_filing(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
     ]
 
 
+def filing_signal(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
+    """An actionable filing by a held or studied company within ``lookback_days``.
+
+    One alert per filing and signal (keyed on the accession). Cash burn — negative TTM free
+    cash flow from the SEC facts — is what promotes a shelf or a sale to a dilution warning;
+    unknown burn promotes nothing (section 12).
+    """
+    from transform import filing_signals as fs  # noqa: PLC0415
+    from transform import fundamentals as fun  # noqa: PLC0415
+
+    if snap.filings.empty:
+        return []
+    lookback = int(params.get("lookback_days", 14))
+    since = (snap.now - pd.Timedelta(days=lookback)).date().isoformat()
+    companies = {**snap.researched, **{cik: t for t, cik in snap.held.items() if cik}}
+    alerts = []
+    for cik, ticker in sorted(companies.items()):
+        found = fs.signals(snap.filings, cik, since, snap.today)
+        if found.empty:
+            continue
+        fcf = fun.free_cash_flow(snap.fundamentals, cik, snap.today) \
+            if not snap.fundamentals.empty else None
+        for w in fs.warnings(found, None if fcf is None else fcf < 0):
+            accession = next((str(r["accession"]) for r in snap.filings[
+                (snap.filings["cik"] == cik) & (snap.filings["form"] == w.form)
+                & (snap.filings["filed_date"].astype(str).str[:10] == w.date)
+            ].to_dict("records")), f"{w.date}:{w.form}")
+            mark = "🚩" if w.severity == fs.RED else "⚠️"
+            alerts.append(Alert("filing_signal", f"filing_signal:{accession}:{w.text[:20]}", (
+                f"{mark} {ticker} presentó un {w.form} el {w.date}: {w.text}.\n"
+                "Léelo antes de cualquier decisión; el panel no interpreta el documento."
+                + (f"\n{w.url}" if w.url else "")
+            )))
+    return alerts
+
+
 RULES: dict[str, Callable[[Snapshot, Mapping[str, Any]], list[Alert]]] = {
     "macro_release_soon": macro_release_soon,
     "earnings_soon": earnings_soon,
@@ -321,6 +361,7 @@ RULES: dict[str, Callable[[Snapshot, Mapping[str, Any]], list[Alert]]] = {
     "review_overdue": review_overdue,
     "exit_ladder_triggered": exit_ladder_triggered,
     "amended_filing": amended_filing,
+    "filing_signal": filing_signal,
 }
 
 
@@ -425,7 +466,10 @@ def load_snapshot(conn: Any, settings: Settings, now: pd.Timestamp | None = None
     held = {t: by_ticker.get(t) for t in tickers}
 
     tracked = settings.tracked_companies
-    fundamentals = read_observations(conn, source="sec") if tracked else pd.DataFrame()
+    researched = {str(c["cik"]).zfill(10): str(c["ticker"])
+                  for c in settings.researched_companies if c.get("cik") and c.get("ticker")}
+    fundamentals = read_observations(conn, source="sec") if tracked or researched \
+        else pd.DataFrame()
 
     etf_prices = read_observations(
         conn, series_ids=[f"{t}:close_raw" for t in rg.regime_tickers(level2)])
@@ -444,6 +488,7 @@ def load_snapshot(conn: Any, settings: Settings, now: pd.Timestamp | None = None
         regime_labels={} if built is None else {r.key: r.label for r in built.rules},
         earnings_window_days=int(level3.get("earnings_window_days", th.EARNINGS_WINDOW_DAYS)),
         hurdle_rate=level3.get("hurdle_rate"),
+        researched=researched,
     )
 
 

@@ -116,7 +116,14 @@ sources:
     # pedir `10-K` guarda también `10-K/A`, que es justo la interesante (§9.6). Se dejan
     # fuera los Form 4 (transacciones de insiders) porque son cientos al año por empresa
     # y hoy nadie los lee; añadirlos aquí es un cambio de una línea.
-    filing_forms: ["10-K", "10-Q", "8-K", "20-F", "40-F", "DEF 14A", "S-1"]
+    # 2026-09-25, señales de dilución y gobernanza (transform/filing_signals.py): registros
+    # para vender valores (S-3, S-3ASR, F-3, S-1), ventas bajo ellos (424B*), planes de
+    # acciones para empleados (S-8), participaciones ≥ 5 % con intención (13D, con los dos
+    # nombres que usa la SEC) y presentaciones tardías (NT 10-K/Q). Se guardan como hechos;
+    # que signifiquen dilución depende de la empresa (un 424B de AMZN es un bono).
+    filing_forms: ["10-K", "10-Q", "8-K", "20-F", "40-F", "DEF 14A", "S-1", "S-3", "S-3ASR",
+                   "F-3", "424B1", "424B2", "424B3", "424B4", "424B5", "424B7", "424B8",
+                   "S-8", "SC 13D", "SCHEDULE 13D", "NT 10-K", "NT 10-Q"]
     earnings_history: 8        # cuántos anuncios pasados se guardan en `events`
 
     # --- Normalización de taxonomía (§8 fase 2, punto 2) -----------------------------
@@ -742,6 +749,10 @@ alerts:
     # Solo enmiendas recientes: la historia completa está en la página de Empresa, y el
     # 10-Q/A de TMUS de 2020 no es noticia.
     - {kind: amended_filing, lookback_days: 30}
+    # Presentaciones accionables de lo que tienes O estudias: tardía, no-fiabilidad (4.02),
+    # exclusión (3.01), cambio de auditor (4.01), deterioro (2.06), y registro o venta de
+    # valores si la empresa quema caja (acciones nuevas). 14 días: lo anterior no es noticia.
+    - {kind: filing_signal, lookback_days: 14}
   # No es una regla evaluada: la dispara run_ingest.py con su propia lista de fallos. Es
   # la vía por la que llega a Telegram un token de IBKR caducado (§4.1).
   ingest_failure: true

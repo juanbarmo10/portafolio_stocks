@@ -41,6 +41,7 @@ from app.format import (
 )
 from core.config import load_settings
 from transform import bcb
+from transform import filing_signals as fs
 from transform import fundamentals as fun
 from transform import portfolio as port
 from transform import thesis as th
@@ -916,6 +917,33 @@ if status.amended_filings:
         + ". Un `/A` sobre un 10-K o 10-Q significa que la empresa volvió a presentar "
         "cuentas ya publicadas: bandera de gobernanza **para investigar**, no prueba de "
         "reexpresión (§9.6)."
+    )
+
+# What the filings say before the numbers do (transform/filing_signals.py): late filings,
+# non-reliance, delisting notices, auditor changes — and a shelf or sale by a company that
+# burns cash, which is almost always new shares.
+LOOKBACK = int(settings.raw.get("panel", {}).get("level3", {}).get("signal_lookback_days", 365))
+found = fs.signals(filings, cik, pd.Timestamp(as_of_iso) - pd.Timedelta(days=LOOKBACK),
+                   as_of_iso)
+if not found.empty:
+    burns = None if snapshot.fcf_ttm is None else snapshot.fcf_ttm < 0
+    for w in fs.warnings(found, burns):
+        (st.error if w.severity == fs.RED else st.warning)(
+            f"**{w.date} · {w.form}** — {w.text}." + (f" [Documento]({w.url})" if w.url else ""))
+    st.markdown(f"**Señales en las presentaciones** · últimos {LOOKBACK} días")
+    st.dataframe(pd.DataFrame({
+        "Fecha": found["date"], "Formulario": found["form"],
+        "Qué es": found["label"],
+        "Nivel": found["severity"].map({fs.RED: "🔴", fs.YELLOW: "🟡", fs.INFO: "·"}),
+        "Documento": found["url"],
+    }), hide_index=True, width="stretch",
+        column_config={"Documento": st.column_config.LinkColumn(display_text="abrir")})
+    st.caption(
+        "Hechos que registra la SEC el día que llegan. Un registro para vender valores o una "
+        "venta bajo él puede ser deuda (así financian las grandes) o acciones: el panel no lee "
+        "el documento, y solo lo sube a aviso cuando la empresa **quema caja**, que es cuando "
+        "casi siempre son acciones nuevas. Un 13D puede ser un activista o un accionista de "
+        "control; léelo."
     )
 
 calendar_column, filings_column = st.columns([1, 1])
