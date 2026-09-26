@@ -173,6 +173,13 @@ def assert_public(selection: Selection, settings: Settings, held: set[str]) -> N
             leaks.append(f"prices outside the public list {sorted(tickers - allowed)}")
         shorted = {sid.split(":", 1)[0] for sid in obs.loc[obs["source"] == FINRA_SOURCE,
                                                            "series_id"]}
+        # SEC facts of a position held without a card exist locally since 2026-09-25 (the
+        # panel values what is held); publishing them would publish the position.
+        sec_ciks = {sid.split(":", 1)[0] for sid in obs.loc[obs["source"] == "sec",
+                                                            "series_id"]}
+        if sec_ciks - researched_ciks(settings):
+            leaks.append("SEC facts of non-researched companies "
+                         f"{sorted(sec_ciks - researched_ciks(settings))}")
         codes = {sid.split(":", 1)[0] for sid in obs.loc[obs["source"] == BCB_IFDATA,
                                                          "series_id"]}
         if codes - researched_institutions(settings):

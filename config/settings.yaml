@@ -532,6 +532,10 @@ panel:
     # Medido el 2026-09-25: IBRX 254 % (deuda oculta), NAUT 15 %, DUOL 4 % (arrendamientos).
     # No optimizado contra nada: separa dos órdenes de magnitud, no un caso frontera.
     unidentified_debt_share: 0.25
+    # «¿Y al revés?»: la rentabilidad anual que da el precio si el FCF POR ACCIÓN crece a
+    # cada uno de estos ritmos (transform/valuation.implied_return). Escenarios, no previsión;
+    # el tuyo va en la ficha (growth_assumption).
+    return_scenarios: [0.0, 0.05, 0.10, 0.15, 0.20, 0.25]
     # DCF inverso: qué crecimiento del flujo durante `years` justifica el precio. La tasa de
     # descuento es TUYA (§12): se muestra una rejilla, y se marca panel.level3.hurdle_rate si
     # la escribes. El crecimiento terminal es una CONVENCIÓN (≈ crecimiento nominal de largo

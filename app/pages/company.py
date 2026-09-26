@@ -566,6 +566,13 @@ if bcb_institution:
             "los 6-K en IFRS y no debe. Es la mirada del supervisor, que la empresa no elige."
         )
 
+# Growth per share (§5) is also the reference for the implied return (§3): computed once.
+PS = dict(settings.raw.get("panel", {}).get("per_share") or {})
+growth_ps = per_share.assess(observations, cik, as_of_iso,
+                             horizons=tuple(PS.get("horizons", (3, 5))),
+                             jump_threshold=float(PS.get("jump_threshold",
+                                                         per_share.JUMP_THRESHOLD)))
+
 # --- 3. Valuation ---------------------------------------------------------------------
 
 VAL = settings.raw.get("panel", {}).get("valuation", {})
@@ -678,6 +685,40 @@ else:
         "precio ya paga más que tu tesis. La tasa de descuento es tuya (§12): se muestra una "
         "rejilla" + ("" if hurdle is not None or public else
                      " y, si escribes `panel.level3.hurdle_rate`, se marca la tuya") + "."
+    )
+
+    # The other way round (§15.4, point 7): the return the price gives for each growth.
+    st.markdown("**¿Y al revés? Lo que rinde el precio de hoy según cuánto crezca**")
+    scenarios = [float(g) for g in VAL.get("return_scenarios", [0, .05, .10, .15, .20, .25])]
+    mine = card.get("growth_assumption")
+    if mine is not None and float(mine) not in scenarios:
+        scenarios = sorted([*scenarios, float(mine)])
+    grid_r = val.return_grid(now, scenarios, terminal_growth=terminal, years=horizon)
+    st.dataframe(pd.DataFrame({
+        "Crecimiento del FCF por acción, al año": [
+            pct(x.growth, decimals=0) + (" ← tu supuesto" if mine is not None
+                                         and abs(x.growth - float(mine)) < 1e-9 else "")
+            for x in grid_r],
+        "Rentabilidad anual a este precio": [
+            (pct(x.rate) + (" ✓ supera tu tasa" if hurdle is not None and x.rate >= hurdle
+                            else ""))
+            if x.rate is not None else x.note for x in grid_r],
+    }), hide_index=True, width="stretch")
+    past = growth_ps.table.set_index(["metric", "years"])
+    references = []
+    for metric_r, label_r in (("fcf", "FCF"), ("revenue", "ingresos")):
+        value_r = past["per_share"].get((metric_r, 3)) if len(past) else None
+        if value_r is not None and not pd.isna(value_r):
+            references.append(f"{label_r} por acción {pct(value_r)} al año en los últimos 3")
+    st.caption(
+        f"El crecimiento es del FCF **por acción** durante {horizon} años (después "
+        f"{pct(terminal)}): la dilución va dentro, así que si la empresa emite acciones hay "
+        "que restarla. Referencia del pasado, no una previsión: "
+        + ("; ".join(references) if references else "sin historia suficiente") + ". "
+        + ("Tu supuesto viene de `growth_assumption` en la ficha. " if mine is not None else
+           "Escribe tu supuesto en la ficha (`growth_assumption: 0.12`) y se marca. ")
+        + ("" if hurdle is not None else "Sin `hurdle_rate`, no hay con qué compararla: el "
+           f"bono a 10 años rinde {pct(treasury / 100) if treasury is not None else MISSING}.")
     )
 
 # --- 4. The price ------------------------------------------------------------------------
@@ -831,12 +872,6 @@ st.caption(
     "El concepto rector (§2): una empresa puede crecer 30% al año y destruir valor por "
     "acción si diluye 35%. Esta sección es el análogo de la vista de unlocks."
 )
-
-PS = dict(settings.raw.get("panel", {}).get("per_share") or {})
-growth_ps = per_share.assess(observations, cik, as_of_iso,
-                             horizons=tuple(PS.get("horizons", (3, 5))),
-                             jump_threshold=float(PS.get("jump_threshold",
-                                                         per_share.JUMP_THRESHOLD)))
 
 row = st.columns(4)
 row[0].metric(

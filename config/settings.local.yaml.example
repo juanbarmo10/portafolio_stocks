@@ -50,6 +50,10 @@ universe:
   #    # lo que es mecánico. Una regla que nombre una métrica que el panel no calcula
   #    # reporta "no evaluable" — nunca pasa en silencio, que parecería salud.
   #    invalidation_rule: { metric: cash_conversion, operator: "<", threshold: 0.6 }
+  #    # Opcional: el crecimiento anual del FCF POR ACCIÓN que crees para 10 años (fracción:
+  #    # 0.12 = 12 %). Empresa y Desplegar calculan la rentabilidad que da el precio de hoy
+  #    # con él. La dilución va dentro: réstala. También vale en una entrada de watchlist.
+  #    growth_assumption: 0.12
   #    # Reglas de salida (§2 nivel 4): se escriben ANTES de comprar. `trigger` y `action`
   #    # son texto y obligatorios; `rule` es opcional y es lo que la alerta evalúa sola.
   #    # Métricas de `rule`: las de invalidation_rule, más `price` (último cierre CRUDO:

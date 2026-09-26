@@ -201,3 +201,16 @@ def test_a_series_new_to_the_public_copy_goes_up_whole(local):
                     published_series=published | {"OLD", f"{HIMS}:short_term_investments"})
     kept = set(zip(sel.observations["series_id"], sel.observations["ts"].str[:10]))
     assert ("OLD", "2010-01-01") not in kept, "a published series stays incremental"
+
+
+
+def test_the_guard_refuses_sec_facts_of_a_position_held_without_a_card(local):
+    """The panel downloads the fundamentals of held positions to value them; the public copy
+    must not carry them — they would name the position."""
+    settings = settings_with_watchlist()
+    sel = ps.select(local, settings)
+    assert not sel.observations["series_id"].str.startswith(TMUS).any()
+    sel.observations = pd.concat([sel.observations,
+                                  pd.DataFrame([obs("sec", f"{TMUS}:revenue:q")])])
+    with pytest.raises(RuntimeError, match="SEC facts of non-researched"):
+        ps.assert_public(sel, settings, held={"TMUS"})

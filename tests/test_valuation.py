@@ -146,3 +146,27 @@ def test_leases_alone_do_not_hide_debt():
     leases = _bases(assets=160.0, liabilities=40.0, liabilities_current=16.0)
     v = val.combine(leases, _close(), [], "X", "2025-06-02")
     assert not v.debt_unidentified and v.enterprise_value == pytest.approx(950.0)
+
+
+# --- Implied return (§15.4, point 7) ---------------------------------------------------------
+
+
+def test_the_implied_return_is_the_mirror_of_the_implied_growth():
+    """Growth implied at 10 %, fed back in, returns 10 %."""
+    growth = val.implied_growth(1000.0, 30.0, 0.10, terminal_growth=0.025, years=10).growth
+    back = val.implied_return(1000.0, 30.0, growth, terminal_growth=0.025, years=10)
+    assert back.rate == pytest.approx(0.10, abs=1e-6)
+
+
+def test_more_growth_or_a_lower_price_returns_more():
+    slow = val.implied_return(1000.0, 30.0, 0.05).rate
+    fast = val.implied_return(1000.0, 30.0, 0.15).rate
+    cheap = val.implied_return(500.0, 30.0, 0.05).rate
+    assert fast > slow and cheap > slow
+
+
+def test_the_implied_return_refuses_what_it_cannot_answer():
+    assert "negativo" in val.implied_return(1000.0, -5.0, 0.10).note
+    assert val.implied_return(None, 5.0, 0.10).rate is None
+    assert "más de" in val.implied_return(1.0, 100.0, 0.20).note, "absurdly cheap"
+    assert "terminal" in val.implied_return(1e12, 1.0, 0.0).note, "absurdly expensive"

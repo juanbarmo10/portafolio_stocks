@@ -322,3 +322,14 @@ def valuation_view(cik: str, ticker: str, as_of_iso: str, years: int, mtime: flo
     dates = [*pd.date_range(end - pd.DateOffset(years=years), end, freq="ME"), end]
     return now, val.history(obs, prices, actions, cik, ticker, dates,
                             unidentified_debt_share=share)
+
+
+@st.cache_data(show_spinner=False)
+def valuation_now(cik: str, ticker: str, as_of_iso: str, mtime: float):
+    """Today's valuation only — no history — for tables that compare several companies."""
+    from transform import valuation as val  # noqa: PLC0415
+
+    share = float(load_settings().raw.get("panel", {}).get("valuation", {})
+                  .get("unidentified_debt_share", val.UNIDENTIFIED_DEBT_SHARE))
+    return val.assess(sec_observations(), prices_for([ticker]), corporate_actions(), cik,
+                      ticker, as_of_iso, unidentified_debt_share=share)

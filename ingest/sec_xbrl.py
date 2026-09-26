@@ -52,7 +52,7 @@ import requests
 
 from core.config import Settings
 from core.logging_setup import get_logger
-from ingest.base import Ingester, empty_observations, retry
+from ingest.base import Ingester, empty_observations, held_tickers, retry
 
 log = get_logger(__name__)
 
@@ -217,6 +217,29 @@ class SecXbrlIngester(Ingester):
             if cik:
                 out.append((str(cik).zfill(10), str(ticker)))
         return out
+
+    def attach_database(self, conn: Any) -> None:
+        """Add the held positions no card names, resolved through the ``companies`` registry
+        (written by ``sec_filings`` from the SEC ticker map). A position is the company the
+        panel most needs to value (Desplegar, Cartera); until 2026-09-25 TMUS and UBER had
+        no fundamentals because only researched cards were fetched. A held ticker the
+        registry does not know yet is simply left for the next run, never guessed."""
+        held = held_tickers(conn)
+        if not held:
+            return
+        try:
+            rows = conn.execute(
+                "SELECT cik, ticker FROM companies WHERE ticker IN ("
+                + ", ".join("?" for _ in held) + ")", list(held)).fetchall()
+        except Exception as exc:  # noqa: BLE001 — a fresh database has no registry yet
+            log.debug("No companies registry: %s", exc)
+            return
+        known = {cik for cik, _ in self._companies}
+        for cik, ticker in rows:
+            cik = str(cik).zfill(10)
+            if cik not in known:
+                self._companies.append((cik, str(ticker)))
+                known.add(cik)
 
     @staticmethod
     def is_available(settings: Settings) -> bool:

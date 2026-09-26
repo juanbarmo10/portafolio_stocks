@@ -21,6 +21,7 @@ from app.format import MISSING, money, number, pct
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
 from transform import funding as fx
+from transform import per_share
 from transform import portfolio as port
 from transform import regime as rg
 from transform import valuation as val
@@ -137,6 +138,57 @@ st.subheader("3 · ¿Qué, y a qué precio?")
 cards = {str(c["ticker"]): c for c in settings.researched_companies if c.get("ticker")}
 candidates = sorted(set(cards) | (set(positions["ticker"]) if not positions.empty else set())
                     | set(targets))
+if candidates:
+    # Every candidate on one scale (§15.4, point 7): the return the price gives today if free
+    # cash flow per share grows at a given rate — the same question for all of them.
+    VALN = settings.raw.get("panel", {}).get("valuation", {})
+    RDCF_ = VALN.get("reverse_dcf", {})
+    hurdle_ = settings.raw.get("panel", {}).get("level3", {}).get("hurdle_rate")
+    today_iso_ = today.date().isoformat()
+    observations_ = app_data.sec_observations()
+    scale = []
+    for t in candidates:
+        cik_t = str((cards.get(t) or {}).get("cik") or by_ticker.get(t) or "").zfill(10)
+        v = app_data.valuation_now(cik_t, t, today_iso_, app_data.db_mtime())
+        g = per_share.assess(observations_, cik_t, today_iso_, horizons=(3,))
+        past = g.table.set_index(["metric", "years"])["per_share"]
+        mine = (cards.get(t) or {}).get("growth_assumption")
+        growths = [0.0, 0.10] + ([float(mine)] if mine is not None else [])
+        r = val.return_grid(v, growths, terminal_growth=float(RDCF_.get("terminal_growth", 0.025)),
+                            years=int(RDCF_.get("years", 10)))
+
+        def cell(x, v=v):
+            if x.rate is not None:
+                return pct(x.rate)
+            # No market cap for a company with no SEC figures at all (NU files IFRS).
+            return "sin cifras de la SEC" if v.shares is None and v.fcf_ttm is None else x.note
+
+        scale.append({
+            "Empresa": t + (" · cartera" if not positions.empty
+                            and t in set(positions["ticker"]) else ""),
+            "Rend. FCF": pct(v.fcf_yield),
+            "Acciones/año": pct(g.shares_yoy) if g.basis == "basic_shares" else MISSING,
+            "Ingresos/acción, 3 años": pct(past.get(("revenue", 3))),
+            "Si el FCF/acción no crece": cell(r[0]),
+            "Si crece un 10 %": cell(r[1]),
+            "Con tu supuesto": (f"{cell(r[2])} ({pct(float(mine), decimals=0)})"
+                                if mine is not None else "sin escribir"),
+        })
+    st.markdown("**Todas las candidatas en una misma escala** — rentabilidad anual que da el "
+                "precio de hoy")
+    st.dataframe(pd.DataFrame(scale), hide_index=True, width="stretch")
+    st.caption(
+        "Misma pregunta para todas: si el flujo de caja libre **por acción** crece a ese ritmo "
+        f"{int(RDCF_.get('years', 10))} años (y luego {pct(float(RDCF_.get('terminal_growth', 0.025)))}), "
+        "¿qué rentabilidad anual te da comprar hoy? La dilución va dentro del crecimiento: "
+        "réstale la columna de acciones. «Ingresos/acción» es el pasado, no una previsión. "
+        + (f"Tu tasa exigida: {pct(hurdle_)}." if hurdle_ is not None else
+           "Sin tasa exigida escrita (`panel.level3.hurdle_rate`), la tabla ordena pero no "
+           "decide.")
+        + " Una empresa que quema caja no tiene flujo que crecer: su precio descansa en un "
+          "flujo que aún no existe."
+    )
+
 if not candidates:
     st.caption("Sin empresas en estudio ni posiciones: nada que valorar todavía.")
 else:

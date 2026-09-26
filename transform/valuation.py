@@ -370,3 +370,54 @@ def reverse_dcf(
                               terminal_growth=terminal_growth, years=years) for r in discounts]
         for name, base in bases.items()
     }
+
+
+# --- The other way round: the return a growth path implies (§15.4, point 7) ---------------
+
+
+@dataclass(frozen=True)
+class ImpliedReturn:
+    """The annual return that makes today's market cap equal to the value of a free cash
+    flow **per share** growing at ``growth`` for ``years`` (then ``terminal_growth``).
+
+    The mirror of :class:`ImpliedGrowth`: that one asks what growth the price assumes at
+    your rate; this one asks what return you get for the growth you believe. Growth is per
+    share on purpose — dilution goes inside it, so the base is the FCF as filed (SBC added
+    back) and the cost of the SBC is the dilution the investor has to subtract when choosing
+    ``growth``. ``rate`` is ``None`` with the reason in ``note``.
+    """
+
+    growth: float
+    rate: float | None
+    note: str
+
+
+def implied_return(market_cap: float | None, base: float | None, growth: float, *,
+                   terminal_growth: float = 0.025, years: int = 10,
+                   upper: float = 1.0) -> ImpliedReturn:
+    """Bisection on the rate in ``(terminal_growth, upper]`` (see :class:`ImpliedReturn`)."""
+    if market_cap is None or market_cap <= 0:
+        return ImpliedReturn(growth, None, "sin capitalización")
+    if base is None:
+        return ImpliedReturn(growth, None, "sin FCF")
+    if base <= 0:
+        return ImpliedReturn(growth, None, "FCF negativo: no hay flujo que crezca")
+    low, high = terminal_growth + 1e-6, upper
+    if present_value(base, growth, high, terminal_growth, years) > market_cap:
+        return ImpliedReturn(growth, None, f"más de {upper:.0%}".replace(".", ","))
+    if present_value(base, growth, low, terminal_growth, years) < market_cap:
+        return ImpliedReturn(growth, None, "menos que el crecimiento terminal")
+    for _ in range(200):
+        mid = (low + high) / 2
+        if present_value(base, growth, mid, terminal_growth, years) > market_cap:
+            low = mid
+        else:
+            high = mid
+    return ImpliedReturn(growth, (low + high) / 2, "")
+
+
+def return_grid(valuation: Valuation, growths: Sequence[float], *,
+                terminal_growth: float = 0.025, years: int = 10) -> list[ImpliedReturn]:
+    """:func:`implied_return` for each growth scenario, on the valuation's FCF."""
+    return [implied_return(valuation.market_cap, valuation.fcf_ttm, g,
+                           terminal_growth=terminal_growth, years=years) for g in growths]

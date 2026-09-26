@@ -347,3 +347,24 @@ def test_no_tracked_company_means_an_empty_frame_not_a_crash(tmp_path):
     frame = SecXbrlIngester(settings).fetch()
     assert frame.empty
     assert list(frame.columns) == ["source", "series_id", "ts", "ts_release", "value"]
+
+
+def test_a_held_position_without_a_card_is_fetched_too(tmp_path):
+    """The panel values what is held; TMUS and UBER had no fundamentals until 2026-09-25."""
+    from core import config
+    from db import loader
+    from ingest.sec_xbrl import SecXbrlIngester
+
+    conn = loader.init_db(tmp_path / "held.db")
+    loader.upsert_observations(conn, pd.DataFrame([
+        {"source": "ibkr", "series_id": "NAV:total", "ts": "2026-09-15",
+         "ts_release": "2026-09-15", "value": 100.0},
+        {"source": "ibkr", "series_id": "TMUS:position_qty", "ts": "2026-09-15",
+         "ts_release": "2026-09-15", "value": 1.0}]))
+    loader.upsert_companies(conn, [{"cik": "0001283699", "ticker": "TMUS", "name": "T-Mobile",
+                                    "sector": None, "thesis_category": None,
+                                    "first_seen": "2026-09-15", "status": "active"}])
+    ingester = SecXbrlIngester(config.load_settings())
+    ingester.attach_database(conn)
+    assert ("0001283699", "TMUS") in ingester._companies
+    conn.close()

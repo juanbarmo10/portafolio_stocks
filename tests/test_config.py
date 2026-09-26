@@ -273,3 +273,11 @@ def test_the_panel_sections_keep_their_keys():
     assert {"readings", "charts", "lookback_days", "key_readings"} <= set(panel["level1"])
     assert set(panel["risk"]) == {"window_days", "factor_years", "t_threshold"}
     assert set(panel["journal"]) == {"tolerance_days"}
+
+
+def test_a_growth_assumption_written_as_a_percent_is_refused():
+    """12 instead of 0.12 would read as 1.200 % a year and inflate every return."""
+    assert config.growth_assumption_problem({"growth_assumption": 0.12}) is None
+    assert config.growth_assumption_problem({}) is None
+    assert "0.12 for 12 %" in config.growth_assumption_problem({"growth_assumption": 12})
+    assert "number" in config.growth_assumption_problem({"growth_assumption": "12 %"})

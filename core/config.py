@@ -210,6 +210,9 @@ def validate_theses(companies: list[dict[str, Any]]) -> None:
         problem = _cik_problem(entry["cik"])
         if problem:
             problems.append(f"{entry['ticker']}: {problem}")
+        problem = growth_assumption_problem(entry)
+        if problem:
+            problems.append(f"{entry['ticker']}: {problem}")
     if problems:
         raise ValueError(
             "Incomplete thesis cards in config (CLAUDE.md section 5.2 — a company "
@@ -257,6 +260,20 @@ def _exit_ladder_problems(entry: dict[str, Any], seen: set[str]) -> list[str]:
 WATCHLIST_REQUIRED_FIELDS = ("ticker", "cik")
 
 
+def growth_assumption_problem(entry: dict[str, Any]) -> str | None:
+    """``growth_assumption`` is optional; when written it must be a yearly rate as a fraction
+    (0.12 for 12 %), between −50 % and +100 %. Written as 12 it would read as 1.200 %."""
+    value = entry.get("growth_assumption")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f"growth_assumption must be a number, got {value!r}"
+    if not -0.5 <= float(value) <= 1.0:
+        return (f"growth_assumption {value} is outside −0.5..1.0 — write 0.12 for 12 %, "
+                "not 12")
+    return None
+
+
 def validate_watchlist(
     watchlist: list[dict[str, Any]], tracked: list[dict[str, Any]]
 ) -> None:
@@ -282,6 +299,9 @@ def validate_watchlist(
             problems.append(f"{label}: missing {missing}")
             continue
         problem = _cik_problem(entry["cik"])
+        if problem:
+            problems.append(f"{entry['ticker']}: {problem}")
+        problem = growth_assumption_problem(entry)
         if problem:
             problems.append(f"{entry['ticker']}: {problem}")
 
