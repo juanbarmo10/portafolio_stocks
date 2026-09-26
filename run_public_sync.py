@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Researched companies the cloud does not list yet go up whole (ps.select).
     newcomers: set[str] = set()
+    published_series: set[str] | None = None
     if since is not None and url:
         target = connect_url(url)
         try:
@@ -53,6 +54,14 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             target.close()
         newcomers = ps.researched_ciks(settings) - published
+        target = connect_url(url)
+        try:
+            published_series = {str(r[0]) for r in target.execute(
+                "SELECT DISTINCT series_id FROM observations").fetchall()}
+        except Exception:  # noqa: BLE001 — first run: nothing published yet
+            published_series = set()
+        finally:
+            target.close()
         if newcomers:
             log.info("Public sync: %d new researched compan(ies) sent whole.", len(newcomers))
 
@@ -60,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         readings = ps.constituent_readings(local, settings.raw["panel"]["level2"])
         selection = ps.select(local, settings, since=since, breadth_readings=readings,
-                              newcomers=newcomers)
+                              newcomers=newcomers, published_series=published_series)
         ps.assert_public(selection, settings, held=set(held_tickers(local)))
     finally:
         local.close()

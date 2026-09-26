@@ -90,12 +90,18 @@ def _recent(frame: pd.DataFrame, since: str | None) -> pd.DataFrame:
 
 def select(conn: Any, settings: Settings, *, since: str | None = None,
            breadth_readings: list | None = None,
-           newcomers: set[str] | frozenset[str] = frozenset()) -> Selection:
+           newcomers: set[str] | frozenset[str] = frozenset(),
+           published_series: set[str] | None = None) -> Selection:
     """Everything the public panel reads, from the local database.
 
     ``newcomers``: researched CIKs the public copy does not have yet. Their rows travel
     whole whatever ``since`` says — an incremental run would otherwise publish a company
     added to the watchlist with only its last ten days (found 2026-09-25, adding four).
+
+    ``published_series``: the series the public copy already has. Any other travels whole
+    too — a concept added to the config (short-term investments, 2026-09-25) arrives with
+    years of history, and an incremental run would publish ten days of it. ``None`` skips
+    the check (a full run, or no target to ask).
     """
     ciks = researched_ciks(settings)
     tickers = public_tickers(settings)
@@ -122,6 +128,8 @@ def select(conn: Any, settings: Settings, *, since: str | None = None,
                                  if str(c.get("cik", "")).zfill(10) in newcomers}
     whole = everything["series_id"].str.split(":").str[0].isin(new_keys) \
         if not everything.empty else pd.Series(dtype=bool)
+    if published_series is not None and not everything.empty:
+        whole |= ~everything["series_id"].isin(published_series)
     observations = pd.concat([_recent(everything[~whole], since), everything[whole]],
                              ignore_index=True) if not everything.empty else everything
 

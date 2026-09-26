@@ -184,3 +184,20 @@ def test_supervisory_data_travels_only_for_researched_institutions(local):
                                   pd.DataFrame([obs("bcb_ifdata", "C0084693:equity")])])
     with pytest.raises(RuntimeError, match="supervisory data"):
         ps.assert_public(sel, settings, held={"TMUS"})
+
+
+def test_a_series_new_to_the_public_copy_goes_up_whole(local):
+    """A concept added to the config arrives with years of history; ten days of it would
+    leave the public page computing with half the inputs (EV without the new liquidity)."""
+    loader.upsert_observations(local, pd.DataFrame([
+        obs("sec", f"{HIMS}:short_term_investments", ts="2024-12-31", release="2025-02-20")]))
+    settings = settings_with_watchlist()
+    published = {"VIXCLS", f"{HIMS}:revenue:q", "SPY:close_raw", "HIMS:close_raw"}
+    sel = ps.select(local, settings, since="2026-09-10", published_series=published)
+    kept = set(zip(sel.observations["series_id"], sel.observations["ts"].str[:10]))
+    assert (f"{HIMS}:short_term_investments", "2024-12-31") in kept
+    assert ("OLD", "2010-01-01") in kept, "unpublished series travel whole, OLD included"
+    sel = ps.select(local, settings, since="2026-09-10",
+                    published_series=published | {"OLD", f"{HIMS}:short_term_investments"})
+    kept = set(zip(sel.observations["series_id"], sel.observations["ts"].str[:10]))
+    assert ("OLD", "2010-01-01") not in kept, "a published series stays incremental"
