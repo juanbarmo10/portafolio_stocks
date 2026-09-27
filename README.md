@@ -329,6 +329,21 @@ streamlit run app/main.py                      # vista local, con importes
 PUBLIC_MODE=1 streamlit run app/main.py        # vista pública, sin ninguna cifra absoluta
 ```
 
+O, para tenerlo siempre disponible mientras el equipo esté encendido, como servicio systemd
+de usuario en `http://localhost:8502` (solo en este equipo: escucha en 127.0.0.1, porque la
+vista local enseña la cuenta):
+
+```bash
+./deploy/install_app.sh                        # instala, o reinicia tras cambiar el código
+systemctl --user status equitydash-app         # si está en marcha
+journalctl --user -u equitydash-app            # su registro
+```
+
+El panel en marcha ve cada ingesta nueva sin reiniciarse (la caché se indexa por la versión
+de la base) y guarda solo la versión actual en memoria: una caché que acumulara versiones
+crecería cientos de MB por ingesta en un proceso que corre semanas. Tras cambiar el código
+sí hay que reiniciarlo: Streamlit no recarga los módulos que las páginas importan.
+
 ### Despliegue público
 
 La versión pública corre en **Streamlit Community Cloud** y lee una base **PostgreSQL**

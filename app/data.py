@@ -42,6 +42,9 @@ def database_ready() -> bool:
     return is_postgres() or db_path().exists()
 
 
+_seen_version: float | None = None
+
+
 def db_mtime() -> float:
     """The cache version: a fresh ingest must invalidate every cached read.
 
@@ -50,9 +53,29 @@ def db_mtime() -> float:
     costs one round of queries per hour instead of one per click.
     """
     if is_postgres():
-        return float(int(time.time() // 3600) * 3600)
-    path = db_path()
-    return path.stat().st_mtime if path.exists() else 0.0
+        version = float(int(time.time() // 3600) * 3600)
+    else:
+        path = db_path()
+        version = path.stat().st_mtime if path.exists() else 0.0
+    _forget_older_versions(version)
+    return version
+
+
+def _forget_older_versions(version: float) -> None:
+    """Keep only the current database version in the data cache.
+
+    Every cached reader takes the version as an argument, so a new ingest makes the old
+    entries unreachable — but ``st.cache_data`` keeps them, and the local panel runs for
+    weeks as a service (``deploy/equitydash-app.service.in``). Measured 2026-09-26: the S&P
+    500 members' closes cost ~150-450 MB per version, and three versions took the process
+    from 639 to 1.083 MB. When the version changes the whole data cache is cleared: every
+    cached function in the panel reads the database, so none of it survives a new version
+    anyway. The public app (hourly version on PostgreSQL) gets the same bound.
+    """
+    global _seen_version
+    if _seen_version is not None and version != _seen_version:
+        st.cache_data.clear()
+    _seen_version = version
 
 
 @st.cache_data(show_spinner=False)

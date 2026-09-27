@@ -244,6 +244,32 @@ def test_a_new_ingest_reaches_a_running_panel(app_db):
     assert len(second) == 2, "the cache served the old read after a new ingest"
 
 
+def test_a_new_database_version_drops_the_old_one_from_memory(app_db, monkeypatch):
+    """A panel running for weeks as a service must not keep every past version cached:
+    measured 2026-09-26, three ingests took the process from 639 to 1.083 MB. When the
+    version changes, what was cached under the old one is recomputed, not kept."""
+    import os  # noqa: PLC0415
+
+    monkeypatch.setattr(app_data, "_seen_version", None)
+    calls = []
+
+    @st.cache_data(show_spinner=False)
+    def probe(version: float) -> float:
+        calls.append(version)
+        return version
+
+    loader.init_db(app_db).close()
+    first = app_data.db_mtime()
+    probe(first)
+    probe(first)
+    assert calls == [first], "same version: served from the cache"
+    os.utime(app_db, (first + 60, first + 60))          # an ingest writes the file
+    second = app_data.db_mtime()
+    assert second != first
+    probe(first)
+    assert calls == [first, first], "the old version's entry was dropped, not kept"
+
+
 # --- The landing page summarizes the rest of the checklist (2026-09-25) -----------------
 
 

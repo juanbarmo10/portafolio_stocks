@@ -1,0 +1,17 @@
+[Unit]
+Description=equitydash: panel local (privado, solo en este equipo)
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@
+# 127.0.0.1 y no 0.0.0.0: el panel local enseña la cuenta y la capa fiscal; nadie en la red
+# de la casa debe poder abrirlo. Puerto 8502: el 8501 es de cryptodash.
+# Sin PUBLIC_MODE: es la versión privada. gatherUsageStats false: Streamlit no envía
+# estadísticas de uso de un panel con datos personales.
+ExecStart=@REPO@/.venv/bin/python -m streamlit run app/main.py --server.port 8502 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false
+Restart=always
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=default.target
