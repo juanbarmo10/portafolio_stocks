@@ -19,9 +19,12 @@ the alerts — and must not surface publicly through the company list.
 the ~1.4 M member closes it comes from: the free cloud tier holds ~0.5 GB.
 
 **Incremental.** The first run copies everything (``full=True``); after that, only rows whose
-reference *or* publication date falls within ``lookback_days`` — the second condition is what
-carries a restatement of an old quarter. Small tables are copied whole every time. Nothing is
-ever deleted from the copy.
+reference *or* publication date falls on or after :func:`window_start` — the second condition
+is what carries a restatement of an old quarter. The window starts ``lookback_days`` before the
+**last complete upload** (:func:`last_upload`), not before today: with the computer off for
+three weeks, "the last ten days" would leave the eleven before them out of the copy for good
+(found 2026-09-26). Small tables are copied whole every time. Nothing is ever deleted from the
+copy.
 """
 
 from __future__ import annotations
@@ -80,6 +83,35 @@ def researched_tickers(settings: Settings) -> list[str]:
 
 def researched_ciks(settings: Settings) -> set[str]:
     return {str(c["cik"]).zfill(10) for c in settings.researched_companies if c.get("cik")}
+
+
+def last_upload(target: Any) -> str | None:
+    """When the public copy last received observations: the newest ``ingested_at`` in it.
+
+    ``loader`` stamps ``ingested_at`` at write time and writes all the observations of a run in
+    one transaction, so this is the moment of the last **complete** upload — a run that failed
+    half-way wrote nothing and leaves the previous stamp. Every run re-sends at least its
+    window, so the stamp moves on each successful one. ``None`` when the copy has no rows.
+    """
+    row = target.execute("SELECT MAX(ingested_at) FROM observations").fetchone()
+    return str(row[0]) if row and row[0] else None
+
+
+def window_start(last: str | None, margin_days: int, now: Any = None) -> str | None:
+    """The first reference or publication date an incremental run sends (ISO date).
+
+    ``margin_days`` before the last complete upload — or before now, if the stamp is somehow
+    in the future. The margin carries what arrives late: a price hole filled days later, a
+    figure whose publication date precedes the day it was ingested. ``None`` when nothing was
+    ever uploaded: everything goes.
+    """
+    if last is None:
+        return None
+    stamp = pd.Timestamp(last)
+    stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+    current = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    current = current.tz_localize("UTC") if current.tzinfo is None else current.tz_convert("UTC")
+    return (min(stamp, current) - pd.Timedelta(days=int(margin_days))).date().isoformat()
 
 
 def _recent(frame: pd.DataFrame, since: str | None) -> pd.DataFrame:

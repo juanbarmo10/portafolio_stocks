@@ -214,3 +214,54 @@ def test_the_guard_refuses_sec_facts_of_a_position_held_without_a_card(local):
                                   pd.DataFrame([obs("sec", f"{TMUS}:revenue:q")])])
     with pytest.raises(RuntimeError, match="SEC facts of non-researched"):
         ps.assert_public(sel, settings, held={"TMUS"})
+
+
+# --- The incremental window starts at the last complete upload ---------------------------
+
+
+def test_an_empty_copy_has_no_last_upload_and_sends_everything(tmp_path):
+    target = connect_url(f"sqlite:///{tmp_path / 'public.db'}")
+    try:
+        loader.apply_schema(target)
+        assert ps.last_upload(target) is None
+    finally:
+        target.close()
+    assert ps.window_start(None, 10) is None
+
+
+def test_the_last_upload_is_the_stamp_of_the_last_write(local, tmp_path):
+    sel = ps.select(local, settings_with_watchlist())
+    target = connect_url(f"sqlite:///{tmp_path / 'public.db'}")
+    try:
+        before = pd.Timestamp.now(tz="UTC")
+        ps.write(target, sel)
+        stamp = pd.Timestamp(ps.last_upload(target))
+        assert before <= stamp <= pd.Timestamp.now(tz="UTC")
+    finally:
+        target.close()
+
+
+def test_the_window_counts_back_from_the_last_upload_not_from_today():
+    now = "2026-09-26T12:00:00+00:00"
+    assert ps.window_start("2026-09-25T11:40:00+00:00", 10, now) == "2026-09-15"
+    # Computer off for three weeks: the window reaches back past the gap.
+    assert ps.window_start("2026-09-01T11:40:00+00:00", 10, now) == "2026-08-22"
+    # A stamp in the future (a clock set wrong) never narrows it past today's margin.
+    assert ps.window_start("2027-01-01T00:00:00+00:00", 10, now) == "2026-09-16"
+
+
+def test_after_three_weeks_off_the_days_in_the_gap_still_go_up(tmp_path):
+    """The bug of 2026-09-26: with "the last ten days", closes from 11-21 days ago never
+    reached the copy after a long absence."""
+    conn = loader.init_db(tmp_path / "local.db")
+    try:
+        loader.upsert_observations(conn, pd.DataFrame([
+            obs("yfinance", "SPY:close_raw", ts="2026-09-05"),     # inside the gap
+            obs("yfinance", "SPY:close_raw", ts="2026-08-10"),     # uploaded long ago
+        ]))
+        since = ps.window_start("2026-09-01T11:40:00+00:00", 10, "2026-09-26T12:00:00+00:00")
+        sel = ps.select(conn, settings_with_watchlist(), since=since,
+                        published_series={"SPY:close_raw"})
+        assert list(sel.observations["ts"]) == ["2026-09-05"]
+    finally:
+        conn.close()

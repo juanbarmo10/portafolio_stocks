@@ -337,7 +337,10 @@ La versión pública corre en **Streamlit Community Cloud** y lee una base **Pos
 1. Crea la base y pon su cadena de conexión en `config/.env` como `PUBLIC_DATABASE_URL`
    (no `DATABASE_URL`, que cambiaría la base local).
 2. Primera carga: `python run_public_sync.py --full`. Después la sube sola la ejecución
-   diaria, tras la ingesta y las alertas (`--dry-run` enseña qué se enviaría).
+   diaria, tras la ingesta y las alertas (`--dry-run` enseña qué se enviaría). Cada subida
+   envía lo nuevo desde la **última subida completa** (con 10 días de margen), no desde hoy:
+   con el equipo apagado varias semanas, al volver a encenderlo la copia se pone al día sin
+   huecos.
 3. En Streamlit Cloud: app desde este repositorio, archivo `app/main.py`, Python 3.12, y en
    *Secrets*: `DATABASE_URL = "..."` (la misma cadena) y `PUBLIC_MODE = "1"`.
 

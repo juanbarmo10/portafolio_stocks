@@ -90,3 +90,48 @@ def test_a_foreign_issuers_results_are_the_days_with_several_6ks_on_the_quarter(
                                           "reportDate": period, "accessionNumber": acc}}}
     dates = [row["date"] for row in foreign_earnings_dates(submissions)]
     assert dates == ["2026-08-13", "2026-05-14"]
+
+
+# --- An outage ends the IF.data requests for the run ----------------------------------
+
+
+def ingester_with(get):
+    from core.config import load_settings  # noqa: PLC0415
+    ing = ingest_bcb.BcbIngester(load_settings())
+    ing._get = get
+    return ing
+
+
+def test_an_outage_stops_ifdata_after_the_first_failure_with_one_message():
+    """2026-09-26: sixteen requests answered HTTP 500 one after another, each after its
+    retries. The first one must end IF.data for the run; SGS is another host and still runs."""
+    calls = []
+
+    def get(url, params=None):
+        calls.append(url)
+        if "olinda" in url:
+            raise RuntimeError("500 Server Error")
+        return []
+
+    ing = ingester_with(get)
+    ing.fetch()
+    ifdata_calls = [c for c in calls if "olinda" in c]
+    assert len(ifdata_calls) == 1, "one failed request, not one per quarter and report"
+    assert any("api.bcb.gov.br" in c for c in calls), "the Selic is still asked"
+    failures = ing.partial_failures()
+    assert len(failures) == 1 and "nothing is lost" in failures[0]
+
+
+def test_a_quarter_cut_by_an_outage_is_not_kept_half():
+    """Report 1 of the first quarter answers, report 5 fails: nothing of that quarter is
+    returned, so the next run asks for it whole and writes its release_observed row."""
+    def get(url, params=None):
+        if "olinda" not in url:
+            return []
+        if "Relatorio='1'" in url:
+            return {"value": [{"NomeColuna": "Ativo Total", "Saldo": 10.0}]}
+        raise RuntimeError("500 Server Error")
+
+    ing = ingester_with(get)
+    assert ing._ifdata(dt.date(2026, 9, 26)) == []
+    assert len(ing.partial_failures()) == 1

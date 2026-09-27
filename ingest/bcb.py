@@ -20,6 +20,15 @@ the day it was seen, and the original stays (section 9.6).
 ``Lucro Líquido`` is **accumulated over the semester** (measured: Q2 = S1 − Q1). It is stored
 as filed, under ``net_income_semester``; the quarter is derived in ``transform/``.
 
+**An outage stops the IF.data requests for the run.** On 2026-09-26 at 06:37 all sixteen
+requests (four quarters × four reports) answered HTTP 500 and minutes later the same ones
+answered in a second: the service was down, not the data. Retrying each of them cost ~3
+minutes and filled the failure alert with sixteen copies of one error. Now the first request
+that fails after its retries ends the IF.data part of the run with **one** failure, which still
+reaches the exit code and Telegram. Nothing is lost: every run asks again for the last four
+quarters (all of them while a series was never stored), and a quarter first seen a day later
+only errs late. The SGS host is separate and still asked.
+
 SGS series (the Selic target) are public the day they apply; the target is filled forward
 to the next Copom meeting, so only dates up to the ingest day are stored.
 
@@ -97,6 +106,10 @@ def release_for(series_id: str, quarter_end: dt.date, value: float,
     return derived.isoformat(), False
 
 
+class _Unavailable(RuntimeError):
+    """IF.data failed after its retries: the rest of its requests are skipped this run."""
+
+
 class BcbIngester(Ingester):
     """IF.data for the configured institutions, and the SGS context series."""
 
@@ -140,7 +153,16 @@ class BcbIngester(Ingester):
         return retry(call, exceptions=(requests.RequestException,))
 
     def _ifdata(self, today: dt.date) -> list[dict[str, Any]]:
-        records = []
+        records: list[dict[str, Any]] = []
+        try:
+            self._ifdata_into(records, today)
+        except _Unavailable as down:
+            self._failures.append(
+                f"IF.data unavailable ({down}); stopped for this run, the last four quarters "
+                "are asked again on the next one — nothing is lost")
+        return records
+
+    def _ifdata_into(self, records: list[dict[str, Any]], today: dt.date) -> None:
         for inst in self._institutions:
             code, tipo = str(inst["code"]), str(inst.get("tipo", 1))
             wanted_series = {f"{code}:{key}" for keys in self._reports.values()
@@ -154,32 +176,36 @@ class BcbIngester(Ingester):
             for end in ends:
                 am = f"{end.year}{end.month:02d}"
                 observed_any: bool | None = None
+                # A quarter is kept whole or not at all: cut half-way by an outage, its
+                # `release_observed` row would be missing, and the next run — seeing the
+                # values as known — would never write it.
+                quarter: list[dict[str, Any]] = []
                 for report, wanted in self._reports.items():
                     url = self._ifdata_url + VALUES.format(am=am, tipo=tipo, report=report,
                                                            code=code)
                     try:
                         rows = self._get(url).get("value", [])
-                    except Exception as exc:  # noqa: BLE001 — one report must not sink the rest
-                        log.exception("IF.data %s %s report %s failed.", code, am, report,
-                                      extra={"source": IFDATA_SOURCE})
-                        self._failures.append(f"IF.data {code} {am} {report}: {exc}")
-                        continue
+                    except Exception as exc:  # noqa: BLE001 — one failure ends IF.data here
+                        log.error("IF.data %s %s report %s failed after retries: %s — "
+                                  "stopping IF.data for this run.", code, am, report, exc,
+                                  extra={"source": IFDATA_SOURCE})
+                        raise _Unavailable(f"{code} {am} report {report}: {exc}") from exc
                     for key, value in column_values(rows, wanted).items():
                         series = f"{code}:{key}"
                         release = release_for(series, end, value, self._known, today,
                                               series not in self._seen_series, self._lag)
                         if release is None:
                             continue
-                        records.append({"source": IFDATA_SOURCE, "series_id": series,
+                        quarter.append({"source": IFDATA_SOURCE, "series_id": series,
                                         "ts": end.isoformat(), "ts_release": release[0],
                                         "value": value})
                         observed_any = release[1] if observed_any is None else observed_any
                 if observed_any is not None:
-                    records.append({"source": IFDATA_SOURCE,
+                    quarter.append({"source": IFDATA_SOURCE,
                                     "series_id": f"{code}:release_observed",
-                                    "ts": end.isoformat(), "ts_release": records[-1]["ts_release"],
+                                    "ts": end.isoformat(), "ts_release": quarter[-1]["ts_release"],
                                     "value": 1.0 if observed_any else 0.0})
-        return records
+                records.extend(quarter)
 
     def _sgs_rows(self, today: dt.date) -> list[dict[str, Any]]:
         records = []

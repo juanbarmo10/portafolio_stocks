@@ -917,8 +917,12 @@ orchestration:
 # Decidido por el usuario el 2026-09-24: lo público es mercado y empresas; a la nube no
 # sube NINGÚN dato de la cuenta. La URL de destino es PUBLIC_DATABASE_URL en config/.env.
 public_sync:
-  # Tras la primera carga completa (--full), cada día sube lo que tenga fecha de referencia
-  # O de publicación en estos últimos días — la segunda condición trae las reexpresiones.
+  # Tras la primera carga completa (--full), cada ejecución sube lo que tenga fecha de
+  # referencia O de publicación desde la ÚLTIMA SUBIDA COMPLETA menos este margen — la segunda
+  # condición trae las reexpresiones. Contado desde la última subida y no desde hoy
+  # (2026-09-26): con el PC apagado tres semanas, "los últimos 10 días" dejaba fuera de la
+  # copia los once anteriores para siempre. El margen cubre lo que llega tarde (un hueco de
+  # precios que se rellena días después).
   lookback_days: 10
 
 # --- Cribado trimestral (CLAUDE.md §15.1; ingest/screen.py, app/pages/screen.py) --------

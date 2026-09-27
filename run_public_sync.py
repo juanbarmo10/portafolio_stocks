@@ -1,7 +1,7 @@
 """Upload the public part of the local database to the public deployment (section 8, phase 5).
 
 Usage:
-    python run_public_sync.py           # incremental: rows touched in the last days
+    python run_public_sync.py           # incremental: rows since the last upload (+ margin)
     python run_public_sync.py --full    # everything (first run)
     python run_public_sync.py --dry-run # count what would be sent, send nothing
 
@@ -37,31 +37,29 @@ def main(argv: list[str] | None = None) -> int:
     if not url and not args.dry_run:
         log.warning("PUBLIC_DATABASE_URL is not set; public sync skipped.")
         return 0
-    cfg = settings.raw.get("public_sync", {})
-    since = None if args.full else (
-        pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=int(cfg.get("lookback_days", 10)))
-    ).date().isoformat()
+    margin = int(settings.raw.get("public_sync", {}).get("lookback_days", 10))
+    since: str | None = None
+    if not args.full and not url:
+        # A dry run with no target to ask: the margin before today, only to count.
+        since = ps.window_start(pd.Timestamp.now(tz="UTC").isoformat(), margin)
 
     # Researched companies the cloud does not list yet go up whole (ps.select).
     newcomers: set[str] = set()
     published_series: set[str] | None = None
-    if since is not None and url:
-        target = connect_url(url)
-        try:
-            published = set(read_table(target, "companies")["cik"])
-        except Exception:  # noqa: BLE001 — a first run has no table: everything is new
-            published = set()
-        finally:
-            target.close()
+    if not args.full and url:
+        # One connection per question: on PostgreSQL a failed query (a first run has no
+        # tables) aborts the transaction, and the next question would fail with it.
+        last = _ask(url, ps.last_upload, None)
+        since = ps.window_start(last, margin)
+        if since is None:
+            log.info("Public sync: the copy has no observations yet — sending everything.")
+        else:
+            log.info("Public sync: last complete upload %s; sending rows since %s.",
+                     last, since)
+        published = _ask(url, lambda t: set(read_table(t, "companies")["cik"]), set())
         newcomers = ps.researched_ciks(settings) - published
-        target = connect_url(url)
-        try:
-            published_series = {str(r[0]) for r in target.execute(
-                "SELECT DISTINCT series_id FROM observations").fetchall()}
-        except Exception:  # noqa: BLE001 — first run: nothing published yet
-            published_series = set()
-        finally:
-            target.close()
+        published_series = _ask(url, lambda t: {str(r[0]) for r in t.execute(
+            "SELECT DISTINCT series_id FROM observations").fetchall()}, set())
         if newcomers:
             log.info("Public sync: %d new researched compan(ies) sent whole.", len(newcomers))
 
@@ -76,8 +74,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sizes = {"observations": len(selection.observations),
              **{k: len(v) for k, v in selection.tables.items()}}
+    scope = "full" if since is None else f"since {since}"
     if args.dry_run:
-        log.info("Dry run (%s): would send %s", "full" if args.full else f"since {since}", sizes)
+        log.info("Dry run (%s): would send %s", scope, sizes)
         return 0
 
     target = connect_url(url)
@@ -85,8 +84,20 @@ def main(argv: list[str] | None = None) -> int:
         counts = ps.write(target, selection)
     finally:
         target.close()
-    log.info("Public sync (%s) done: %s", "full" if args.full else f"since {since}", counts)
+    log.info("Public sync (%s) done: %s", scope, counts)
     return 0
+
+
+def _ask(url: str, question, default):
+    """Run one read against the public copy; ``default`` when it fails (a first run has no
+    tables). Every default errs toward sending more — never less."""
+    target = connect_url(url)
+    try:
+        return question(target)
+    except Exception:  # noqa: BLE001 — a first run has no tables: nothing is published yet
+        return default
+    finally:
+        target.close()
 
 
 if __name__ == "__main__":
