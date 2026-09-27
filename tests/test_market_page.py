@@ -261,3 +261,30 @@ def test_advance_decline_diverging_from_the_index_is_said(market_db):
     assert "Avance-descenso" in text and "Divergen" in text
     assert "Máximos − mínimos de 52 semanas" in text
     assert DERIVED_SOURCE
+
+
+def test_the_tile_shows_the_last_valid_reading_not_a_thin_day(market_db):
+    """Since the universe runs weekly (2026-09-25), the days after its run carry only the
+    few members priced daily for other reasons — the tile read "—" and "0,4 %" six days a
+    week. It must show the last reading that is not a hole, and say its date."""
+    from transform.breadth import breadth_series, readings_to_observations
+
+    days = DAYS
+    closes = pd.DataFrame({f"M{i}": np.linspace(100, 150, len(days)) for i in range(9)},
+                          index=days)
+    closes.iloc[-1, 1:] = np.nan                      # the last day: one member of nine
+    intervals = [{"ticker": t, "start_date": "2019-01-01", "end_date": None}
+                 for t in closes.columns]
+    readings = breadth_series(intervals, closes, window=200)
+    assert readings[-1].source_hole, "precondition: the thin day is flagged as a hole"
+    seed(market_db, healthy=True)
+    conn = loader.init_db(market_db)
+    try:
+        loader.upsert_observations(conn, readings_to_observations(readings))
+    finally:
+        conn.close()
+    app = render()
+    tile = next(m for m in app.metric if m.label == "Empresas sobre su media de 200")
+    assert tile.value not in ("—", ""), "the thin day's hole reached the tile"
+    captions = " ".join(c.value for c in app.caption)
+    assert f"Lectura del **{readings[-2].date}**" in captions

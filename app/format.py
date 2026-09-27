@@ -255,8 +255,166 @@ SPANISH_LOCALE = {
 }
 
 
-def altair_chart(chart: Any, **kwargs: Any) -> Any:
-    """``st.altair_chart`` with :data:`SPANISH_LOCALE` configured on the chart itself.
+# --- Chart axes (2026-09-26) -------------------------------------------------------------
+# The date axis mixed years and month names ("2020, julio, 2021, julio") and crowded 27 years
+# into one line. Now months are numbers and the year sits UNDER them — under every January
+# and under the first tick, so the reader never has to guess the year of the left edge:
+#
+#     09    10    11    12    01    02          (monthly or quarterly ticks)
+#     2025                    2026
+#
+# Past ~8 years, only years. Ticks inside a month (a zoomed chart) read day/month.
+_MONTHS_EXPR = (
+    "date(datum.value) != 1"
+    " ? (datum.index == 0 ? [timeFormat(datum.value, '%d/%m'), timeFormat(datum.value, '%Y')]"
+    " : timeFormat(datum.value, '%d/%m'))"
+    " : (month(datum.value) == 0 || datum.index == 0)"
+    " ? [timeFormat(datum.value, '%m'), timeFormat(datum.value, '%Y')]"
+    " : timeFormat(datum.value, '%m')"
+)
+_YEARS_EXPR = (f"(month(datum.value) == 0 && date(datum.value) == 1)"
+               f" ? timeFormat(datum.value, '%Y') : ({_MONTHS_EXPR})")
+
+# A vertical axis title is read by tilting the head; above the plot it reads like a label.
+Y_TITLE = {"titleAngle": 0, "titleAlign": "left", "titleAnchor": "end",
+           "titleBaseline": "bottom", "titleY": -8}
+
+
+def time_axis(start: Any, end: Any, *, zoomable: bool = False) -> dict[str, Any]:
+    """Temporal-axis config for dates spanning ``[start, end]``: the label expression and
+    the ticks — monthly up to ~13 months, quarterly up to 4 years, half-yearly up to 8,
+    then every 1, 2 or 5 years.
+
+    A fixed chart gets an explicit interval: a mere tick *count* lets Vega choose, and it
+    never chooses half-years (between a quarter and a year it takes the year — seen on a
+    4,5-year chart, 2026-09-26). A ``zoomable`` chart gets a count instead, so zooming in
+    brings finer ticks rather than none."""
+    days = (pd.Timestamp(end) - pd.Timestamp(start)).days if start is not None \
+        and end is not None else 0
+    if days <= 0:
+        return {"labelExpr": _MONTHS_EXPR}
+    years = days / 365.25
+    if years <= 400 / 365.25:
+        expr, unit, step, count = _MONTHS_EXPR, "month", 1, days / 30.4
+    elif years <= 4:
+        expr, unit, step, count = _MONTHS_EXPR, "month", 3, years * 3
+    elif years <= 8:
+        # The zoomable count aims at quarters: aiming at half-years, Vega lands on years.
+        expr, unit, step, count = _MONTHS_EXPR, "month", 6, years * 3
+    else:
+        step = 1 if years <= 12 else 2 if years <= 30 else 5
+        expr, unit, count = _YEARS_EXPR, "year", years / step
+    ticks: Any = max(2, round(count)) if zoomable else {"interval": unit, "step": step}
+    return {"labelExpr": expr, "tickCount": ticks}
+
+
+def _zoomable(chart: Any) -> bool:
+    """Whether the chart (or a layer of it) binds its scales to the mouse (``.interactive()``)."""
+    kwds = getattr(chart, "_kwds", {})
+
+    def listed(key: str) -> list:
+        value = kwds.get(key)
+        return value if isinstance(value, list) else []   # absent, or Altair's Undefined
+
+    for param in listed("params"):
+        spec = param.to_dict() if hasattr(param, "to_dict") else param
+        if isinstance(spec, dict) and spec.get("bind") == "scales":
+            return True
+    return any(_zoomable(sub) for group in ("layer", "vconcat", "hconcat", "concat")
+               for sub in listed(group))
+
+
+# Default y labels, with the space the page's text puts before "%" ("40 %", not "40%").
+PERCENT_SPACE_EXPR = "replace(datum.label, '%', ' %')"
+
+
+def amount_axis(max_abs: float | None) -> dict[str, Any]:
+    """Quantitative-axis labels in the page's own scale words when the values are large:
+    ``250 mil M`` instead of ``250.000.000.000`` (same words as :func:`compact_amount`).
+    One unit per chart, chosen by its largest value, so an axis never mixes "M" and
+    "mil M". Below a million, the default labels.
+
+    **Only for values in units** (dollars, reais, shares) — which is why the chart has to
+    ask for it (``amounts=True``). A series published already in millions (the Fed's
+    balance sheet) would read "6,6 M" for 6,6 billones."""
+    if max_abs is None or pd.isna(max_abs):
+        return {"labelExpr": PERCENT_SPACE_EXPR}
+    for limit, word in ((1e12, "bill."), (1e9, "mil M"), (1e6, "M")):
+        if max_abs >= limit:
+            return {"labelExpr": f"datum.value == 0 ? '0' : "
+                                 f"format(datum.value / {limit:.0f}, ',.1~f') + ' {word}'"}
+    return {"labelExpr": PERCENT_SPACE_EXPR}
+
+
+def _field(channel: Any) -> str | None:
+    """The data column behind an encoding channel (``"date:T"`` → ``date``)."""
+    if channel is None or type(channel).__name__ == "UndefinedType":
+        return None
+    if isinstance(channel, str):
+        return channel.split(":")[0]
+    # The stored values, not attribute access: on an Altair channel ``.axis`` or ``.field``
+    # is a method-chaining setter, not the value.
+    kwds = getattr(channel, "_kwds", {})
+    for key in ("shorthand", "field"):
+        value = kwds.get(key)
+        if isinstance(value, str) and value:
+            return value.split(":")[0]
+    return None
+
+
+def _axis_hidden(channel: Any) -> bool:
+    """Whether the channel is drawn with ``axis=None``."""
+    return "axis" in getattr(channel, "_kwds", {}) and channel._kwds["axis"] is None
+
+
+def _views(chart: Any, data: Any = None):
+    """``(data frame, encoding)`` of every view in a chart, layers included."""
+    own = getattr(chart, "data", None)
+    frame = own if isinstance(own, pd.DataFrame) else data
+    encoding = getattr(chart, "encoding", None)
+    if isinstance(frame, pd.DataFrame) and encoding is not None \
+            and type(encoding).__name__ != "UndefinedType":
+        yield frame, encoding
+    for group in ("layer", "vconcat", "hconcat", "concat"):
+        for sub in getattr(chart, group, None) or []:
+            if type(sub).__name__ != "UndefinedType":
+                yield from _views(sub, frame)
+
+
+def axis_ranges(chart: Any) -> tuple[Any, Any, float | None]:
+    """``(first date, last date, largest |y|)`` over the chart's data, for the axes. A y
+    channel drawn without an axis (``axis=None``) does not count."""
+    dates: list[pd.Series] = []
+    largest: float | None = None
+    for frame, encoding in _views(chart):
+        x = _field(getattr(encoding, "x", None))
+        if x in frame.columns:
+            dates.append(pd.to_datetime(frame[x], errors="coerce"))
+        channel = getattr(encoding, "y", None)
+        y = _field(channel)
+        if y in frame.columns and not _axis_hidden(channel):
+            values = pd.to_numeric(frame[y], errors="coerce").abs()
+            if values.notna().any():
+                largest = max(largest or 0.0, float(values.max()))
+    stamps = pd.concat(dates).dropna() if dates else pd.Series(dtype="datetime64[ns]")
+    if stamps.empty:
+        return None, None, largest
+    return stamps.min(), stamps.max(), largest
+
+
+def configured(chart: Any, *, amounts: bool = False) -> Any:
+    """The chart with the Spanish locale and the axis rules above, carried by the chart.
+    ``amounts``: the y values are raw amounts in units — label them with scale words."""
+    start, end, largest = axis_ranges(chart)
+    y_labels = amount_axis(largest) if amounts else {"labelExpr": PERCENT_SPACE_EXPR}
+    return (chart.configure(locale=SPANISH_LOCALE)
+            .configure_axisTemporal(**time_axis(start, end, zoomable=_zoomable(chart)))
+            .configure_axisY(**Y_TITLE, **y_labels))
+
+
+def altair_chart(chart: Any, *, amounts: bool = False, **kwargs: Any) -> Any:
+    """``st.altair_chart`` with :data:`SPANISH_LOCALE` and the axis rules configured on the
+    chart itself (:func:`configured`).
 
     Per chart, not as a global Altair theme: Streamlit swaps the global theme while it
     serializes a chart (under a lock, and only when the active one is the default), so a
@@ -266,4 +424,4 @@ def altair_chart(chart: Any, **kwargs: Any) -> Any:
     """
     import streamlit as st  # noqa: PLC0415 — the format helpers stay importable without it
 
-    return st.altair_chart(chart.configure(locale=SPANISH_LOCALE), **kwargs)
+    return st.altair_chart(configured(chart, amounts=amounts), **kwargs)

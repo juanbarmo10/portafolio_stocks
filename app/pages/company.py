@@ -371,7 +371,7 @@ if not revenue_series.empty:
         )
         .interactive(bind_y=False)
         .properties(height=260),
-        width="stretch",
+        width="stretch", amounts=True,
     )
 
 # Quarter by quarter (§15.1.3): the TTM flattens the trend and the operating leverage,
@@ -544,7 +544,7 @@ if bcb_institution:
                              alt.Tooltip("credit:Q", title="R$", format=",.0f"),
                              alt.Tooltip("basis:N", title="Base")],
                 ).properties(height=200),
-                width="stretch",
+                width="stretch", amounts=True,
             )
         sgs = app_data.observations("bcb_sgs", app_data.db_mtime())
         selic = bcb.series(sgs, "BR:selic_target", as_of_iso)
@@ -647,8 +647,11 @@ else:
             alt.Chart(series.assign(date=pd.to_datetime(series["date"]))).mark_line(
                 strokeWidth=2, color=SERIES_COLORS[0]).encode(
                 x=alt.X("date:T", title=None),
+                # A yield is a fraction (0,057 = 5,7 %); a multiple reads "30×", not "30".
                 y=alt.Y(f"{chosen}:Q", title=MULTIPLE_LABELS[chosen],
-                        scale=alt.Scale(zero=False)),
+                        scale=alt.Scale(zero=False),
+                        axis=alt.Axis(format="%") if chosen == "fcf_yield"
+                        else alt.Axis(labelExpr="datum.label + '×'")),
             ).properties(height=220),
             width="stretch",
         )
@@ -996,13 +999,13 @@ if len(shares) >= 2:
         .mark_line(strokeWidth=2, color=SERIES_COLORS[0], point=True)
         .encode(
             x=alt.X("date:T", title=None, axis=alt.Axis(grid=False)),
-            y=alt.Y("value:Q", title="acciones", scale=alt.Scale(zero=False),
+            y=alt.Y("value:Q", title="Acciones", scale=alt.Scale(zero=False),
                     axis=alt.Axis(grid=True, gridOpacity=0.25)),
             tooltip=[alt.Tooltip("date:T", title="Ejercicio"),
                      alt.Tooltip("value:Q", title="Acciones", format=",.0f")],
         )
         .properties(height=200),
-        width="stretch",
+        width="stretch", amounts=True,
     )
 
 # --- 4. Filings and calendar ----------------------------------------------------------

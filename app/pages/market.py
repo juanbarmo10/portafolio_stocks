@@ -220,20 +220,30 @@ if not readings:
     st.caption("Amplitud por empresas sin calcular todavía." if public else
                "Amplitud por empresas sin calcular: `python run_ingest.py --only universe`.")
 else:
-    last = readings[-1]
+    # The last reading that is not a hole. Since the universe went weekly (2026-09-25) the
+    # days after its run carry only the members priced daily for other reasons — the held
+    # and researched ones, 2 of 503 — and read as holes: showing that one put "—" and
+    # "0,4 % coverage" on the tile six days a week.
+    usable = [r for r in readings if not r.source_hole]
+    last = usable[-1] if usable else readings[-1]
     start = usable_from(readings)
     cols = st.columns(3)
     if last.source_hole:
         cols[0].metric("Empresas sobre su media de 200", MISSING,
                        help="Hueco en la fuente ese día: no dice nada del índice.")
     else:
-        cols[0].metric("Empresas sobre su media de 200", pct(last.breadth))
+        cols[0].metric("Empresas sobre su media de 200", pct(last.breadth),
+                       help=f"Lectura del {last.date}.")
     cols[1].metric("Cobertura", pct(last.coverage),
                    help="Miembros de ese día sobre los que descansa el cálculo.")
     cols[2].metric("Serie fiable desde", start or MISSING)
+    if last.date != readings[-1].date:
+        st.caption(f"Lectura del **{last.date}**: los cierres de los ~500 miembros se "
+                   "descargan una vez por semana; los días posteriores solo traen unos pocos "
+                   "y no cuentan.")
     if not last.meets_threshold:
         st.warning(
-            "La lectura de hoy no llega a la cobertura mínima "
+            f"La lectura del {last.date} no llega a la cobertura mínima "
             f"({pct(B['coverage_threshold'], decimals=0)}): no describe el índice entero."
         )
     series = pd.DataFrame([
@@ -275,7 +285,7 @@ else:
             altair_chart(
                 alt.Chart(ad.assign(date=pd.to_datetime(ad["date"]))).mark_line(color=LINE)
                 .encode(x=alt.X("date:T", title=None),
-                        y=alt.Y("line:Q", title="línea A/D acumulada",
+                        y=alt.Y("line:Q", title="Avance − descenso, acumulado",
                                 scale=alt.Scale(zero=False)))
                 .properties(height=180),
                 width="stretch",
@@ -286,7 +296,7 @@ else:
             altair_chart(
                 alt.Chart(smooth.dropna(subset=["net"])).mark_area(color=LINE, opacity=0.6)
                 .encode(x=alt.X("date:T", title=None),
-                        y=alt.Y("net:Q", title="máximos − mínimos, % (media 10 sesiones)",
+                        y=alt.Y("net:Q", title="Máximos − mínimos, % de miembros (media de 10 sesiones)",
                                 axis=alt.Axis(format="%")))
                 .properties(height=160),
                 width="stretch",
@@ -348,7 +358,7 @@ with st.expander("Las dos gráficas"):
             altair_chart(
                 alt.Chart(ew.assign(date=pd.to_datetime(ew["date"]))).mark_line(color=LINE)
                 .encode(x=alt.X("date:T", title=None),
-                        y=alt.Y("ratio:Q", title="cociente", scale=alt.Scale(zero=False)))
+                        y=alt.Y("ratio:Q", title="RSP / SPY", scale=alt.Scale(zero=False)))
                 .properties(height=200),
                 width="stretch",
             )
@@ -361,7 +371,7 @@ with st.expander("Las dos gráficas"):
             altair_chart(
                 alt.Chart(rot.assign(date=pd.to_datetime(rot["date"]))).mark_line(color=LINE)
                 .encode(x=alt.X("date:T", title=None),
-                        y=alt.Y("rotation:Q", title="base 100", scale=alt.Scale(zero=False)))
+                        y=alt.Y("rotation:Q", title="Base 100", scale=alt.Scale(zero=False)))
                 .properties(height=200),
                 width="stretch",
             )
