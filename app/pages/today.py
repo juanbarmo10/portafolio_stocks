@@ -21,7 +21,8 @@ import streamlit as st
 
 from app import data as app_data
 from app.data import last_ingest, macro_observations
-from app.format import altair_chart, MISSING, number
+from app.format import (BAD, GOOD, MISSING, VERDICT_TONES, altair_chart, color_cells, colored,
+                        number, tone)
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
 from transform import macro
@@ -117,8 +118,10 @@ if view is None:
 else:
     r = view["reading"]
     # verdict_label already carries its icon (it read "🟡 🟡 Mixto" with one added here).
-    regime_state = (f"{rg.verdict_label(r.verdict)} al {r.date}: {r.on} a favor, "
-                    f"{r.off} en contra, {r.neutral} neutros")
+    regime_state = (f"{colored(rg.verdict_label(r.verdict), VERDICT_TONES.get(r.verdict))} "
+                    f"al {r.date}: {colored(f'{r.on} a favor', GOOD if r.on else None)}, "
+                    f"{colored(f'{r.off} en contra', BAD if r.off else None)}, "
+                    f"{r.neutral} neutros")
 researched = settings.researched_companies
 theses = f"{len(settings.tracked_companies)} tesis escritas, " \
          f"{len(settings.watchlist_companies)} empresas en estudio"
@@ -144,6 +147,15 @@ series_ids = [r["series_id"] for r in readings_cfg]
 labels = {r["series_id"]: r.get("label", r["series_id"]) for r in readings_cfg}
 units = {r["series_id"]: r.get("unit") for r in readings_cfg}
 notes = {r["series_id"]: r.get("note") for r in readings_cfg}
+favorable = {r["series_id"]: r.get("favorable") for r in readings_cfg}
+
+
+def change_color(sid: str, change: float | None) -> str | None:
+    """Green when the move favours equities by the regime's own direction, red otherwise;
+    ``None`` for a series without a single good direction (config ``favorable``)."""
+    if favorable.get(sid) not in ("up", "down"):
+        return None
+    return tone(change, higher_is_better=favorable[sid] == "up")
 
 snapshot = macro.snapshot(df, series_ids, as_of, lookback_days=lookback_days)
 def signed(value: float | None) -> str:
@@ -165,7 +177,8 @@ if key_ids:
                    delta=None if reading is None or reading.change is None
                    else f"{'+' if reading.change >= 0 else ''}"
                         f"{number(reading.change, decimals=2)} en {lookback_days} d",
-                   delta_color="off", help=notes.get(sid) or None)
+                   delta_color=(change_color(sid, reading.change) if reading else None)
+                   or "off", help=notes.get(sid) or None)
     st.caption("Qué mirar: el spread de crédito **ensanchándose** es el mejor aviso temprano "
                "de aversión al riesgo; la curva negativa, recesión descontada; el dólar fuerte "
                "y el VIX alto, estrés. El veredicto conjunto está en 📈 Mercado.")
@@ -187,7 +200,8 @@ with st.expander("Las series macro, una por una, y sus gráficas"):
     ])
 
     st.dataframe(
-        table,
+        color_cells(table.style, f"Cambio {lookback_days}d",
+                    [change_color(r.series_id, r.change) for r in snapshot]),
         hide_index=True,
         width="stretch",
         column_config={

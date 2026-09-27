@@ -29,15 +29,22 @@ import streamlit as st
 
 from app import data as app_data
 from app.format import (
-    altair_chart,
+    BAD,
+    CAUTION,
+    GOOD,
     MISSING,
     PUBLIC_NOTE,
+    altair_chart,
+    color_by_sign,
+    color_rows_by_sign,
     compact_amount,
     money,
     number,
     pct,
     quantity,
     reported_amount,
+    tone,
+    verdict_delta,
 )
 from core.config import load_settings
 from transform import bcb
@@ -305,22 +312,36 @@ row = st.columns(4)
 row[0].metric("Ingresos (TTM, USD)", compact_amount(snapshot.revenue_ttm),
               help=reported_amount(snapshot.revenue_ttm))
 row[1].metric("Beneficio neto (TTM, USD)", compact_amount(snapshot.net_income_ttm),
+              **verdict_delta(tone(snapshot.net_income_ttm), "beneficio"
+                              if (snapshot.net_income_ttm or 0) > 0 else "pérdida"),
               help=reported_amount(snapshot.net_income_ttm))
 row[2].metric("Flujo de caja libre (TTM, USD)", compact_amount(snapshot.fcf_ttm),
+              **verdict_delta(tone(snapshot.fcf_ttm), "genera caja"
+                              if (snapshot.fcf_ttm or 0) > 0 else "quema caja"),
               help=reported_amount(snapshot.fcf_ttm))
 row[3].metric(
     "Crecimiento de ingresos",
     pct(snapshot.revenue_growth_yoy),
+    **verdict_delta(tone(snapshot.revenue_growth_yoy), "crece"
+                    if (snapshot.revenue_growth_yoy or 0) > 0 else "decrece"),
     help="TTM contra el TTM de un año antes. Geométrico, nunca media de porcentajes (§9.10).",
 )
 
 row = st.columns(4)
-row[0].metric("Margen operativo", pct(snapshot.operating_margin))
-row[1].metric("Margen neto", pct(snapshot.net_margin))
-row[2].metric("Margen FCF", pct(snapshot.fcf_margin))
+for column, label, value in ((row[0], "Margen operativo", snapshot.operating_margin),
+                             (row[1], "Margen neto", snapshot.net_margin),
+                             (row[2], "Margen FCF", snapshot.fcf_margin)):
+    column.metric(label, pct(value), **verdict_delta(
+        tone(value), "gana dinero" if (value or 0) > 0 else "pierde dinero"))
+# Below 1 is the help's own definition of "part of the profit does not reach cash"; common
+# in heavy-capex companies (MSFT 0,50), so a caution, not a red.
 row[3].metric(
     "Conversión a caja",
-    f"{snapshot.cash_conversion:.2f}" if snapshot.cash_conversion is not None else MISSING,
+    number(snapshot.cash_conversion) if snapshot.cash_conversion is not None else MISSING,
+    **verdict_delta(None if snapshot.cash_conversion is None else
+                    GOOD if snapshot.cash_conversion >= 1 else CAUTION,
+                    "todo llega a caja" if (snapshot.cash_conversion or 0) >= 1
+                    else "parte no llega a caja"),
     help="FCF / beneficio neto. Por debajo de 1, parte del beneficio contable no llega a "
          "la caja — capex, circulante o contabilidad agresiva.",
 )
@@ -399,7 +420,9 @@ if not table.empty:
          for _, key, fmt in shown],
         index=[label for label, _, _ in shown], columns=list(table["quarter_end"]),
     )
-    st.dataframe(grid, width="stretch")
+    st.dataframe(color_rows_by_sign(grid, {
+        "Crecimiento interanual": True, "Margen bruto": True, "Margen operativo": True,
+        "Margen neto": True, "Margen FCF": True}), width="stretch")
     missing = [label for label, key, _ in lines if table[key].isna().all()]
     st.caption(
         "Cada columna es un trimestre tal como se conocía a la fecha elegida; los Q4 y los "
@@ -422,6 +445,8 @@ if sheet.assets is not None:
                        f"{reported_amount(sheet.long_term_debt)}, convertibles incluidos: "
                        "un convertible es deuda y, si convierte, dilución futura.")
     row[2].metric("Caja neta (USD)", compact_amount(sheet.net_cash),
+                  **verdict_delta(tone(sheet.net_cash), "más caja que deuda"
+                                  if (sheet.net_cash or 0) > 0 else "más deuda que caja"),
                   help="Caja e inversiones menos deuda. Negativa = más deuda que caja.")
     row[3].metric("Patrimonio (USD)", compact_amount(sheet.equity),
                   help=f"Activos {reported_amount(sheet.assets)} − pasivos "
@@ -435,6 +460,7 @@ if sheet.assets is not None:
                        "cubre el negocio lo que paga por su deuda. Vacía si no presenta "
                        "intereses o pierde dinero.")
     row[2].metric("Quema de caja (TTM, USD)", compact_amount(sheet.cash_burn_ttm),
+                  **verdict_delta(BAD if sheet.cash_burn_ttm else None, "quema caja"),
                   help="Flujo de caja libre negativo de los últimos cuatro trimestres. Vacía "
                        "si la empresa genera caja.")
     row[3].metric("Autonomía de caja", f"{number(sheet.runway_years, decimals=1)} años"
@@ -781,9 +807,13 @@ else:
     )
     b = pa.behaviour(stock["tr"], views["SPY"]["tr"], as_of_iso, days=365)
     row = st.columns(4)
-    row[0].metric("Rentabilidad 1 año", pct(b.total_return), help="Con dividendos.")
+    row[0].metric("Rentabilidad 1 año", pct(b.total_return), help="Con dividendos.",
+                  **verdict_delta(tone(b.total_return),
+                                  "sube" if (b.total_return or 0) > 0 else "baja"))
     row[1].metric("SPY 1 año", pct(b.benchmark_return))
-    row[2].metric("Diferencia", pct(b.excess))
+    row[2].metric("Diferencia", pct(b.excess),
+                  **verdict_delta(tone(b.excess), "por encima de SPY"
+                                  if (b.excess or 0) > 0 else "por debajo de SPY"))
     row[3].metric("Beta frente a SPY", number(b.beta),
                   help="Cuánto amplifica los movimientos del mercado (1 = igual que el "
                        "índice). Un año de rendimientos diarios.")
@@ -803,12 +833,13 @@ else:
                                       list(confirmed["ts"]) if not confirmed.empty else [])
     if not reactions.empty:
         st.markdown("**Reacción a los resultados**")
-        st.dataframe(pd.DataFrame({
+        st.dataframe(color_by_sign(pd.DataFrame({
             "Resultados": reactions["date"],
             "Movimiento": reactions["move"].map(pct),
             "SPY": reactions["benchmark_move"].map(pct),
             "Por encima de SPY": reactions["excess"].map(pct),
-        }).head(8), hide_index=True, width="stretch")
+        }).head(8), {"Movimiento": True, "Por encima de SPY": True}),
+            hide_index=True, width="stretch")
         typical = pa.typical_reaction(reactions)
         st.caption(
             "Del cierre anterior al 8-K de resultados (item 2.02) al cierre siguiente: la "
@@ -877,8 +908,11 @@ st.caption(
 )
 
 row = st.columns(4)
+# Dilution is the unlock of §2: more shares is red, fewer is green.
 row[0].metric(
     "Dilución interanual (diluidas)", pct(accrual.dilution_yoy, decimals=2),
+    **verdict_delta(tone(accrual.dilution_yoy, higher_is_better=False),
+                    "diluye" if (accrual.dilution_yoy or 0) > 0 else "reduce acciones"),
     help="Acciones diluidas medias del ejercicio frente al anterior. Incluye opciones y "
          "convertibles… solo en los años con beneficio: con pérdida, la norma las iguala a "
          "las básicas (§9.15), así que salta al cruzar de pérdida a ganancia.",
@@ -886,6 +920,9 @@ row[0].metric(
 row[1].metric(
     "Acciones en circulación, interanual",
     pct(growth_ps.shares_yoy, decimals=2) if growth_ps.basis == "basic_shares" else MISSING,
+    **verdict_delta(tone(growth_ps.shares_yoy, higher_is_better=False)
+                    if growth_ps.basis == "basic_shares" else None,
+                    "diluye" if (growth_ps.shares_yoy or 0) > 0 else "reduce acciones"),
     help="Acciones básicas medias, fechas emparejadas a un año: la emisión real, sin el "
          "vaivén de las diluidas. Vacía si la empresa no presenta la básica al día.",
 )
@@ -909,7 +946,10 @@ grid_ps["Acciones (" + ("básicas" if growth_ps.basis == "basic_shares" else "di
     **{f"{y} años · empresa": pct(growth_ps.shares.get(y)) for y in horizons_ps},
     **{f"{y} años · por acción": "" for y in horizons_ps}}
 st.markdown("**Crecimiento del negocio frente a crecimiento por acción** — anual compuesto")
-st.dataframe(pd.DataFrame(grid_ps).T.replace({"None": MISSING}), width="stretch")
+shares_row = [k for k in grid_ps if k.startswith("Acciones")]
+st.dataframe(color_rows_by_sign(pd.DataFrame(grid_ps).T.replace({"None": MISSING}), {
+    **{label: True for label in labels_ps.values()},
+    **{label: False for label in shares_row}}), width="stretch")
 notes_ps = []
 if any(growth_ps.jumps.values()):
     notes_ps.append("Una ventana cruza un **salto de más del 50 % en el recuento** en un solo "
@@ -949,6 +989,8 @@ if len(growth_ps.chart) > 2:
 row = st.columns(4)
 row[0].metric(
     "ROIC (aprox.)", pct(accrual.roic),
+    **verdict_delta(tone(accrual.roic), "crea rentabilidad" if (accrual.roic or 0) > 0
+                    else "destruye capital"),
     help="NOPAT sobre capital invertido, con la tasa impositiva OBSERVADA en los filings, "
          "no la estatutaria. Capital invertido = patrimonio + deuda largo plazo − caja.",
 )
@@ -957,6 +999,9 @@ row = st.columns(4)
 row[0].metric("Recompras brutas (TTM, USD)", compact_amount(accrual.buybacks_ttm),
               help=reported_amount(accrual.buybacks_ttm))
 row[1].metric("Recompras netas (TTM, USD)", compact_amount(accrual.net_buybacks_ttm),
+              **verdict_delta(tone(accrual.net_buybacks_ttm), "devuelve capital"
+                              if (accrual.net_buybacks_ttm or 0) > 0
+                              else "emite más de lo que recompra"),
               help="Recompras − emisión. La bruta engaña si el SBC la anula. "
                    + reported_amount(accrual.net_buybacks_ttm))
 # The count grew for most companies that pay in stock: a tile reading "retired: −21 M"
@@ -965,6 +1010,7 @@ issued = accrual.shares_removed is not None and accrual.shares_removed < 0
 row[2].metric(
     "Acciones emitidas netas (año)" if issued else "Acciones retiradas (año)",
     compact_amount(abs(accrual.shares_removed) if issued else accrual.shares_removed),
+    **verdict_delta(tone(accrual.shares_removed), "diluye" if issued else "recompra"),
     help="Variación del recuento diluido medio en un año. Emitidas netas = la emisión "
          "(SBC, conversiones, ampliaciones) superó a las recompras.",
 )

@@ -656,30 +656,40 @@ panel:
   level1:
     lookback_days: 30          # ventana de la columna "cambio" de la tabla macro
     # Las cuatro que se ven sin desplegar en "Hoy" (§15.2); el resto, en el desplegable.
+    # `favorable`: hacia dónde un movimiento favorece a la renta variable, el MISMO sentido
+    # con que vota el semáforo (spread y VIX abajo, curva arriba, dólar abajo, NFCI abajo).
+    # El panel pinta el cambio en verde o rojo según eso (2026-09-26). Sin la clave, gris:
+    # la subida del 10 años, la inflación o las nóminas no tienen un sentido "bueno" único.
     key_readings: [BAMLH0A0HYM2, T10Y2Y, DTWEXBGS, VIXCLS]
     readings:
       - series_id: BAMLH0A0HYM2
         label: Spread HY (OAS)
+        favorable: down
         unit: pp
         note: histórico solo desde 2023-08 — ventana rodante de FRED por licencia ICE
       - series_id: BAA10Y
         label: Prima crédito Baa − 10a
+        favorable: down
         unit: pp
         note: sustituto del spread HY — serie desde 1986, point-in-time desde 2014
       - series_id: T10Y2Y
         label: Curva 10a − 2a
+        favorable: up
         unit: pp
         note: negativo = curva invertida
       - series_id: NFCI
         label: Condiciones financieras (NFCI)
+        favorable: down
         unit: índice
         note: semanal; negativo = condiciones laxas
       - series_id: DTWEXBGS
         label: Dólar amplio (DXY del panel)
+        favorable: down
         unit: índice
         note: semanal
       - series_id: VIXCLS
         label: VIX
+        favorable: down
         unit: pts
         note: FRED arrastra el cierre anterior en festivos de mercado
       - series_id: DGS10

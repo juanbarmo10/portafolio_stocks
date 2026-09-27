@@ -22,10 +22,14 @@ from app.format import (
     MISSING,
     PORTFOLIO_PUBLIC_NOTE as PUBLIC_NOTE,
     altair_chart,
+    color_by_sign,
+    color_cells,
     money,
     number,
     pct,
     rebase_100,
+    tone,
+    verdict_delta,
 )
 from core.config import load_settings
 from transform import corporate_actions as reorg
@@ -270,7 +274,9 @@ else:
             format="percent", help="Sobre el total: acciones más efectivo."),
     }
 
-st.dataframe(display, hide_index=True, width="stretch", column_config=column_config)
+st.dataframe(color_by_sign(display, {"PnL no realizado": True, "Retorno": True,
+                                     "Retorno no realizado": True}),
+             hide_index=True, width="stretch", column_config=column_config)
 if not public and cash_now is not None and account_total:
     # The weights above add up to 100 % of the shares. Until 2026-09-25 that was the only
     # weight shown, while most of the account was cash — a concentrated-looking portfolio
@@ -435,7 +441,14 @@ if not public:
                 if pd.notna(grid.at[sc, t]) else MISSING for sc in grid.index]
             for t in grid.columns}, index=grid.index)
         st.markdown("**Qué pasaría en cada escenario** — movimiento estimado de cada acción")
-        st.dataframe(shown, width="stretch")
+        # Coloured only where the estimate is not noise: a red "(ruido)" would still alarm.
+        styled = shown.style
+        for t in grid.columns:
+            label = t + (" · cartera" if t in held else "")
+            styled = color_cells(styled, label, [
+                tone(grid.at[sc, t]) if pd.notna(grid.at[sc, t]) and bool(reliable.at[sc, t])
+                else None for sc in grid.index])
+        st.dataframe(styled, width="stretch")
         together = [(sc, [t for t in grid.columns if bool(reliable.at[sc, t])
                           and grid.at[sc, t] < 0]) for sc in grid.index]
         shared = [(sc, ts) for sc, ts in together if len(ts) >= 2 and sc != "mercado −20 %"]
@@ -502,10 +515,13 @@ if perf is None:
 else:
     cols = st.columns(3)
     cols[0].metric("Tu rentabilidad (sin aportes)", pct(perf.twr),
+                   **verdict_delta(tone(perf.twr), "gana" if (perf.twr or 0) > 0 else "pierde"),
                    help="Ponderada en el tiempo: encadena los días quitando cada aporte, así "
                         "que mide las decisiones y no el dinero que entró.")
     cols[1].metric("S&P 500 con dividendos (SPY)", pct(perf.benchmark_return))
     cols[2].metric("Diferencia", pct(perf.excess),
+                   **verdict_delta(tone(perf.excess), "por encima de SPY"
+                                   if (perf.excess or 0) > 0 else "por debajo de SPY"),
                    help="Tu rentabilidad menos la del índice, en esta ventana. Positiva = "
                         "lo batiste; con menos de varios años es sobre todo ruido.")
     long = curves.melt("date", var_name="Serie", value_name="valor")
@@ -536,15 +552,21 @@ else:
     cols = st.columns(3)
     cols[0].metric("TIR (ponderada por el dinero)",
                    pct(mwr.period_return) if mwr else MISSING,
+                   **verdict_delta(tone(mwr.period_return) if mwr else None,
+                                   "gana" if mwr and mwr.period_return > 0 else "pierde"),
                    help="La tasa interna de retorno de tus propios flujos: cuenta cuándo "
                         "entró cada aporte. Sobre la ventana, sin anualizar"
                         + (f"; anualizada, {pct(mwr.annual_rate)}." if mwr else "."))
+    # Positive = what the cash failed to earn next to SPY (a cost); negative = it avoided a loss.
     cols[1].metric("Coste del efectivo frente a SPY", pct(cash_cost),
+                   **verdict_delta(tone(cash_cost, higher_is_better=False),
+                                   "le costó" if (cash_cost or 0) > 0 else "le ahorró"),
                    help="Aproximado: cada día, la parte de la cuenta en efectivo por lo que "
                         "hizo SPY ese día, sumado. Lo que el efectivo dejó de ganar (o evitó "
                         "perder) frente a tenerlo en el índice.")
     rest = None if cash_cost is None else perf.excess + cash_cost
     cols[2].metric("Resto de la diferencia", pct(rest),
+                   **verdict_delta(tone(rest), "suma" if (rest or 0) > 0 else "resta"),
                    help="La diferencia con SPY sin la parte del efectivo: lo que explican las "
                         "acciones elegidas y cuándo se compraron y vendieron. Aproximado.")
     st.caption(
@@ -557,17 +579,21 @@ else:
         attribution = portfolio.position_attribution(trades, cash, valued)
         if not attribution.empty:
             st.markdown("**Qué aportó cada posición**")
-            st.dataframe(pd.DataFrame({
-                "Posición": attribution["ticker"],
-                "Comprado": attribution["bought"],
-                "Vendido": attribution["sold"],
-                "Valor hoy": attribution["market_value"],
-                "Dividendos netos": attribution["income"],
-                "Comisiones": attribution["commissions"],
-                "Resultado": attribution["pnl"],
+            # Rounded to cents like the positions table: "764,455" reads as thousands.
+            cents = attribution.round({c: 2 for c in ("bought", "sold", "market_value",
+                                                      "income", "commissions", "pnl")})
+            st.dataframe(color_by_sign(pd.DataFrame({
+                "Posición": cents["ticker"],
+                "Comprado": cents["bought"],
+                "Vendido": cents["sold"],
+                "Valor hoy": cents["market_value"],
+                "Dividendos netos": cents["income"],
+                "Comisiones": cents["commissions"],
+                "Resultado": cents["pnl"],
                 "Parte del total": attribution["share"],
                 "Historia completa": attribution["complete"],
-            }), hide_index=True, width="stretch", column_config={
+            }), {"Resultado": True, "Parte del total": True}),
+                hide_index=True, width="stretch", column_config={
                 **{c: st.column_config.NumberColumn(format="localized")
                    for c in ("Comprado", "Vendido", "Valor hoy", "Dividendos netos",
                              "Comisiones", "Resultado")},
@@ -596,8 +622,10 @@ if public:
     )
 else:
     columns = st.columns(4)
-    columns[0].metric("PnL realizado (FIFO)", money(
-        float(realized["realized_pnl"].sum()) if not realized.empty else 0.0, public=False))
+    realized_total = float(realized["realized_pnl"].sum()) if not realized.empty else 0.0
+    columns[0].metric("PnL realizado (FIFO)", money(realized_total, public=False),
+                      **verdict_delta(tone(realized_total),
+                                      "ganancia" if realized_total > 0 else "pérdida"))
     columns[1].metric("Dividendos netos", money(income.dividends_net, public=False),
                       help=f"Brutos {money(income.dividends_gross, public=False)}, "
                            f"retención {money(income.withholding, public=False)}.")
@@ -606,12 +634,12 @@ else:
 
     if not realized.empty:
         st.dataframe(
-            pd.DataFrame({
+            color_by_sign(pd.DataFrame({
                 "Posición": realized["ticker"],
                 "PnL realizado": realized["realized_pnl"].round(2),
                 "Cantidad vendida": realized["quantity_sold"],
                 "Ventas": realized["disposals"],
-            }),
+            }), {"PnL realizado": True}),
             hide_index=True, width="stretch",
             column_config={
                 "PnL realizado": st.column_config.NumberColumn(format="localized"),

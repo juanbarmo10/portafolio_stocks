@@ -237,6 +237,98 @@ def drop_absolute_columns(
     return frame.drop(columns=[column for column in columns if column in frame.columns])
 
 
+# --- Colour: what favours the holder, in green; what hurts, in red (2026-09-26) -----------
+# One meaning across the panel: GREEN = favourable to holding equities or the company (a
+# gain, a beat, a thesis metric moving the right way, a risk-on vote); RED = unfavourable.
+# Colour only where the direction is a FACT (a sign) or a rule the panel already writes down
+# (the regime's votes, a gate). Where the direction is genuinely ambiguous — a rise in the
+# 10-year yield, inflation, payrolls — nothing is coloured: a colour would be an opinion.
+GOOD, BAD, CAUTION = "green", "red", "orange"
+# The regime's verdicts (transform.regime constants): its votes are the written rule.
+VERDICT_TONES = {"risk_on": GOOD, "neutral": CAUTION, "risk_off": BAD}
+# Table text, matched to Streamlit's green/red text on a white background.
+TABLE_COLORS = {GOOD: "#158237", BAD: "#bd4043", CAUTION: "#b36b00"}
+
+
+def tone(value: float | None, *, higher_is_better: bool = True,
+         neutral_band: float = 0.0) -> str | None:
+    """:data:`GOOD` or :data:`BAD` by the sign of ``value`` (within ``neutral_band`` of zero,
+    or unknown: ``None``)."""
+    if value is None or pd.isna(value) or abs(float(value)) <= neutral_band:
+        return None
+    return GOOD if (float(value) > 0) == higher_is_better else BAD
+
+
+def colored(text: str, color: str | None) -> str:
+    """Markdown ``:green[text]``; plain ``text`` without a colour."""
+    return f":{color}[{text}]" if color else text
+
+
+def tinted(value: float | None, text: str, *, higher_is_better: bool = True) -> str:
+    """``text`` coloured by the sign of ``value`` — the usual case in a sentence."""
+    return colored(text, tone(value, higher_is_better=higher_is_better))
+
+
+def verdict_delta(color: str | None, phrase: str | None) -> dict[str, Any]:
+    """``st.metric`` keyword arguments that put ``phrase`` under the value in ``color``,
+    without an arrow — the metric's value itself cannot be coloured. Empty when either is
+    unknown, so the tile stays neutral rather than guessing."""
+    if not color or not phrase:
+        return {}
+    return {"delta": phrase, "delta_color": color, "delta_arrow": "off"}
+
+
+def _sign_of(cell: Any) -> float | None:
+    """The sign of a number or of a formatted cell (``"-12,1 %"``, ``"+3"``, ``"−0,4"``)."""
+    if cell is None or (isinstance(cell, float) and pd.isna(cell)):
+        return None
+    if isinstance(cell, (int, float)):
+        return float(cell)
+    text = str(cell).strip().replace("\u2212", "-")
+    if not text or text[0] not in "+-0123456789":
+        return None
+    if text[0] == "-":
+        return -1.0
+    digits = "".join(ch for ch in text if ch.isdigit())
+    return 0.0 if not digits or int(digits) == 0 else 1.0
+
+
+def color_cells(styler: Any, column: str, colors: Sequence[str | None]) -> Any:
+    """Colour one column row by row (``colors`` aligned with the rows; ``None`` = none) —
+    for a column whose good direction changes from row to row (a spread down, a curve up)."""
+    css = [f"color: {TABLE_COLORS[c]}" if c else "" for c in colors]
+    return styler.apply(lambda _col: css, subset=[column])
+
+
+def color_rows_by_sign(frame: pd.DataFrame, rules: dict[Any, bool]) -> Any:
+    """As :func:`color_by_sign`, for a table whose metrics are ROWS (``{row: higher_is_better}``)
+    — a quarter-by-quarter table, a growth grid."""
+    styler = frame.style
+    for row, higher_is_better in rules.items():
+        if row in frame.index:
+            css = [f"color: {TABLE_COLORS[c]}" if (c := tone(_sign_of(cell),
+                   higher_is_better=higher_is_better)) else "" for cell in frame.loc[row]]
+            styler = styler.apply(lambda _row, css=css: css, axis=1,
+                                  subset=pd.IndexSlice[[row], :])
+    return styler
+
+
+def color_by_sign(frame: pd.DataFrame, rules: dict[str, bool]) -> Any:
+    """A Styler colouring the ``rules`` columns by sign: ``{column: higher_is_better}``.
+    Works on numbers and on already formatted text; "—" and zero stay uncoloured."""
+    def paint(higher_is_better: bool):
+        def css(cell: Any) -> str:
+            color = tone(_sign_of(cell), higher_is_better=higher_is_better)
+            return f"color: {TABLE_COLORS[color]}" if color else ""
+        return css
+
+    styler = frame.style
+    for column, higher_is_better in rules.items():
+        if column in frame.columns:
+            styler = styler.map(paint(higher_is_better), subset=[column])
+    return styler
+
+
 # d3's Spanish locale for every chart: comma decimals, point thousands, Spanish months.
 # Until 2026-09-25 every axis read "2,500,000,000" and "April / July" next to text that
 # reads "2,58 mil M" and "abril" — the same number in two notations on one screen.

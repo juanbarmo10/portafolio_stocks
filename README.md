@@ -533,6 +533,15 @@ todos los horizontes y en las dos mitades, +1 punto por trimestre— pero no sup
 corrección por comparaciones múltiples y se debilitan con el tiempo. El cribado no ordena por
 ninguna.
 
+### Colores: un solo significado
+
+Verde es lo que favorece a quien tiene la acción o la empresa que se mira (una ganancia, un
+crecimiento, una dilución que baja, un voto *risk-on*); rojo, lo que la perjudica; naranja,
+lo mixto. Solo donde el sentido es un hecho —un signo— o una regla que el panel ya escribe:
+el cambio de cada lectura macro se colorea con el mismo sentido con que vota el semáforo. Lo
+que no tiene un sentido bueno único —la subida del bono a 10 años, la inflación, las
+nóminas— queda sin color: pintarlo sería opinar.
+
 ## Licencia
 
 MIT.

@@ -15,7 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING, money, pct
+from app.format import MISSING, color_by_sign, money, pct, tone, verdict_delta
 from core.config import load_settings
 from fiscal import estimates as est
 from fiscal import lots as fl
@@ -91,12 +91,18 @@ else:
     cols[0].metric("Costo (congelado)", local_money(split.cost_local))
     cols[1].metric("Valor hoy", local_money(split.value_local))
     cols[2].metric("Resultado", local_money(split.result_local),
+                   **verdict_delta(tone(split.result_local), "ganancia"
+                                   if (split.result_local or 0) > 0 else "pérdida"),
                    help=f"En dólares: {usd(split.result_usd)}.")
     cols[3].metric("Tasa media de compra", local_money(split.fx_cost_average))
     cols = st.columns(2)
     cols[0].metric("Parte por los activos", local_money(split.asset_part_local),
+                   **verdict_delta(tone(split.asset_part_local), "suma"
+                                   if (split.asset_part_local or 0) > 0 else "resta"),
                    help="Lo que se movieron las acciones, a tu tasa de compra.")
     cols[1].metric("Parte por la divisa", local_money(split.fx_part_local),
+                   **verdict_delta(tone(split.fx_part_local), "suma"
+                                   if (split.fx_part_local or 0) > 0 else "resta"),
                    help="Lo que movió la tasa sobre lo que tienes hoy.")
     st.caption(
         "Tener todo en dólares y vivir en otra moneda es una **posición larga en dólares del "
@@ -120,7 +126,8 @@ table = pd.DataFrame({
     "Parte divisa": lots["fx_part_local"].map(local_money),
     "Cumple el periodo": [d if d else "no calculable" for d in lots["threshold_date"]],
 })
-st.dataframe(table, hide_index=True, width="stretch")
+st.dataframe(color_by_sign(table, {"Parte activo": True, "Parte divisa": True}),
+             hide_index=True, width="stretch")
 if months is None:
     st.caption("**Periodo de tenencia: no calculable.** Cuántos meses de tenencia cambian el "
                "tratamiento de una ganancia es pregunta para tu contador; escríbelo en "
@@ -133,7 +140,7 @@ sold = est.classify_disposals(fl.local_disposals(disposals, fx), months)
 if sold.empty:
     st.caption("Sin ventas en los datos.")
 else:
-    st.dataframe(pd.DataFrame({
+    st.dataframe(color_by_sign(pd.DataFrame({
         "Venta": sold["ts"].str[:10],
         "Compra": sold["acquired_ts"].str[:10],
         "Valor": sold["ticker"],
@@ -144,7 +151,8 @@ else:
         "Parte divisa": sold["fx_part_local"].map(local_money),
         "Pasó el periodo": ["no calculable" if v is None else ("sí" if v else "no")
                             for v in sold["held_past_threshold"]],
-    }), hide_index=True, width="stretch")
+    }), {"Resultado USD": True, f"Resultado {local}": True, "Parte activo": True,
+         "Parte divisa": True}), hide_index=True, width="stretch")
     total_local = pd.to_numeric(sold["result_local"], errors="coerce")
     st.caption(
         f"Suma: {usd(float(sold['result_usd'].sum()))} · "

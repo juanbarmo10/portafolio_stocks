@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING, money, number, pct
+from app.format import BAD, GOOD, MISSING, color_cells, money, number, pct, tone, verdict_delta
 from core.config import load_settings
 from transform import behavior as bh
 from transform import journal as jr
@@ -77,7 +77,7 @@ look = bh.mirror(app_data.trades(), port.nav_series(account),
                  min_holding_days=int(BEHAVIOR.get("min_holding_days", 90)))
 written = len(executed) - len(unwritten)
 st.subheader("🪞 Tu conducta, medida")
-st.dataframe(pd.DataFrame([
+mirror_rows = pd.DataFrame([
     {"Qué": "Horizonte",
      "Lo que dice el plan": f"Trimestres a años (§1); mínimo escrito: {look.min_holding_days} días",
      "Lo que hizo la cuenta": (f"lo vendido se mantuvo {number(look.holding_median_days, decimals=0)}"
@@ -116,7 +116,20 @@ st.dataframe(pd.DataFrame([
     {"Qué": "Razones escritas",
      "Lo que dice el plan": "Toda decisión con su porqué antes de ejecutarla (📓)",
      "Lo que hizo la cuenta": f"{written} de {len(executed)} decisiones"},
-]), hide_index=True, width="stretch")
+])
+# Coloured only where the plan gives a yardstick: the written horizon, the cost of selling,
+# the reasons. Turnover, cash and commissions have none written, so they stay plain.
+mirror_tones = {
+    "Horizonte": None if look.holding_median_days is None
+    else GOOD if look.holding_median_days >= look.min_holding_days else BAD,
+    "Lo que costó vender": None if look.after_sale is None
+    else BAD if look.after_sale > 0 else GOOD,
+    "Razones escritas": None if not len(executed)
+    else GOOD if written == len(executed) else BAD,
+}
+st.dataframe(color_cells(mirror_rows.style, "Lo que hizo la cuenta",
+                         [mirror_tones.get(q) for q in mirror_rows["Qué"]]),
+             hide_index=True, width="stretch")
 st.caption(
     f"Del {look.start} al {look.end}, solo con los datos de la cuenta. Rotación = menor entre "
     "compras y ventas sobre el patrimonio medio (la definición estándar: el dinero que entra y "
@@ -158,9 +171,17 @@ for row in table.to_dict("records"):
                              f"{money(abs(row['commission'] or 0), public=False)}.")
             c[1].metric("Semáforo ese día", rg.verdict_label(verdict) if verdict else MISSING,
                         help="El veredicto vigente esa fecha, con lo publicado entonces.")
-            c[2].metric("Desde entonces", pct(move), help="Con dividendos, hasta hoy.")
-            c[3].metric("Frente a SPY", pct(None if move is None or market is None
-                                             else move - market),
+            # For a purchase a rise is good; for a sale it is what selling gave up.
+            sold = row["side"] == "sell"
+            gap = None if move is None or market is None else move - market
+            c[2].metric("Desde entonces", pct(move), help="Con dividendos, hasta hoy.",
+                        **verdict_delta(tone(move, higher_is_better=not sold),
+                                        ("vender costó" if (move or 0) > 0 else "vender evitó")
+                                        if sold else ("sube" if (move or 0) > 0 else "baja")))
+            c[3].metric("Frente a SPY", pct(gap),
+                        **verdict_delta(tone(gap, higher_is_better=not sold),
+                                        ("por encima de SPY" if (gap or 0) > 0
+                                         else "por debajo de SPY")),
                         help="Para una venta, positivo = la acción siguió subiendo después: "
                              "vender costó; negativo = vender evitó esa caída.")
         if entry:

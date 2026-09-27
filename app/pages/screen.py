@@ -17,7 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING
+from app.format import MISSING, color_by_sign
 from core.config import load_settings
 from ingest.screen import SOURCE
 from transform import portfolio as port
@@ -142,7 +142,11 @@ display = pd.DataFrame({
 percent = st.column_config.NumberColumn(format="percent")
 multiple = st.column_config.NumberColumn(format="%.1f×")
 st.dataframe(
-    display, hide_index=True, width="stretch", height=560,
+    # Signs that are facts: growth, margins and yields up is good; dilution up is not.
+    color_by_sign(display, {"Crec. ingresos": True, "Margen operativo": True,
+                            "Margen FCF": True, "Dilución": False, "Rent. FCF": True,
+                            "Rent. FCF − SBC": True}),
+    hide_index=True, width="stretch", height=560,
     column_config={
         "Ingresos (mil M)": st.column_config.NumberColumn(format="%.1f"),
         "Capitalización (mil M)": st.column_config.NumberColumn(format="%.1f"),

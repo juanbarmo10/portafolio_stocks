@@ -22,7 +22,8 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import altair_chart, MISSING, number, pct, reported_amount
+from app.format import (BAD, CAUTION, GOOD, MISSING, VERDICT_TONES, altair_chart, color_cells,
+                        colored, number, pct, reported_amount, tinted, tone, verdict_delta)
 from core.config import load_settings
 from transform import regime as rg
 from transform.breadth import (
@@ -95,10 +96,11 @@ if view is None:
 
 reading = view["reading"]
 st.subheader("1 · Semáforo de régimen")
-st.markdown(f"### {rg.verdict_label(reading.verdict)}")
+st.markdown(f"### {colored(rg.verdict_label(reading.verdict), VERDICT_TONES.get(reading.verdict))}")
 st.caption(
-    f"Al cierre del {reading.date}: **{reading.on}** componentes dicen risk-on, "
-    f"**{reading.off}** risk-off, **{reading.neutral}** neutros, de **{reading.available}** "
+    f"Al cierre del {reading.date}: {colored(f'**{reading.on}** componentes dicen risk-on', GOOD)}, "
+    f"{colored(f'**{reading.off}** risk-off', BAD)}, **{reading.neutral}** neutros, de "
+    f"**{reading.available}** "
     f"que votan. Pesos iguales, mayoría simple. **Bloquea, no dispara:** en rojo no se "
     "compra aunque la empresa sea perfecta (§2); en verde no significa comprar, significa "
     "que el entorno no lo impide."
@@ -128,8 +130,11 @@ for vote in reading.votes:
         "Dato del": vote.value_date or MISSING,
         "Por qué": vote.detail,
     })
+VOTE_COLORS = {1: GOOD, 0: CAUTION, -1: BAD, None: None}
 st.dataframe(
-    pd.DataFrame(rows), hide_index=True, width="stretch",
+    color_cells(pd.DataFrame(rows).style, "Voto",
+                [VOTE_COLORS[v.vote] for v in reading.votes]),
+    hide_index=True, width="stretch",
     # "5,45 billones USD" does not fit the default width and was cut to "5,45 bill".
     column_config={name: st.column_config.TextColumn(width="medium")
                    for name in ("Valor", "Comparado con")},
@@ -232,7 +237,12 @@ else:
         cols[0].metric("Empresas sobre su media de 200", MISSING,
                        help="Hueco en la fuente ese día: no dice nada del índice.")
     else:
+        # 50 % is the regime's own line for breadth (a majority), not a new threshold.
         cols[0].metric("Empresas sobre su media de 200", pct(last.breadth),
+                       **verdict_delta(tone(last.breadth - 0.5) if last.breadth is not None
+                                       else None,
+                                       "mayoría por encima" if (last.breadth or 0) > 0.5
+                                       else "minoría por encima"),
                        help=f"Lectura del {last.date}.")
     cols[1].metric("Cobertura", pct(last.coverage),
                    help="Miembros de ese día sobre los que descansa el cálculo.")
@@ -272,14 +282,16 @@ else:
             "**Avance-descenso, tres meses:** " + f"{ad_change:+,}".replace(",", ".")
             + " (empresas que subieron menos las que bajaron, sumadas cada día) frente a "
             f"SPY {pct(spy_change)}. "
-            + ("⚠️ **Divergen**: el índice y la mayoría de sus empresas van en direcciones "
-               "distintas." if diverging else "Van en la misma dirección.")
+            + (colored("⚠️ **Divergen**: el índice y la mayoría de sus empresas van en "
+                       "direcciones distintas.", BAD) if diverging
+               else colored("Van en la misma dirección.", GOOD))
         )
     if not nh.empty:
         newest = nh.iloc[-1]
         st.markdown(f"**Máximos − mínimos de 52 semanas, {newest['date']}:** "
                     f"{int(newest['highs'])} en máximos, {int(newest['lows'])} en mínimos "
-                    f"({pct(newest['net_share'])} neto de los miembros con precio).")
+                    f"({tinted(newest['net_share'], pct(newest['net_share']))} neto de los "
+                    "miembros con precio).")
     with st.expander("Las gráficas de avance-descenso y máximos − mínimos"):
         if not ad.empty:
             altair_chart(
@@ -317,8 +329,10 @@ sb = sector_breadth(closes, splits, SB["sectors"], window=SB["window"],
                     min_window_fraction=SB["min_window_fraction"]).dropna(subset=["share"])
 if not sb.empty:
     sb = sb.assign(date=pd.to_datetime(sb["date"]), share=sb["share"].astype(float))
-    st.markdown(f"**Amplitud sectorial** — {int(sb['above'].iloc[-1])} de "
-                f"{len(SB['sectors'])} sectores sobre su media de 200 sesiones")
+    share_now = float(sb["share"].iloc[-1])
+    st.markdown("**Amplitud sectorial** — " + tinted(
+        share_now - 0.5, f"{int(sb['above'].iloc[-1])} de {len(SB['sectors'])} sectores "
+        "sobre su media de 200 sesiones"))
     altair_chart(
         alt.Chart(sb).mark_line(color=LINE).encode(
             x=alt.X("date:T", title=None),
@@ -343,12 +357,18 @@ def three_month_change(frame: pd.DataFrame, column: str) -> float | None:
 
 ew_change, rot_change = three_month_change(ew, "ratio"), three_month_change(rot, "rotation")
 st.markdown(
-    f"**{EW['equal']}/{EW['cap']}** {pct(ew_change)} en tres meses "
-    + ("(la empresa media se queda atrás de las gigantes)" if ew_change is not None
-       and ew_change < 0 else "(la empresa media acompaña)" if ew_change is not None else "")
-    + f" · **rotación defensiva** {pct(rot_change)} "
-    + ("(los defensivos ganan: se descuenta desaceleración)" if rot_change is not None
-       and rot_change > 0 else "(los cíclicos ganan)" if rot_change is not None else "")
+    # Colour by what it means for the market's health: the average company falling behind
+    # the giants (RSP/SPY down) is a narrow rally; defensives winning is a slowdown priced.
+    f"**{EW['equal']}/{EW['cap']}** "
+    + tinted(ew_change, f"{pct(ew_change)} en tres meses "
+             + ("(la empresa media se queda atrás de las gigantes)" if ew_change is not None
+                and ew_change < 0 else "(la empresa media acompaña)"
+                if ew_change is not None else ""))
+    + " · **rotación defensiva** "
+    + tinted(rot_change, f"{pct(rot_change)} "
+             + ("(los defensivos ganan: se descuenta desaceleración)" if rot_change is not None
+                and rot_change > 0 else "(los cíclicos ganan)" if rot_change is not None
+                else ""), higher_is_better=False)
 )
 with st.expander("Las dos gráficas"):
     left, right = st.columns(2)
@@ -391,6 +411,8 @@ cols[1].metric("VIX3M (3 meses)", number(vix3m.value))
 if vix.value is not None and vix3m.value:
     ratio = vix.value / vix3m.value
     cols[2].metric("VIX / VIX3M", number(ratio, decimals=3),
+                   **verdict_delta(GOOD if ratio < 1 else BAD,
+                                   "curva normal" if ratio < 1 else "invertida: estrés"),
                    help="Por debajo de 1 es lo normal. Por encima, el miedo a corto plazo "
                         "supera al de largo: estrés presente.")
 st.caption(f"Datos del {vix.ts or MISSING}. VIX3M desde 2007-12 y VIX desde 2000; antes de 2014 "

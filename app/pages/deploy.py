@@ -17,7 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import MISSING, money, number, pct
+from app.format import BAD, CAUTION, GOOD, MISSING, colored, money, number, pct
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
 from transform import funding as fx
@@ -86,8 +86,10 @@ gates.append(("🟡" if near else "🟢", f"Resultados en {earnings_window} día
               "; ".join(near) + " — no abrir posición en ellas sin decisión explícita"
               if near else "ninguno en cartera ni en estudio"))
 
+ICON_TONES = {"🟢": GOOD, "🟡": CAUTION, "🔴": BAD, "✅": GOOD, "⚠️": CAUTION}
 st.markdown("| | Puerta | Estado |\n|---|---|---|\n"
-            + "\n".join(f"| {i} | **{g}** | {s} |" for i, g, s in gates))
+            + "\n".join(f"| {i} | **{g}** | {colored(s, ICON_TONES.get(i))} |"
+                         for i, g, s in gates))
 if view is not None and view["reading"].verdict == rg.RISK_OFF:
     st.error("Regla dura de §2: con el semáforo en rojo no se compra, aunque la empresa sea "
              "perfecta. El dinero espera en efectivo; en la validación, esperar costó poco.")
@@ -209,7 +211,8 @@ else:
     checks.append(("⚠️" if near_pick else "✅", f"Resultados en {earnings_window} días",
                    near_pick[0] if near_pick else "no"))
     st.markdown("| | Comprobación | Estado |\n|---|---|---|\n"
-                + "\n".join(f"| {i} | {c} | {v} |" for i, c, v in checks))
+                + "\n".join(f"| {i} | {c} | {colored(v, ICON_TONES.get(i))} |"
+                             for i, c, v in checks))
 
     years = int(settings.raw.get("panel", {}).get("valuation", {}).get("history_years", 5))
     today_iso = today.date().isoformat()
