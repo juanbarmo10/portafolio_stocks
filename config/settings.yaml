@@ -873,6 +873,13 @@ alerts:
     # Efectivo por encima de portfolio.cash_max más de portfolio.cash_grace_days (§15.5
     # punto 4). Callada mientras esos dos parámetros de tu política estén en null.
     - {kind: cash_above_limit}
+    # Inflexión de fundamentales (§15.5 punto 5): trimestre nuevo (visible en los últimos
+    # `lookback_days`) de una empresa en cartera o en estudio donde el crecimiento interanual
+    # cambia ≥ `acceleration` frente al trimestre anterior, o el margen bruto ≥ `gross_margin`
+    # frente al mismo trimestre del año anterior. Umbrales fijados el 2026-09-28 ANTES de
+    # mirar ningún dato, por principio (10 pp de crecimiento es un cambio de ritmo que se ve;
+    # 3 pp de margen bruto, uno que en un negocio maduro casi no ocurre). Tuyos para cambiar.
+    - {kind: fundamental_inflection, acceleration: 0.10, gross_margin: 0.03, lookback_days: 30}
   # No es una regla evaluada: la dispara run_ingest.py con su propia lista de fallos. Es
   # la vía por la que llega a Telegram un token de IBKR caducado (§4.1).
   ingest_failure: true

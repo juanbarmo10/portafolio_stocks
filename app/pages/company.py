@@ -50,6 +50,7 @@ from app.format import (
 from core.config import load_settings
 from transform import bcb
 from transform import filing_signals as fs
+from transform import inflection as infl
 from transform import per_share
 from transform import fundamentals as fun
 from transform import portfolio as port
@@ -457,6 +458,20 @@ if not table.empty:
         "`GrossProfit`: restar el coste de ventas no da lo mismo en todas."
         + (f" No presentadas en XBRL estándar: {', '.join(missing)}." if missing else "")
     )
+    # The latest quarter's change of pace (§15.5 point 5), with the alert's own thresholds.
+    rule = next((r for r in settings.raw.get("alerts", {}).get("rules", [])
+                 if r.get("kind") == "fundamental_inflection"), {})
+    turn = infl.assess(observations, cik, as_of_iso,
+                       acceleration=float(rule.get("acceleration", 0.10)),
+                       gross_margin=float(rule.get("gross_margin", 0.03)))
+    if turn is not None and turn.signals:
+        for _kind, text in turn.signals:
+            st.info(f"**Inflexión, trimestre al {turn.quarter}.** {text}")
+    elif turn is not None and turn.acceleration is not None:
+        st.caption(f"Ritmo del último trimestre: el crecimiento interanual cambió "
+                   f"{number(turn.acceleration * 100, decimals=1)} puntos frente al trimestre "
+                   "anterior, por debajo de tu umbral de inflexión "
+                   f"({number(float(rule.get('acceleration', 0.10)) * 100, decimals=0)} puntos).")
 
 # Segments (§15.5 point 15): where the growth is. From each filing's XBRL, which is the
 # only free source of dimensional facts; not in the public copy, so publicly absent.

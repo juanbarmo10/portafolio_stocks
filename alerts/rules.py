@@ -44,7 +44,7 @@ import pandas as pd
 from core.config import Settings
 from core.logging_setup import get_logger
 from ingest.macro_calendar import current_calendar
-from transform import allocation, discipline, portfolio
+from transform import allocation, discipline, inflection, portfolio
 from transform import regime as rg
 from transform import thesis as th
 
@@ -348,6 +348,30 @@ def filing_signal(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
     return alerts
 
 
+def fundamental_inflection(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
+    """A new quarter of a held or studied company where growth accelerates or slows, or the
+    gross margin turns, beyond the written thresholds (§15.5 point 5). Keyed by quarter:
+    once per filing, never on the price."""
+    lookback = int(params.get("lookback_days", 30))
+    companies = {**snap.researched,
+                 **{cik: ticker for ticker, cik in snap.held.items() if cik}}
+    out: list[Alert] = []
+    for cik, ticker in sorted(companies.items(), key=lambda kv: kv[1]):
+        if snap.fundamentals.empty or not inflection.is_new(snap.fundamentals, cik,
+                                                            snap.today, lookback):
+            continue
+        found = inflection.assess(snap.fundamentals, cik, snap.today,
+                                  acceleration=float(params.get("acceleration", 0.10)),
+                                  gross_margin=float(params.get("gross_margin", 0.03)))
+        for kind, text in (found.signals if found else []):
+            out.append(Alert("fundamental_inflection",
+                             f"fundamental_inflection:{cik}:{found.quarter}:{kind}", (
+                                 f"📈 {ticker}, trimestre al {found.quarter}: {text}\n"
+                                 "Mira la página de Empresa y la tesis antes que el precio: "
+                                 "es un cambio de ritmo, no una orden (§12).")))
+    return out
+
+
 def cash_above_limit(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
     """Cash above the written limit for longer than the written grace (§15.5 point 4).
 
@@ -377,6 +401,7 @@ RULES: dict[str, Callable[[Snapshot, Mapping[str, Any]], list[Alert]]] = {
     "amended_filing": amended_filing,
     "filing_signal": filing_signal,
     "cash_above_limit": cash_above_limit,
+    "fundamental_inflection": fundamental_inflection,
 }
 
 
@@ -483,7 +508,7 @@ def load_snapshot(conn: Any, settings: Settings, now: pd.Timestamp | None = None
     tracked = settings.tracked_companies
     researched = {str(c["cik"]).zfill(10): str(c["ticker"])
                   for c in settings.researched_companies if c.get("cik") and c.get("ticker")}
-    fundamentals = read_observations(conn, source="sec") if tracked or researched \
+    fundamentals = read_observations(conn, source="sec") if tracked or researched or held \
         else pd.DataFrame()
 
     etf_prices = read_observations(
