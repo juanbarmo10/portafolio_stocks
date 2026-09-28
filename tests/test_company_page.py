@@ -496,3 +496,27 @@ def test_the_scenarios_give_the_expected_return_and_the_size_the_budget_allows(t
     assert "3,3 %" in text, "2 % budget / 60 % bear loss"
     st.cache_data.clear()
     config.load_settings.cache_clear()
+
+
+# --- Segments (§15.5 point 15) --------------------------------------------------------------
+
+
+def test_the_segments_table_and_a_change_of_measure_reach_the_page(company_app):
+    def row(member, concept, end, value, filed):
+        return {"source": "sec_segments", "series_id": f"{CIK}:{member}:{concept}:q",
+                "ts": end, "ts_release": filed, "value": value}
+
+    conn = loader.init_db(company_app)
+    loader.upsert_observations(conn, pd.DataFrame([
+        row("Cloud", "Revenues", "2025-06-30", 30e9, "2025-07-30"),
+        row("Cloud", "Revenues", "2026-06-30", 40e9, "2026-07-29"),
+        row("Gaming", "Revenues", "2026-06-30", 10e9, "2026-07-29"),
+        row("Cloud", "AdjustedEarningsBeforeInterestTaxesDepreciationAndAmortization",
+            "2025-06-30", 12e9, "2025-07-30"),
+        row("Cloud", "OperatingIncomeLoss", "2026-06-30", 16e9, "2026-07-29"),
+    ]))
+    conn.close()
+    st.cache_data.clear()
+    text = rendered_text(render())
+    assert "Por segmento" in text and "Cloud" in text and "33,3 %" in text
+    assert "Cambio de medida" in text and "EBITDA ajustado del segmento" in text

@@ -58,6 +58,7 @@ from transform import price_action as pa
 from transform import quarterly as qt
 from transform import screen as sc
 from transform import scenarios as scn
+from transform import segments as sg
 from transform import sfc
 from transform import valuation as val
 from transform.adjustments import split_adjusted, total_return_index
@@ -85,6 +86,22 @@ if public and not cards:
 # only thing on the page that behaves differently — a candidate gets the same audited
 # numbers as anything else, because the numbers are what you study it with (section 5.1).
 under_study = {str(entry.get("ticker")) for entry in watchlist}
+# Positions held with no card yet (local only: holdings are private). They get the page as a
+# candidate does — the numbers are what a card is written from — marked so it is never
+# forgotten that the position already exists (§5.1).
+held_no_card: set[str] = set()
+if not public and app_data.database_ready():
+    account_now = app_data.account_observations()
+    held_now = port.latest_positions(account_now) if not account_now.empty else pd.DataFrame()
+    registry_held = app_data.companies()
+    carded = {str(c.get("ticker")) for c in cards}
+    for held_ticker in (held_now["ticker"] if not held_now.empty else []):
+        match = registry_held[registry_held["ticker"] == held_ticker] \
+            if not registry_held.empty else registry_held
+        if held_ticker not in carded and len(match):
+            cards = [*cards, {"ticker": held_ticker, "cik": str(match["cik"].iloc[0])}]
+            held_no_card.add(str(held_ticker))
+under_study |= held_no_card
 level3 = settings.raw.get("panel", {}).get("level3", {})
 hurdle = level3.get("hurdle_rate")
 earnings_window = int(level3.get("earnings_window_days", th.EARNINGS_WINDOW_DAYS))
@@ -148,7 +165,8 @@ left, right = st.columns([1, 1])
 with left:
     ticker = st.selectbox(
         "Empresa", sorted(by_ticker), index=0,
-        format_func=lambda t: f"{t} · en estudio" if t in under_study else t,
+        format_func=lambda t: (f"{t} · en cartera, sin ficha" if t in held_no_card else
+                               f"{t} · en estudio" if t in under_study else t),
     )
 with right:
     as_of = st.date_input(
@@ -250,6 +268,10 @@ st.subheader("1 · En estudio" if ticker in under_study else "1 · La tesis")
 # inside the blackout window are still results inside the blackout window.
 for flag in status.flags:
     st.warning(flag)
+if ticker in held_no_card:
+    st.warning(f"**Tienes {ticker} en cartera y no tiene ficha de tesis.** La posición existe "
+               "antes que la razón escrita para tenerla: sin criterio de invalidación no hay "
+               "forma de saber cuándo venderla (§5.2).")
 
 if ticker in under_study and public:
     # The visitor is not the owner: no "your list", and no instructions for editing a
@@ -435,6 +457,66 @@ if not table.empty:
         "`GrossProfit`: restar el coste de ventas no da lo mismo en todas."
         + (f" No presentadas en XBRL estándar: {', '.join(missing)}." if missing else "")
     )
+
+# Segments (§15.5 point 15): where the growth is. From each filing's XBRL, which is the
+# only free source of dimensional facts; not in the public copy, so publicly absent.
+SEG_CFG = dict(settings.source("segments"))
+segment_obs = app_data.observations("sec_segments", app_data.db_mtime())
+segments = sg.assess(segment_obs, cik, as_of_iso,
+                     settings.source("sec").get("concepts", {}).get("revenue", {}).get("tags", []),
+                     SEG_CFG.get("profit_concepts", [])) if not segment_obs.empty else None
+if segments is not None and len(segments.members) == 1:
+    only = segments.members[0]
+    generic = only.lower() in {"singlereporting", "reportable", "consolidated", "single"}
+    st.caption("Segmentos: la empresa reporta **uno solo**"
+               + ("" if generic else f" ({only})") + "; sus cifras son las de la empresa entera.")
+elif segments is not None:
+    profit_name = sg.labels(SEG_CFG.get("profit_labels", {}), segments.profit_concept)
+    st.markdown(f"**Por segmento** · trimestre al {segments.quarter}")
+    st.dataframe(pd.DataFrame([{
+        "Segmento": r["member"],
+        "Ingresos": compact_amount(r["revenue"]),
+        "Crec. interanual": pct(r["revenue_growth"]),
+        "Peso en los ingresos": pct(r["share"], decimals=0),
+        (profit_name or "Resultado"): compact_amount(r["profit"]),
+        "Margen": pct(r["margin"]),
+        "Crec. del resultado": pct(r["profit_growth"]),
+    } for r in segments.table.to_dict("records")]), hide_index=True, width="stretch")
+    chart_data = segments.history[segments.history["date"] >= segments.history["date"].max()
+                                  - pd.DateOffset(months=24)]
+    palette = ["#2a78d6", "#eb6834", "#3aa76d", "#8e6bd8", "#c9a227", "#9aa5b1"]
+    altair_chart(
+        alt.Chart(chart_data).mark_bar().encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y("revenue:Q", title="Ingresos por segmento, USD", stack=True),
+            color=alt.Color("member:N", sort=segments.members,
+                            scale=alt.Scale(domain=segments.members,
+                                            range=palette[:len(segments.members)]),
+                            legend=alt.Legend(orient="top", title=None)),
+            tooltip=[alt.Tooltip("date:T", title="Trimestre"),
+                     alt.Tooltip("member:N", title="Segmento"),
+                     alt.Tooltip("revenue:Q", title="USD", format=",.0f"),
+                     alt.Tooltip("derived:N", title="Derivado")],
+        ).properties(height=220),
+        width="stretch", amounts=True,
+    )
+    notes = ["Del XBRL de cada 10-Q y 10-K: la única fuente gratuita de cifras por segmento. "
+             "Crecimiento interanual; el cuarto trimestre, cuando la empresa solo lo da dentro "
+             "del año, se deriva (año − nueve meses, §9.12)."]
+    if segments.profit_concept is None:
+        notes.append("Sin resultado por segmento: la empresa usa una medida que el panel no "
+                     "conoce todavía (se añade en `sources.segments.profit_concepts`).")
+    if segments.older_concepts:
+        notes.append(f"⚠️ **Cambio de medida:** antes de este trimestre la empresa medía el "
+                     f"segmento con «{', '.join(sg.labels(SEG_CFG.get('profit_labels', {}), c) for c in segments.older_concepts)}», y "
+                     f"ahora con «{profit_name}». El crecimiento del resultado solo compara "
+                     "periodos con la medida nueva; las dos series no se empalman (§9.8).")
+    if segments.restated:
+        notes.append(f"{segments.restated} cifra(s) por segmento aparecen con otro valor en una "
+                     "presentación posterior (reexpresión o reclasificación): manda la última.")
+    notes.append("Las métricas operativas (reservas, viajes, usuarios) no van etiquetadas en "
+                 "el XBRL: solo en el texto y el comunicado de resultados.")
+    st.caption(" ".join(notes))
 
 sheet = qt.balance(observations, cik, as_of_iso)
 if sheet.assets is not None:

@@ -42,6 +42,7 @@ from ingest.screen import ScreenIngester
 from ingest.short_interest import ShortInterestIngester
 from ingest.universe import UniverseIngester
 from ingest.sec_xbrl import SecXbrlIngester
+from ingest.segments import SegmentsIngester
 from ingest.sfc import SfcIngester
 
 log = get_logger(__name__)
@@ -56,6 +57,8 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "ibkr": (IbkrFlexIngester.is_available, IbkrFlexIngester),
     "sec": (SecXbrlIngester.is_available, SecXbrlIngester),
     "sec_filings": (SecFilingsIngester.is_available, SecFilingsIngester),
+    # Segment revenue and profit from each filing's XBRL (§15.5 point 15).
+    "segments": (SegmentsIngester.is_available, SegmentsIngester),
     "short_interest": (ShortInterestIngester.is_available, ShortInterestIngester),
     "universe": (UniverseIngester.is_available, UniverseIngester),
     # Supervisory data for companies the SEC cannot read (Nu Holdings, IFRS).

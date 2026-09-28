@@ -234,6 +234,7 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 | Macro (CPI, PCE, NFP, fed funds, dólar, curva, spread HY, NFCI, VIX) | FRED | REST, clave gratuita |
 | Fundamentales auditados | SEC EDGAR XBRL | `data.sec.gov`, sin clave |
 | Cribado trimestral del S&P 500 | SEC XBRL `frames` | un concepto para todas las empresas de un año: ~40 peticiones en vez de 500. Sin fecha de presentación, así que solo sirve para el cribado de hoy, nunca para un backtest |
+| Segmentos de negocio | XBRL de cada 10-Q/10-K en el archivo de EDGAR | `companyfacts` y `frames` no traen hechos con dimensión. La medida de resultado es propia de cada empresa y puede cambiar (Uber, 2026): se nombra, nunca se empalma |
 | Pares de NU en Colombia | Superintendencia Financiera, CUIF en datos.gov.co (`mxk5-ce6w`) | cuentas mensuales de cada entidad vigilada; el resultado es acumulado desde enero y no hay fecha de publicación (primera vista o cierre + 60 días) |
 | Pares fuera del cribado (DiDi) | SEC `companyfacts`, ejercicios completos | en la moneda en que presentan; solo cocientes. Un emisor que pasó a IFRS deja de leerse |
 | Cribado de crecimiento (todas las empresas de la SEC) | SEC XBRL `frames` trimestral + yfinance (último cierre, volumen y splits) | cada empresa en su último trimestre presentado: el cuarto trimestre natural casi no existe en `frames` (va dentro del 10-K). Un solo concepto de ingresos por empresa, el total, porque algunas etiquetan una partida con otro concepto |

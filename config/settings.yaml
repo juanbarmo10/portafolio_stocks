@@ -473,6 +473,25 @@ sources:
     sgs_series:
       432: selic_target
 
+  # --- Segmentos de negocio (ingest/segments.py, §15.5 punto 15) -------------------------
+  # Del XBRL de cada 10-Q/10-K: companyfacts y frames no traen hechos con dimensión. Los
+  # ingresos usan los mismos conceptos que los fundamentales; el RESULTADO por segmento es una
+  # medida propia de cada empresa, y aquí va la lista de las conocidas, con su nombre en
+  # pantalla. Verificadas el 2026-09-28. Una empresa con otra medida sale sin resultado por
+  # segmento hasta que se añada aquí; nunca se toma una medida adivinada.
+  segments:
+    filings: 9                   # ~2 años de 10-Q/10-K: interanual y 8 trimestres
+    profit_concepts:
+      - OperatingIncomeLoss                                     # Uber desde 2026 (us-gaap)
+      - AdjustedEarningsBeforeInterestTaxesDepreciationAndAmortization   # Uber hasta 2025
+      - DirectContribution                                      # MercadoLibre
+      - GrossProfit                                             # estándar
+    profit_labels:
+      OperatingIncomeLoss: "Resultado operativo del segmento"
+      AdjustedEarningsBeforeInterestTaxesDepreciationAndAmortization: "EBITDA ajustado del segmento"
+      DirectContribution: "Contribución directa"
+      GrossProfit: "Beneficio bruto del segmento"
+
   # --- Superintendencia Financiera de Colombia (ingest/sfc.py, §15.5 punto 11) -----------
   # El CUIF de cada entidad vigilada, cuenta por cuenta, cada mes, en datos.gov.co (sin
   # clave; robots.txt no restringe /resource/). Para NU: su negocio en Colombia frente a sus
