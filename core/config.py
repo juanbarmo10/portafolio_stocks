@@ -419,6 +419,46 @@ def validate_peers(raw: Any) -> None:
                          + "\n  ".join(problems))
 
 
+def _fraction(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and 0 <= value <= 1
+
+
+def validate_policy(portfolio: Any) -> None:
+    """The written core/satellite policy (CLAUDE.md §15.5, point 4), every field optional.
+
+    Raises:
+        ValueError: On a share written as a percentage (50 instead of 0.5), a count that is
+            not a whole number, or core tickers that are not a list — each would silently
+            turn the panel's advice into its opposite.
+    """
+    cfg = dict(portfolio or {})
+    core = cfg.get("core") or {}
+    problems = []
+    if not isinstance(core, dict):
+        problems.append("portfolio.core must be a mapping {tickers, target_share, band}")
+        core = {}
+    tickers = core.get("tickers")
+    if tickers is not None and (not isinstance(tickers, list)
+                                or not all(isinstance(t, str) and t.strip() for t in tickers)):
+        problems.append("portfolio.core.tickers must be a list of tickers")
+    for key, value in (("portfolio.core.target_share", core.get("target_share")),
+                       ("portfolio.core.band", core.get("band")),
+                       ("portfolio.cash_max", cfg.get("cash_max"))):
+        if value is not None and not _fraction(value):
+            problems.append(f"{key} {value!r} must be a fraction 0..1 (0.5 for 50 %)")
+    for key in ("max_satellites", "cash_grace_days"):
+        value = cfg.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)
+                                  or value < 0):
+            problems.append(f"portfolio.{key} {value!r} must be a whole number")
+    if core.get("target_share") is not None and not tickers:
+        problems.append("portfolio.core.target_share without portfolio.core.tickers: the "
+                        "panel would not know which positions are the core")
+    if problems:
+        raise ValueError("Invalid portfolio policy (CLAUDE.md §15.5 point 4):\n  "
+                         + "\n  ".join(problems))
+
+
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     """Load and cache the effective settings.
@@ -474,6 +514,7 @@ def load_settings() -> Settings:
     validate_theses(settings.tracked_companies)
     validate_watchlist(settings.watchlist_companies, settings.tracked_companies)
     validate_peers(raw.get("universe", {}).get("peers"))
+    validate_policy(raw.get("portfolio"))
     budget = raw.get("portfolio", {}).get("loss_budget")
     if budget is not None and (isinstance(budget, bool) or not isinstance(budget, (int, float))
                                or not 0 < budget <= 1):

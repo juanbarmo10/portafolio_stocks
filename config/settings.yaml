@@ -870,6 +870,9 @@ alerts:
     # exclusión (3.01), cambio de auditor (4.01), deterioro (2.06), y registro o venta de
     # valores si la empresa quema caja (acciones nuevas). 14 días: lo anterior no es noticia.
     - {kind: filing_signal, lookback_days: 14}
+    # Efectivo por encima de portfolio.cash_max más de portfolio.cash_grace_days (§15.5
+    # punto 4). Callada mientras esos dos parámetros de tu política estén en null.
+    - {kind: cash_above_limit}
   # No es una regla evaluada: la dispara run_ingest.py con su propia lista de fallos. Es
   # la vía por la que llega a Telegram un token de IBKR caducado (§4.1).
   ingest_failure: true

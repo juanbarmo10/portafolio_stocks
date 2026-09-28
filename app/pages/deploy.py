@@ -22,6 +22,7 @@ from app.format import (BAD, CAUTION, GOOD, MISSING, colored, money, number, pct
                         reported_amount)
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
+from transform import allocation as al
 from transform import behavior as bh
 from transform import discipline as dc
 from transform import funding as fx
@@ -125,6 +126,50 @@ st.markdown(
 if cash_now and cash_now >= amount:
     st.info(f"Ya hay {money(cash_now, public=False)} en efectivo en IBKR. Desplegar eso no "
             "cuesta ninguna transferencia: va antes que cualquier depósito nuevo.")
+
+# Core and satellite (§15.5 point 4): where this tranche goes by the written policy. The
+# rebalancing is done with contributions, never with sales (transform/allocation.py).
+policy = al.Policy.from_config(local.get("portfolio"))
+held_all = sorted(positions["ticker"]) if not positions.empty else []
+valued_all = port.valuation(positions, port.latest_prices(app_data.prices_for(held_all))) \
+    if held_all else pd.DataFrame()
+nav_frame = port.nav_series(nav) if not nav.empty else pd.DataFrame()
+nav_now = float(nav_frame["value"].iloc[-1]) if not nav_frame.empty else None
+split = al.allocate(valued_all, nav_now, cash_now, policy)
+st.markdown("**Núcleo y satélite**")
+if policy.written:
+    target = float(policy.core_target)
+    st.markdown(
+        f"Núcleo ({', '.join(policy.core_tickers)}): **{pct(split.core_share, decimals=0)}** "
+        f"de la cuenta frente a tu objetivo del **{pct(target, decimals=0)}** · satélite "
+        f"({len(split.satellites)} acciones): {pct(split.satellite_share, decimals=0)} · "
+        f"efectivo: {pct(split.cash_share, decimals=0)}.")
+    if split.destination == "core":
+        months = None if not split.to_target else split.to_target / default_amount
+        st.info(f"**Este tramo va al núcleo.** Faltan unos "
+                f"{money(split.to_target, public=False)} de aportes para llegar al objetivo"
+                + (f" (≈ {number(months, decimals=0)} aportes de "
+                   f"{money(default_amount, public=False)})" if months else "")
+                + ". No se vende ningún satélite para rebalancear: se corrige con aportes.")
+    elif split.destination == "satellite":
+        st.info("**El núcleo está en su objetivo: este tramo puede ir al satélite.** Primero, "
+                "reforzar una tesis que ya tienes y mejora (sección 3); una nueva, solo si "
+                "ninguna cumple.")
+else:
+    st.caption("Sin política núcleo-satélite escrita (`portfolio.core` en "
+               "`settings.local.yaml`): el panel no sabe qué parte de la cuenta es núcleo.")
+for note in split.notes if policy.written else split.notes[1:]:
+    st.caption(note)
+days_above, since = al.cash_spell(nav_frame, port.nav_series(nav, port.NAV_CASH)
+                                  if not nav.empty else pd.DataFrame(), policy.cash_max)
+if days_above:
+    grace = policy.cash_grace_days
+    message = (f"El efectivo está por encima de tu límite del {pct(policy.cash_max, decimals=0)} "
+               f"desde el {since} ({days_above} días).")
+    if grace is not None and days_above > grace:
+        st.warning(message + f" Tu regla permite {grace} días: toca desplegarlo.")
+    else:
+        st.caption(message)
 
 targets = dict(local.get("portfolio", {}).get("target_weights") or {})
 suggested = None

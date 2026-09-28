@@ -44,7 +44,7 @@ import pandas as pd
 from core.config import Settings
 from core.logging_setup import get_logger
 from ingest.macro_calendar import current_calendar
-from transform import discipline, portfolio
+from transform import allocation, discipline, portfolio
 from transform import regime as rg
 from transform import thesis as th
 
@@ -78,6 +78,9 @@ class Snapshot:
     earnings_window_days: int = th.EARNINGS_WINDOW_DAYS
     hurdle_rate: float | None = None
     researched: dict[str, str] = field(default_factory=dict)   # CIK → ticker (studied)
+    nav: pd.DataFrame = field(default_factory=pd.DataFrame)    # NAV:total, [ts, value]
+    nav_cash: pd.DataFrame = field(default_factory=pd.DataFrame)
+    policy: Mapping[str, Any] = field(default_factory=dict)    # settings `portfolio`
 
     @property
     def today(self) -> str:
@@ -345,6 +348,25 @@ def filing_signal(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
     return alerts
 
 
+def cash_above_limit(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
+    """Cash above the written limit for longer than the written grace (§15.5 point 4).
+
+    Once per spell: keyed on the day it went above, so a cash pile that stays is said once
+    and a new one after a deployment is news again. Silent without a written policy."""
+    policy = allocation.Policy.from_config(snap.policy)
+    if policy.cash_max is None or policy.cash_grace_days is None:
+        return []
+    days, since = allocation.cash_spell(snap.nav, snap.nav_cash, policy.cash_max)
+    if not days or days <= int(policy.cash_grace_days):
+        return []
+    return [Alert("cash_above_limit", f"cash_above_limit:{since}", (
+        f"💵 El efectivo lleva {days} días por encima de tu límite del "
+        f"{policy.cash_max * 100:.0f} % de la cuenta (desde el {since}).\n"
+        f"Tu política permite {policy.cash_grace_days} días. El efectivo que espera es una "
+        "posición que nadie decidió: toca desplegarlo según el plan (📋 Desplegar)."
+    ))]
+
+
 RULES: dict[str, Callable[[Snapshot, Mapping[str, Any]], list[Alert]]] = {
     "macro_release_soon": macro_release_soon,
     "earnings_soon": earnings_soon,
@@ -354,6 +376,7 @@ RULES: dict[str, Callable[[Snapshot, Mapping[str, Any]], list[Alert]]] = {
     "exit_ladder_triggered": exit_ladder_triggered,
     "amended_filing": amended_filing,
     "filing_signal": filing_signal,
+    "cash_above_limit": cash_above_limit,
 }
 
 
@@ -481,6 +504,10 @@ def load_snapshot(conn: Any, settings: Settings, now: pd.Timestamp | None = None
         earnings_window_days=int(level3.get("earnings_window_days", th.EARNINGS_WINDOW_DAYS)),
         hurdle_rate=level3.get("hurdle_rate"),
         researched=researched,
+        nav=portfolio.nav_series(account) if not account.empty else pd.DataFrame(),
+        nav_cash=portfolio.nav_series(account, portfolio.NAV_CASH) if not account.empty
+        else pd.DataFrame(),
+        policy=dict(settings.raw.get("portfolio") or {}),
     )
 
 

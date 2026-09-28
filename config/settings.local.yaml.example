@@ -92,6 +92,15 @@ portfolio:
   # una tesis sale mal. Con los escenarios de cada ficha, Empresa y Desplegar calculan el
   # tamaño máximo que lo respeta. Fracción: 0.02 = 2 %. En null, no se calcula.
   loss_budget: null
+  # Política núcleo + satélite (§15.5 punto 4). Todo en null hasta que escribas tu política
+  # de inversión: el panel no supone ninguna. Fracciones sobre TODA la cuenta, efectivo incluido.
+  core:
+    tickers: []                   # los fondos índice del núcleo, ej. [QQQM] o [VOO]
+    target_share: null            # parte de la cuenta en el núcleo, ej. 0.5
+    band: null                    # tolerancia antes de dirigir aportes al núcleo, ej. 0.05
+  max_satellites: null            # nº máximo de acciones individuales, ej. 6
+  cash_max: null                  # efectivo máximo, ej. 0.05
+  cash_grace_days: null           # días que puede estar por encima antes de avisar, ej. 45
 
 # Plan de aportes (§13, entrada de usuario nº1). Determina cuántas posiciones son
 # razonables y si la comisión es material por ticket.
