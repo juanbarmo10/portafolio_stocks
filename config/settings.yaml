@@ -951,6 +951,45 @@ insider_study:
   # dos mitades. Si no, el panel no la enseña como señal.
   decision_horizons: [90, 180]
 
+# --- Estudio de la deriva posterior a resultados, PEAD (CLAUDE.md §15.5 punto 6) --------
+# Escrito el 2026-09-28 ANTES de descargar ninguna fecha de resultados y de calcular nada.
+# Una sola ejecución: `python run_validation.py --pead`. Pregunta: tras un anuncio de
+# resultados, ¿la acción sigue moviéndose en la dirección de su reacción inicial? Si pasa,
+# Empresa enseñará la reacción y la deriva esperada; si no, nada (§9.7).
+pead_study:
+  first_date: "2017-03-01"          # los cierres de los miembros empiezan en 2017
+  # Evento: 8-K con item 2.02 (resultados), fechado por su presentación. Incluye algún
+  # avance de cifras preliminares (DUOL, IBRX en enero): ruido, dicho en el informe.
+  event_item: "2.02"
+  universe: sp500_at_event          # miembro del S&P 500 ese día y con precio
+  # Sorpresa = REACCIÓN: rentabilidad de la acción menos la de SPY desde el cierre de la sesión
+  # ANTERIOR a la fecha de presentación hasta el cierre de la sesión SIGUIENTE a ella. Tres
+  # sesiones cubren un anuncio antes de la apertura y uno tras el cierre. El consenso de
+  # analistas, la medida habitual, es de pago (§4.5).
+  reaction_window: [-1, 1]
+  # Dos señales, umbrales fijos escritos antes (no percentiles de la muestra, que usarían la
+  # distribución del futuro): una reacción grande en cada sentido.
+  signals:
+    positive: {min_reaction: 0.05}   # ≥ +5 % sobre SPY
+    negative: {max_reaction: -0.05}  # ≤ −5 % sobre SPY
+  # Deriva: exceso sobre SPY (precio, sin dividendos, los dos) desde el cierre de la primera
+  # sesión DESPUÉS de la ventana de reacción, a estos días naturales (≈ 20 y 60 sesiones).
+  horizons_days: [30, 90]
+  benchmark: SPY
+  # Base: las mismas empresas en una rejilla mensual, a más de `away_days` de cualquier
+  # anuncio suyo: «lo que hacen estas acciones un día normal».
+  baseline_step_days: 30
+  away_days: 20
+  fdr_alpha: 0.10                    # BH sobre las 4 pruebas (2 señales × 2 horizontes)
+  permutations: 10000
+  seed: 0
+  halves_split: "2021-12-31"         # estabilidad del signo: 2017-2021 frente a 2022-hoy
+  # Regla de decisión, escrita antes: una señal está VALIDADA solo si, a 90 días, es
+  # significativa tras BH, su deriva media frente a la base va en el SENTIDO de la reacción
+  # (positiva para `positive`, negativa para `negative`) y ese sentido se repite en las dos
+  # mitades. Si ninguna pasa, el panel no enseña la deriva como señal.
+  decision_horizons: [90]
+
 # --- Estudio de factores: calidad, devengos, momentum (CLAUDE.md §15.4 punto 9) ---------
 # Escrito el 2026-09-26 ANTES de descargar los fundamentales de los miembros y de calcular
 # nada. Una sola ejecución: `python run_validation.py --factors`. Pregunta: ¿ordenar el
