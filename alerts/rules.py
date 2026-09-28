@@ -44,7 +44,7 @@ import pandas as pd
 from core.config import Settings
 from core.logging_setup import get_logger
 from ingest.macro_calendar import current_calendar
-from transform import portfolio
+from transform import discipline, portfolio
 from transform import regime as rg
 from transform import thesis as th
 
@@ -246,17 +246,9 @@ def review_overdue(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
 
 
 def _position_metrics(snap: Snapshot, ticker: str) -> dict[str, float | None]:
-    """``price``, ``weight`` and ``return_pct`` of one held position."""
-    rows = snap.valued[snap.valued["ticker"] == ticker] if not snap.valued.empty else []
-    if len(rows) == 0:
-        return {"price": None, "weight": None, "return_pct": None}
-    row = rows.iloc[0]
-
-    def clean(value: Any) -> float | None:
-        return None if pd.isna(value) else float(value)
-
-    return {"price": clean(row["price"]), "weight": clean(row["weight"]),
-            "return_pct": clean(row["unrealized_return"])}
+    """``price``, ``weight`` and ``return_pct`` of one held position — the same function
+    📋 Desplegar uses, so the page and the alert never disagree."""
+    return discipline.position_metrics(snap.valued, ticker)
 
 
 def exit_ladder_triggered(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:

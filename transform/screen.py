@@ -189,8 +189,12 @@ FILTERS = {
 
 
 def apply_filters(table: pd.DataFrame, limits: Mapping[str, float | None], *,
-                  keep_unknown: bool = False, exclude_financials: bool = False) -> Filtered:
+                  keep_unknown: bool = False, exclude_financials: bool = False,
+                  filters: Mapping[str, tuple[str, str]] | None = None) -> Filtered:
     """Keep the rows that pass every limit set (``None`` = limit off).
+
+    ``filters``: ``{column: (min|max, parameter name)}``, :data:`FILTERS` by default; the
+    growth screen passes its own (``transform.growth_screen.FILTERS``).
 
     A row a rule cannot judge (its value is missing) is neither kept nor counted as failed
     unless ``keep_unknown``: it goes to ``unknown[column]`` (if it fails no other rule), so
@@ -207,7 +211,7 @@ def apply_filters(table: pd.DataFrame, limits: Mapping[str, float | None], *,
     keep = pd.Series(True, index=table.index)
     failed = pd.Series(False, index=table.index)
     missing_by: dict[str, pd.Series] = {}
-    for column, (direction, name) in FILTERS.items():
+    for column, (direction, name) in (FILTERS if filters is None else filters).items():
         limit = limits.get(name)
         if limit is None:
             continue

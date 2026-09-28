@@ -125,6 +125,18 @@ class Settings:
         """
         return [*self.tracked_companies, *self.watchlist_companies]
 
+    @property
+    def peers(self) -> dict[str, list[str]]:
+        """``{ticker: [peer tickers]}``, chosen by the user (CLAUDE.md §15.5, point 11).
+
+        A mapping of its own rather than a field of the thesis card, so a company without a
+        card yet can have peers too. Peers buy data, as a
+        watchlist entry does, and nothing else: they are never universe.
+        """
+        raw = self.raw.get("universe", {}).get("peers") or {}
+        return {str(t).upper(): [str(p).upper() for p in (group or [])]
+                for t, group in raw.items()}
+
     def source(self, name: str) -> dict[str, Any]:
         """Return the parameter block for a named data source (e.g. 'fred', 'sec')."""
         return dict(self.raw.get("sources", {}).get(name, {}))
@@ -323,6 +335,30 @@ def validate_watchlist(
         )
 
 
+def validate_peers(raw: Any) -> None:
+    """``universe.peers`` must map a ticker to a list of tickers, none of them itself.
+
+    Raises:
+        ValueError: On any other shape — a string where a list was meant would be read as
+            one peer per character.
+    """
+    if raw is None:
+        return
+    problems: list[str] = []
+    if not isinstance(raw, dict):
+        problems.append("must be a mapping {TICKER: [PEER, ...]}")
+    else:
+        for ticker, group in raw.items():
+            if not isinstance(group, list) or not all(isinstance(p, str) and p.strip()
+                                                      for p in group):
+                problems.append(f"{ticker}: must be a list of tickers")
+            elif str(ticker).upper() in {p.upper() for p in group}:
+                problems.append(f"{ticker}: a company is not its own peer")
+    if problems:
+        raise ValueError("Invalid universe.peers (CLAUDE.md §15.5 point 11):\n  "
+                         + "\n  ".join(problems))
+
+
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     """Load and cache the effective settings.
@@ -377,4 +413,5 @@ def load_settings() -> Settings:
     )
     validate_theses(settings.tracked_companies)
     validate_watchlist(settings.watchlist_companies, settings.tracked_companies)
+    validate_peers(raw.get("universe", {}).get("peers"))
     return settings

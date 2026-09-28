@@ -169,10 +169,11 @@ class BcbIngester(Ingester):
                              for key in keys.values()}
             # The whole history while any configured series has never been stored (a first
             # run, or a column added to the config); afterwards only the last year: late
-            # revisions and the new quarter.
-            ends = quarter_ends(self._first, today)
+            # revisions and the new quarter. A peer (§15.5 point 11) asks for less: its own
+            # `first_quarter` (enough for a year-on-year change) and `recent_quarters`.
+            ends = quarter_ends(str(inst.get("first_quarter") or self._first), today)
             if wanted_series <= self._seen_series:
-                ends = ends[-4:]
+                ends = ends[-int(inst.get("recent_quarters", 4)):]
             for end in ends:
                 am = f"{end.year}{end.month:02d}"
                 observed_any: bool | None = None

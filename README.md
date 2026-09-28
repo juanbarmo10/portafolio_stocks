@@ -234,6 +234,9 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 | Macro (CPI, PCE, NFP, fed funds, dólar, curva, spread HY, NFCI, VIX) | FRED | REST, clave gratuita |
 | Fundamentales auditados | SEC EDGAR XBRL | `data.sec.gov`, sin clave |
 | Cribado trimestral del S&P 500 | SEC XBRL `frames` | un concepto para todas las empresas de un año: ~40 peticiones en vez de 500. Sin fecha de presentación, así que solo sirve para el cribado de hoy, nunca para un backtest |
+| Pares de NU en Colombia | Superintendencia Financiera, CUIF en datos.gov.co (`mxk5-ce6w`) | cuentas mensuales de cada entidad vigilada; el resultado es acumulado desde enero y no hay fecha de publicación (primera vista o cierre + 60 días) |
+| Pares fuera del cribado (DiDi) | SEC `companyfacts`, ejercicios completos | en la moneda en que presentan; solo cocientes. Un emisor que pasó a IFRS deja de leerse |
+| Cribado de crecimiento (todas las empresas de la SEC) | SEC XBRL `frames` trimestral + yfinance (último cierre, volumen y splits) | cada empresa en su último trimestre presentado: el cuarto trimestre natural casi no existe en `frames` (va dentro del 10-K). Un solo concepto de ingresos por empresa, el total, porque algunas etiquetan una partida con otro concepto |
 | Fechas de presentación y enmiendas | SEC submissions | `data.sec.gov`, sin clave |
 | Mapa ticker↔CIK | SEC `company_tickers.json` | sin clave |
 | Precios diarios OHLC y acciones corporativas | yfinance | sin clave |
@@ -292,8 +295,8 @@ python run_ingest.py --force         # también lo que no toca hoy (amplitud, cr
 ```
 
 Fuentes registradas: `fred`, `macro_calendar`, `prices`, `ibkr`, `sec`, `sec_filings`,
-`short_interest`, `bcb`, `universe` (semanal) y `screen` (trimestral). Las dos últimas se saltan
-solas mientras no les toca: los datos que traen no cambian más deprisa. Una fuente sin sus
+`short_interest`, `bcb`, `sfc` y `universe` (semanales), `peers`, `screen` y `growth_screen`
+(trimestrales). Las programadas se saltan solas mientras no les toca: los datos que traen no cambian más deprisa. Una fuente sin sus
 credenciales configuradas **se omite con aviso**, no rompe el pipeline; y una unidad rota
 dentro de una fuente (una serie, un ticker, una empresa) se reporta y devuelve código de
 salida ≠ 0 sin llevarse por delante a las demás.
@@ -409,7 +412,8 @@ transform/  funciones puras, sin red — entrada faltante -> None
 app/        Streamlit multipágina (st.navigation)
               ├── 🏠 Hoy       nivel 1 point-in-time + resumen del checklist y lo que viene
               ├── 📈 Mercado   nivel 2 y el semáforo de régimen, con el voto de cada señal
-              ├── 🔎 Cribado   trimestral: qué empresas del S&P 500 merecen una ficha
+              ├── 🔎 Cribado   trimestral: qué empresas merecen una ficha (S&P 500 por
+              │                calidad y precio, o todas las de la SEC por crecimiento)
               │                (captura de valor y precio; solo local)
               ├── 🏢 Empresa   nivel 3: fundamentales trimestre a trimestre y balance,
               │                valoración (múltiplos, DCF inverso), el precio frente al

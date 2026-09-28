@@ -29,6 +29,7 @@ from ingest.bcb import BcbIngester
 from ingest.fred import FredIngester
 from ingest.local_fx import LocalFxIngester
 from ingest.macro_calendar import MacroCalendarIngester
+from ingest.peers import PeersIngester
 from ingest.ibkr_flex import (
     IbkrFlexIngester,
     cash_transactions_frame,
@@ -36,10 +37,12 @@ from ingest.ibkr_flex import (
 )
 from ingest.prices import PricesIngester
 from ingest.sec_filings import SecFilingsIngester
+from ingest.growth_screen import GrowthScreenIngester
 from ingest.screen import ScreenIngester
 from ingest.short_interest import ShortInterestIngester
 from ingest.universe import UniverseIngester
 from ingest.sec_xbrl import SecXbrlIngester
+from ingest.sfc import SfcIngester
 
 log = get_logger(__name__)
 
@@ -57,10 +60,16 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "universe": (UniverseIngester.is_available, UniverseIngester),
     # Supervisory data for companies the SEC cannot read (Nu Holdings, IFRS).
     "bcb": (BcbIngester.is_available, BcbIngester),
+    # Colombia's supervisor, for Nu Colombia and its competitors (§15.5 point 11).
+    "sfc": (SfcIngester.is_available, SfcIngester),
+    # Annual figures for the peers the growth screen cannot read (DiDi: 20-F, yuan).
+    "peers": (PeersIngester.is_available, PeersIngester),
     # Local only: its config lives in settings.local.yaml (section 11).
     "local_fx": (LocalFxIngester.is_available, LocalFxIngester),
     # Quarterly; last, so the universe and the registry it reads are already fresh.
     "screen": (ScreenIngester.is_available, ScreenIngester),
+    # Quarterly: every SEC filer, for the growth mode of the screen (§15.5 point 2).
+    "growth_screen": (GrowthScreenIngester.is_available, GrowthScreenIngester),
 }
 
 # Where non-observation rows go. An ingester returning a table name absent from this

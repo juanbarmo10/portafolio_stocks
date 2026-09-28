@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from typing import Any
 
 import altair as alt
 import pandas as pd
@@ -56,6 +57,7 @@ from transform import thesis as th
 from transform import price_action as pa
 from transform import quarterly as qt
 from transform import screen as sc
+from transform import sfc
 from transform import valuation as val
 from transform.adjustments import split_adjusted, total_return_index
 from transform import value_accrual as va
@@ -521,6 +523,69 @@ if not screen_table.empty:
             "leen en la misma dirección."
         )
 
+# Against the peers the user chose (§15.5 point 11): the SIC group above fails on the
+# companies that matter (HIMS is "offices of doctors", UBER a catch-all code). The list lives
+# in settings.local.yaml, so the public deployment never shows it.
+peer_list = settings.peers.get(ticker, [])
+if peer_list:
+    peer_rows, peer_median = app_data.peers_view(ticker, tuple(peer_list), as_of_iso,
+                                                 app_data.db_mtime())
+    shown = peer_rows[peer_rows["found"]]
+    missing = [str(t) for t in peer_rows.loc[~peer_rows["found"], "ticker"]]
+    # A peer whose last readable period is old (DiDi: US GAAP until FY2023, IFRS since) is
+    # shown with its period and said out loud: compared as if current, it would mislead.
+    old_rows = [f"{r['ticker']} ({r['quarter']})" for r in shown.to_dict("records")
+                if r.get("quarter_end") and (pd.Timestamp(as_of_iso)
+                                             - pd.Timestamp(r["quarter_end"])).days > 460]
+    st.markdown(f"**Frente a tus pares** · {len(shown) - int(shown['role'].eq('empresa').sum())}"
+                f" de {len(peer_list)} con cifras")
+    PEER_COLUMNS = {
+        "revenue_growth": "Crec. ingresos", "acceleration": "Aceleración (pp)",
+        "gross_margin": "Margen bruto", "operating_margin": "Margen operativo",
+        "incremental_margin": "Margen op. incremental", "fcf_margin": "Margen FCF (año)",
+        "sbc_over_revenue": "SBC / ingresos", "dilution": "Dilución",
+        "rule_of_40": "Regla del 40", "price_to_sales": "P / ventas",
+        "market_cap": "Capitalización (mil M)",
+    }
+
+    def scaled(metric: str, value: Any) -> Any:
+        if value is None or pd.isna(value):
+            return None
+        if metric == "acceleration":
+            return value * 100
+        return value / 1e9 if metric == "market_cap" else value
+
+    table_rows = [{"Empresa": ("▶ " if r["role"] == "empresa" else "") + str(r["ticker"]),
+                   "Nombre": r.get("name"),
+                   "Periodo": str(r.get("quarter") or "").replace("CY", "").replace("Q", " T"),
+                   **{label: scaled(m, r.get(m)) for m, label in PEER_COLUMNS.items()}}
+                  for r in peer_rows.to_dict("records") if r["found"]]
+    table_rows.append({"Empresa": "Mediana de los pares", "Nombre": None, "Periodo": None,
+                       **{label: scaled(m, peer_median.get(m))
+                          for m, label in PEER_COLUMNS.items()}})
+    percent = st.column_config.NumberColumn(format="percent")
+    st.dataframe(pd.DataFrame(table_rows), hide_index=True, width="stretch", column_config={
+        "Crec. ingresos": percent, "Margen bruto": percent, "Margen operativo": percent,
+        "Margen op. incremental": percent, "Margen FCF (año)": percent,
+        "SBC / ingresos": percent, "Dilución": percent, "Regla del 40": percent,
+        "Aceleración (pp)": st.column_config.NumberColumn(format="%.1f"),
+        "P / ventas": st.column_config.NumberColumn(format="%.1f×"),
+        "Capitalización (mil M)": st.column_config.NumberColumn(format="%.1f"),
+    })
+    st.caption(
+        "Cada empresa en su último trimestre presentado frente al mismo del año anterior "
+        "(🔎 Cribado, modo crecimiento); las que solo presentan un informe anual, en su último "
+        "ejercicio («FY»), con cocientes que no dependen de la moneda. La mediana es la de los "
+        "pares, sin la empresa. Nada aquí dice cuál es mejor: más crecimiento y más dilución "
+        "no se leen en la misma dirección. En un banco o una financiera, el margen FCF y la "
+        "regla del 40 quedan vacíos: su flujo de caja lleva dentro los préstamos que concede. "
+        "Los pares los eliges tú en `universe.peers`."
+        + (f" **Sin cifras:** {', '.join(missing)} (emisor IFRS, sin ingresos presentados o "
+           "fuera del cribado todavía)." if missing else "")
+        + (f" ⚠️ **Cifras antiguas:** {', '.join(old_rows)} — su último periodo legible tiene "
+           "más de 15 meses (por ejemplo, un emisor extranjero que pasó a IFRS, que esta "
+           "fuente no lee): no lo compares como si fuera actual." if old_rows else ""))
+
 # The supervisor's figures, for a bank the SEC cannot read (RESEARCH.md §2.43): Nu Holdings
 # files IFRS without quarterly XBRL, and the Banco Central do Brasil publishes its Brazilian
 # conglomerate every quarter. Shown for any company with an institution in sources.bcb.
@@ -591,6 +656,80 @@ if bcb_institution:
             + "Normas contables brasileñas (COSIF), en reales y **solo Brasil**: no cuadra con "
             "los 6-K en IFRS y no debe. Es la mirada del supervisor, que la empresa no elige."
         )
+
+# The same lender against its competitors, by the same supervisor (§15.5 point 11): in
+# Brazil the IF.data institutions marked `peer_of`, in Colombia the CUIF entities. The same
+# definitions for all, which is what makes these the cleanest comparison there is.
+bcb_group = [i for i in settings.source("bcb").get("institutions", [])
+             if ticker in (str(i.get("ticker")), str(i.get("peer_of")))]
+if len(bcb_group) > 1:
+    ifdata = app_data.observations("bcb_ifdata", app_data.db_mtime())
+    lines = []
+    for inst in bcb_group:
+        view = bcb.assess(ifdata, str(inst["code"]), as_of_iso)
+        if view is None:
+            continue
+        lines.append({
+            "Institución": ("▶ " + ticker) if inst.get("ticker") == ticker else inst.get("name"),
+            "Trimestre": view.quarter,
+            "Cartera (mil M R$)": None if view.credit_portfolio is None
+            else view.credit_portfolio / 1e9,
+            "Crec. cartera": view.credit_growth,
+            "Clientes con crédito (M)": None if view.credit_clients is None
+            else view.credit_clients / 1e6,
+            "Basilea": view.basel,                       # IF.data: a fraction (0,155)
+            "Activos problemáticos": view.problem_share,
+            "ROE anualizado": view.roe_annualized,
+        })
+    if len(lines) > 1:
+        st.markdown("**Frente a los bancos de Brasil** · Banco Central do Brasil (IF.data)")
+        percent = st.column_config.NumberColumn(format="percent")
+        st.dataframe(pd.DataFrame(lines), hide_index=True, width="stretch", column_config={
+            "Cartera (mil M R$)": st.column_config.NumberColumn(format="%.1f"),
+            "Clientes con crédito (M)": st.column_config.NumberColumn(format="%.2f"),
+            "Crec. cartera": percent, "Basilea": percent, "Activos problemáticos": percent,
+            "ROE anualizado": percent})
+        st.caption("Mismos informes y mismas definiciones del supervisor para todos: la "
+                   "comparación más limpia. Conglomerados prudenciales, solo Brasil. «Activos "
+                   "problemáticos» sobre la exposición total (Res. 4.966); ROE = 4 × beneficio "
+                   "del trimestre / patrimonio, aproximado. Crecimiento de cartera solo dentro "
+                   "de la misma base contable; uno enorme es una entidad que empezó a prestar "
+                   "hace poco (Revolut Brasil).")
+
+sfc_group = [e for e in settings.source("sfc").get("entities", [])
+             if ticker in (str(e.get("ticker")), str(e.get("peer_of")))]
+if sfc_group:
+    cuif = app_data.observations("sfc_cuif", app_data.db_mtime())
+    snaps = sfc.compare(cuif, sfc_group, as_of_iso) if not cuif.empty else []
+    if snaps:
+        st.markdown("**Frente a los de Colombia** · Superintendencia Financiera (CUIF)")
+        percent = st.column_config.NumberColumn(format="percent")
+        billions = st.column_config.NumberColumn(format="%.2f")
+        st.dataframe(pd.DataFrame([{
+            "Entidad": ("▶ " if next((e for e in sfc_group if str(e.get("name")) == x.name),
+                                     {}).get("ticker") == ticker else "") + x.name,
+            "Mes": x.month,
+            "Activo (billones COP)": None if x.total_assets is None else x.total_assets / 1e12,
+            "Cartera neta (billones)": None if x.loans_net is None else x.loans_net / 1e12,
+            "Crec. cartera": x.loans_growth,
+            "Depósitos (billones)": None if x.deposits is None else x.deposits / 1e12,
+            "Crec. depósitos": x.deposits_growth,
+            "Cartera / depósitos": x.loans_to_deposits,
+            "Cartera C, D y E": x.risk_share,
+            "ROE anualizado": x.roe_annualized,
+        } for x in snaps]), hide_index=True, width="stretch", column_config={
+            "Activo (billones COP)": billions, "Cartera neta (billones)": billions,
+            "Depósitos (billones)": billions, "Crec. cartera": percent,
+            "Crec. depósitos": percent, "Cartera / depósitos": percent,
+            "Cartera C, D y E": percent, "ROE anualizado": percent})
+        st.caption(
+            "Normas colombianas, en pesos y **solo Colombia**. «Cartera C, D y E»: la parte de "
+            "la cartera bruta en riesgo apreciable, significativo o de incobrabilidad, según la "
+            "calificación del supervisor (no es la morosidad a 90 días que publica la empresa). "
+            "El resultado es acumulado desde enero; el ROE lo anualiza (× 12 / mes) y es "
+            "aproximado. Un crecimiento de miles por ciento es una entidad que empezó a "
+            "prestar hace menos de un año (base casi nula), no un error. Fecha de publicación: "
+            "primera vista o cierre + 60 días.")
 
 # Growth per share (§5) is also the reference for the implied return (§3): computed once.
 PS = dict(settings.raw.get("panel", {}).get("per_share") or {})

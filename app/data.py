@@ -328,6 +328,40 @@ def screen_view(mtime: float) -> pd.DataFrame:
                            unidentified_debt_share=share)
 
 
+@st.cache_data(show_spinner="Calculando el cribado de crecimiento…")
+def growth_view(mtime: float) -> pd.DataFrame:
+    """The growth screen table (``transform.growth_screen``): every SEC filer's latest
+    reported quarter, its price summary, and the registry's tickers, names and SIC codes."""
+    from ingest.growth_screen import PRICE_SOURCE, SOURCE  # noqa: PLC0415
+    from transform import growth_screen as gs  # noqa: PLC0415
+
+    fundamentals = observations(SOURCE, mtime)
+    if fundamentals.empty:
+        return pd.DataFrame()
+    registry = companies()
+    names = {str(r["cik"]): (str(r["ticker"]), r.get("name"))
+             for r in registry.to_dict("records")}
+    sics = dict(zip(registry["cik"], registry["sic"])) if "sic" in registry else {}
+    jump = float(load_settings().raw.get("panel", {}).get("per_share", {})
+                 .get("jump_threshold", 0.5))
+    return gs.growth_table(fundamentals, observations(PRICE_SOURCE, mtime), names, sics,
+                           jump_threshold=jump)
+
+
+@st.cache_data(show_spinner="Comparando con los pares…")
+def peers_view(ticker: str, peers: tuple[str, ...], as_of_iso: str, mtime: float):
+    """``(rows, median)`` of ``transform.peers.peer_table``: the growth screen's latest
+    quarter for each company, and the fiscal years of ``sec_peers`` for the rest."""
+    from ingest.peers import SOURCE  # noqa: PLC0415
+    from transform import peers as pr  # noqa: PLC0415
+
+    registry = companies()
+    names = {str(r["cik"]): (str(r["ticker"]), r.get("name"))
+             for r in registry.to_dict("records")}
+    annual = pr.annual_table(observations(SOURCE, mtime), names, as_of_iso)
+    return pr.peer_table(growth_view(mtime), annual, ticker, list(peers))
+
+
 @st.cache_data(show_spinner="Calculando la valoración…")
 def valuation_view(cik: str, ticker: str, as_of_iso: str, years: int, mtime: float):
     """Today's valuation and its monthly history, point-in-time (``transform.valuation``).

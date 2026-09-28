@@ -135,3 +135,25 @@ def test_a_quarter_cut_by_an_outage_is_not_kept_half():
     ing = ingester_with(get)
     assert ing._ifdata(dt.date(2026, 9, 26)) == []
     assert len(ing.partial_failures()) == 1
+
+
+def test_a_peer_asks_only_for_its_own_history_and_then_its_recent_quarters():
+    """§15.5 point 11: twelve peer banks asking for the whole history every day would
+    multiply IF.data's requests; a peer asks from its `first_quarter`, then `recent_quarters`."""
+    quarters = []
+
+    def get(url, params=None):
+        if "olinda" in url and "Relatorio='1'" in url:
+            quarters.append(url.split("@AnoMes=")[1][:6])
+        return {"value": []} if "olinda" in url else []
+
+    ing = ingester_with(get)
+    peer = {"code": "C0000009", "name": "Peer", "peer_of": "NU", "first_quarter": "2025q1",
+            "recent_quarters": 2}
+    ing._institutions = [peer]
+    ing._ifdata(dt.date(2026, 9, 28))
+    assert quarters == ["202503", "202506", "202509", "202512", "202603", "202606"]
+    quarters.clear()
+    ing._seen_series = {f"C0000009:{k}" for keys in ing._reports.values() for k in keys.values()}
+    ing._ifdata(dt.date(2026, 9, 28))
+    assert quarters == ["202603", "202606"]

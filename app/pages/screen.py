@@ -1,7 +1,8 @@
 """🔎 Cribado — which companies deserve a thesis (CLAUDE.md §15.1, question 3 of section 2).
 
-Once a quarter, the current S&P 500 plus the researched companies, on audited annual
-figures from the SEC (``ingest/screen``, ``transform/screen``). The output is a short list
+Once a quarter, two modes: the current S&P 500 plus the researched companies on audited
+annual figures (``ingest/screen``, ``transform/screen``), or — "Crecimiento", §15.5 point 2 —
+every SEC filer at its latest reported quarter (``app/screen_growth``). The output is a short list
 of companies to **study** on the company page — the screen never says "buy", and nothing on
 it is fresher than the last annual report (sections 2, 12).
 
@@ -17,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
+from app import screen_growth
 from app.format import MISSING, color_by_sign
 from core.config import load_settings
 from ingest.screen import SOURCE
@@ -30,12 +32,42 @@ st.title("🔎 Cribado")
 st.caption(
     "Una vez al trimestre: ¿qué empresas merecen una ficha? El resultado es una lista de "
     "candidatas **para estudiar** en la página de Empresa, no una lista de compra. Cifras "
-    "anuales auditadas de la SEC; nada aquí es más reciente que el último informe anual."
+    "auditadas de la SEC; nada aquí es más reciente que el último informe presentado."
 )
 
 
 if not app_data.database_ready():
     st.info("Todavía no hay base de datos. Ejecuta `python run_ingest.py`.")
+    st.stop()
+
+held = set()
+account = app_data.account_observations()
+if not account.empty:
+    positions = port.latest_positions(account)
+    held = set(positions["ticker"]) if not positions.empty else set()
+tracked = {str(c["ticker"]) for c in settings.tracked_companies}
+watch = {str(c["ticker"]) for c in settings.watchlist_companies}
+
+
+def status(ticker: str) -> str:
+    marks = []
+    if ticker in held:
+        marks.append("en cartera")
+    if ticker in tracked:
+        marks.append("con tesis")
+    elif ticker in watch:
+        marks.append("en estudio")
+    return " · ".join(marks)
+
+
+GROWTH = "Crecimiento · todas las empresas de la SEC"
+mode = st.radio(
+    "Modo", ["Calidad y precio · S&P 500", GROWTH], horizontal=True, key="screen_mode",
+    help="Calidad y precio: el S&P 500 con cifras anuales, filtrado por dilución, SBC, caja y "
+         "tamaño. Crecimiento: todas las que presentan en la SEC, cada una en su último "
+         "trimestre, para buscar crecimiento que acelera y de buena calidad (§15.5).")
+if mode == GROWTH:
+    screen_growth.render(settings, status, tracked | watch)
     st.stop()
 
 table = app_data.screen_view(app_data.db_mtime())
@@ -99,26 +131,6 @@ if unknown and not keep_unknown:
 st.markdown(line)
 
 # --- The table ----------------------------------------------------------------------------
-held = set()
-account = app_data.account_observations()
-if not account.empty:
-    positions = port.latest_positions(account)
-    held = set(positions["ticker"]) if not positions.empty else set()
-tracked = {str(c["ticker"]) for c in settings.tracked_companies}
-watch = {str(c["ticker"]) for c in settings.watchlist_companies}
-
-
-def status(ticker: str) -> str:
-    marks = []
-    if ticker in held:
-        marks.append("en cartera")
-    if ticker in tracked:
-        marks.append("con tesis")
-    elif ticker in watch:
-        marks.append("en estudio")
-    return " · ".join(marks)
-
-
 shown = result.table.sort_values("fcf_after_sbc_yield", ascending=False, na_position="last")
 display = pd.DataFrame({
     "Ticker": shown["ticker"],

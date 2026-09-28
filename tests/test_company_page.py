@@ -416,3 +416,51 @@ def test_a_foreign_issuer_is_explained_not_sent_to_rerun_the_ingest(tmp_path, mo
     metrics = {m.label: m.value for m in app.metric}
     assert metrics["Activos problemáticos"] == "12,0 %"
     st.cache_data.clear()
+
+
+# --- Peers (§15.5 point 11) -----------------------------------------------------------
+
+PEERS = CARD + """
+  peers:
+    MSFT: [AAA, BBB]
+sources:
+  sfc:
+    entities:
+      - {tipo: 4, codigo: 1, name: Filial de MSFT, ticker: MSFT}
+      - {tipo: 1, codigo: 2, name: Rival, peer_of: MSFT}
+"""
+
+
+def test_the_peers_table_has_the_median_and_says_who_has_no_figures(tmp_path, monkeypatch):
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(PEERS, encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+    db_path = tmp_path / "company.db"
+    seed_database(db_path)
+    peer = "0000000011"
+    conn = loader.init_db(db_path)
+    loader.upsert_companies(conn, [{"cik": peer, "ticker": "AAA", "name": "Alpha",
+                                    "sector": None, "thesis_category": None,
+                                    "first_seen": "2026-09-28", "status": "active",
+                                    "sic": None, "sic_description": None}])
+    growth = [(f"{peer}:revenue:CY2026Q2", "2026-06-30", 130.0),
+              (f"{peer}:revenue:CY2025Q2", "2025-06-30", 100.0)]
+    cuif = [(f"{e}:{k}", m, v) for e in ("4-1", "1-2") for k, m, v in (
+        ("total_assets", "2026-07-31", 10e12), ("loans_net", "2026-07-31", 4e12))]
+    loader.upsert_observations(conn, pd.DataFrame(
+        [{"source": "sec_growth", "series_id": s, "ts": t, "ts_release": "", "value": v}
+         for s, t, v in growth]
+        + [{"source": "sfc_cuif", "series_id": s, "ts": t, "ts_release": t, "value": v}
+           for s, t, v in cuif]))
+    conn.close()
+    monkeypatch.setattr(app_data, "db_path", lambda: db_path)
+    st.cache_data.clear()
+    app = render()
+    text = rendered_text(app)
+    assert "Frente a tus pares" in text and "1 de 2 con cifras" in text
+    assert "Mediana de los pares" in text and "AAA" in text
+    assert "Sin cifras:** MSFT, BBB" in text, "a peer that vanished is said, not hidden"
+    assert "Frente a los de Colombia" in text and "▶ Filial de MSFT" in text
+    st.cache_data.clear()
+    config.load_settings.cache_clear()

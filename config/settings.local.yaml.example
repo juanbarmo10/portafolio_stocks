@@ -66,6 +66,11 @@ universe:
   #        action: "Vender hasta volver al 8 %."
   #        rule: { metric: weight, operator: ">", threshold: 0.12 }
 
+  # Pares (§15.5 punto 11): con quién comparar cada empresa en la página de Empresa. Se leen
+  # del cribado de crecimiento (o de su informe anual, si no está en él). Nunca son universo.
+  # peers:
+  #   AAPL: [MSFT, GOOGL]
+
 # Cartera objetivo: pesos por posición y por thesis_category, para que el drift
 # signifique algo (§13, entrada de usuario nº4). La cartera REAL nunca se escribe
 # aquí: se lee del Flex Query de IBKR.

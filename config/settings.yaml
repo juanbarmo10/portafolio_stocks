@@ -421,6 +421,25 @@ sources:
       - ticker: NU
         code: C0084693             # "NU PAGAMENTOS - PRUDENCIAL", conglomerado prudencial
         tipo: 1                    # TipoInstituicao de IF.data para conglomerados prudenciales
+      # Pares de NU (§15.5 punto 11), elegidos por el usuario el 2026-09-28. Mismos informes
+      # y misma definición que NU: la comparación más limpia que existe. Todos conglomerados
+      # prudenciales (tipo 1), códigos verificados contra IfDataCadastro. Solo la historia
+      # necesaria para el interanual (`first_quarter`) y, después, los 2 últimos trimestres
+      # (`recent_quarters`): IF.data es lento y los pares no necesitan su historia entera.
+      # RappiPay Brasil (institución de pago 09048716) NO está: las instituciones de pago no
+      # reportan estos informes (verificado con los cuatro tipos).
+      - {code: C0080996, name: Inter, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0084844, name: C6 Bank, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0088022, name: PicPay, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0084820, name: Mercado Pago, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0084813, name: PagBank, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0087054, name: Revolut Brasil, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0080099, name: Itaú, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0080075, name: Bradesco, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0080329, name: Banco do Brasil, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0080185, name: Santander Brasil, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0080336, name: BTG Pactual, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
+      - {code: C0082475, name: XP, peer_of: NU, first_quarter: 2025q1, recent_quarters: 2}
     # Informe → {columna del BCB (texto antes del salto de línea) → clave}. Verificadas
     # contra la API el 2026-09-25. Los informes de cartera por nivel de riesgo (8) llegan
     # solo hasta 2023; desde 2025 la Res. 4.966 los sustituye por el 16.
@@ -453,6 +472,37 @@ sources:
     # Copom: solo se guardan fechas hasta el día de la ingesta.
     sgs_series:
       432: selic_target
+
+  # --- Superintendencia Financiera de Colombia (ingest/sfc.py, §15.5 punto 11) -----------
+  # El CUIF de cada entidad vigilada, cuenta por cuenta, cada mes, en datos.gov.co (sin
+  # clave; robots.txt no restringe /resource/). Para NU: su negocio en Colombia frente a sus
+  # competidores. Normas colombianas, en PESOS, solo Colombia. Verificado el 2026-09-28.
+  sfc:
+    url: https://www.datos.gov.co/resource/mxk5-ce6w.json
+    history_months: 25           # la primera vez: dos años y un mes, para el interanual
+    recent_months: 3             # después: revisiones tardías y el mes nuevo
+    run_every_days: 7            # los datos son mensuales
+    # Sin fecha de publicación en la fuente: primera vista (observada) o, para la historia de
+    # la primera ingesta, cierre + este rezago (derivado). Una medida: julio de 2026 estaba
+    # publicado a los 49 días.
+    derived_lag_days: 60
+    # tipo_entidad y codigo_entidad de la SFC (1 = bancos, 4 = compañías de financiamiento).
+    entities:
+      - {tipo: 4, codigo: 128, name: Nu Colombia, ticker: NU}
+      - {tipo: 1, codigo: 65, name: Lulo Bank, peer_of: NU}
+      - {tipo: 4, codigo: 124, name: RappiPay, peer_of: NU}
+      - {tipo: 4, codigo: 130, name: Nequi, peer_of: NU}
+      - {tipo: 4, codigo: 127, name: Bold, peer_of: NU}
+      - {tipo: 1, codigo: 7, name: Bancolombia, peer_of: NU}
+    # Cuenta CUIF → clave. ⚠️ 590000 (resultado) es ACUMULADO DESDE ENERO.
+    accounts:
+      "100000": total_assets
+      "140000": loans_net          # cartera neta de deterioro
+      "210500": deposits_current   # cuenta corriente
+      "210700": deposits_term      # CDT
+      "210800": deposits_savings   # ahorro
+      "300000": equity
+      "590000": net_income_ytd
 
   ibkr_flex:
     base_url: https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService
@@ -746,6 +796,11 @@ panel:
   behavior:
     window_days: 365
     min_holding_days: 90
+  # Reforzar antes de abrir (📋 Desplegar, transform/discipline.py, §15.5 punto 1): la
+  # métrica de tu `invalidation_rule` hoy frente a hace `lookback_days`, con lo presentado a
+  # cada fecha. 100 días para que entre una presentación trimestral en medio; no optimizado.
+  discipline:
+    lookback_days: 100
   # Riesgo y modos de fallo (Cartera, transform/risk.py). No optimizados contra nada.
   risk:
     window_days: 365             # rendimientos diarios para volatilidad y correlación
@@ -957,3 +1012,25 @@ screen:
     # Bancos, aseguradoras, brókeres y REIT (SIC 6000-6799) fuera de la ordenación: su
     # "flujo de caja libre" mezcla depósitos y préstamos. Se cuentan aparte, no se esconden.
     exclude_financials: true
+  # Modo «Crecimiento» del cribado (§15.5 punto 2, ingest/growth_screen.py): TODAS las
+  # empresas de SEC `frames`, cada una en su último trimestre presentado frente al mismo
+  # trimestre del año anterior. Trimestral, como el anual.
+  growth:
+    run_every_days: 90
+    quarter_lag_days: 50          # un trimestre entra cuando cerró hace ≥ 50 días (10-Q: 40-45)
+    volume_sessions: 60           # mediana del volumen en dólares sobre estas sesiones
+    price_period: "6mo"           # yfinance: solo un resumen, nunca una historia de precios
+    batch_size: 200               # medido: ~35 s por lote de 200
+    min_price_coverage: 0.5       # con menos, la fuente probablemente cambió: fallo ruidoso
+    # Filtros por defecto de la página, editables allí. Decididos por el usuario el
+    # 2026-09-28; no optimizados contra nada. `null` = filtro apagado.
+    defaults:
+      min_market_cap: 300000000   # 300 M USD: fuera las microcaps más ilíquidas
+      min_dollar_volume: 1000000  # 1 M USD negociado al día (mediana)
+      exclude_financials: true    # su FCF no es el de una industrial; se cuentan aparte
+      min_revenue_q: null         # ingresos del trimestre; un crecimiento sobre una base
+                                  # minúscula (una empresa que empieza a facturar) encabeza
+                                  # cualquier orden por crecimiento
+      min_revenue_growth: null
+      min_gross_margin: null
+      max_dilution: null

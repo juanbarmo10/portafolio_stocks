@@ -71,8 +71,10 @@ def periods_for(metric: str, spec: Mapping[str, Any], year: int) -> list[str]:
 
 
 def frame_rows(payload: Mapping[str, Any], metric: str, period: str,
-               ciks: set[str], preference: int) -> dict[str, dict[str, Any]]:
-    """``{cik: row}`` for the wanted companies in one frames payload.
+               ciks: set[str] | None, preference: int, *,
+               source: str = SOURCE) -> dict[str, dict[str, Any]]:
+    """``{cik: row}`` for the wanted companies in one frames payload (``ciks=None``: every
+    filer in it — the growth screen's universe).
 
     Raises:
         ValueError: If the payload has no ``data`` list — a changed endpoint fails loudly.
@@ -83,11 +85,96 @@ def frame_rows(payload: Mapping[str, Any], metric: str, period: str,
     out = {}
     for row in data:
         cik = str(row["cik"]).zfill(10)
-        if cik in ciks and row.get("val") is not None:
-            out[cik] = {"source": SOURCE, "series_id": f"{cik}:{metric}:{period}",
+        if (ciks is None or cik in ciks) and row.get("val") is not None:
+            out[cik] = {"source": source, "series_id": f"{cik}:{metric}:{period}",
                         "ts": str(row["end"]), "ts_release": TS_RELEASE_UNKNOWN,
                         "value": float(row["val"]), "_preference": preference}
     return out
+
+
+# Metrics whose tags can be a total or one of its parts: NVE Corp files its whole revenue as
+# ``Revenues`` and a single line of it as ``RevenueFromContractWithCustomer…`` (11,0 M against
+# 0,3 M in 2026-Q2); Valaris uses one tag in some periods and the other in others (539 M
+# total against 7,5 M part). Found 2026-09-28 on the growth screen's first run.
+LARGEST_IS_TOTAL = frozenset({"revenue"})
+
+
+def resolve_tags(by_tag: Mapping[int, Mapping[str, dict[str, Any]]], *,
+                 largest: bool) -> dict[str, dict[str, Any]]:
+    """``{period: row}`` for one company and one metric, from its candidate tags
+    (``{preference: {period: row}}``).
+
+    **One tag per company**, not the first tag with a value in each period: mixing tags
+    across periods turns a change of tag into a change of the business. The chosen tag is
+    the first by preference — or, with ``largest`` (a total and its parts share the
+    metric), the one that is larger in the periods the tags share, because a total is
+    never smaller than one of its parts. Another tag fills a period the chosen one lacks
+    (a company that changed tags) only if it was never smaller than the chosen one where
+    both cover the same period (same end date): a part must not stand in for the total.
+    """
+    tags = sorted(by_tag)
+    if not tags:
+        return {}
+
+    def shared(a: int, b: int) -> list[str]:
+        # Comparable only when both facts end on the same day: Amcor's two tags in "CY2024"
+        # are fiscal years ending in June and in September, not a total and its part.
+        return [p for p in set(by_tag[a]) & set(by_tag[b])
+                if str(by_tag[a][p].get("ts")) == str(by_tag[b][p].get("ts"))]
+
+    best = tags[0]
+    if largest and len(tags) > 1:
+        wins = {t: 0 for t in tags}
+        for i, a in enumerate(tags):
+            for b in tags[i + 1:]:
+                for period in shared(a, b):
+                    va, vb = by_tag[a][period]["value"], by_tag[b][period]["value"]
+                    if va > vb:
+                        wins[a] += 1
+                    elif vb > va:
+                        wins[b] += 1
+        best = max(tags, key=lambda t: (wins[t], len(by_tag[t]), -t))
+    out = dict(by_tag[best])
+    for tag in tags:
+        if tag == best:
+            continue
+        if largest and any(by_tag[tag][p]["value"] < by_tag[best][p]["value"]
+                           for p in shared(tag, best)):
+            continue
+        for period, row in by_tag[tag].items():
+            out.setdefault(period, row)
+    return out
+
+
+def resolved_records(candidates: Mapping[tuple[str, str], Mapping[int, Mapping[str, dict]]]
+                     ) -> list[dict[str, Any]]:
+    """Observation rows from ``{(cik, metric): {preference: {period: row}}}``."""
+    return [{k: v for k, v in row.items() if k != "_preference"}
+            for (_, metric), by_tag in candidates.items()
+            for row in resolve_tags(by_tag, largest=metric in LARGEST_IS_TOTAL).values()]
+
+
+def cached_json(url: str, path: Path, *, user_agent: str, delay_s: float,
+                max_age_days: int = 7) -> dict[str, Any]:
+    """A SEC JSON document, from ``path`` when younger than ``max_age_days``. A 404 is an
+    empty frame (nobody filed that tag for the period), not an error."""
+    if path.exists():
+        age = dt.datetime.now() - dt.datetime.fromtimestamp(path.stat().st_mtime)
+        if age < dt.timedelta(days=max_age_days):
+            return json.loads(path.read_text(encoding="utf-8"))
+
+    def call() -> dict[str, Any]:
+        response = requests.get(url, headers={"User-Agent": user_agent}, timeout=90)
+        if response.status_code == 404:
+            return {"data": []}
+        response.raise_for_status()
+        return response.json()
+
+    payload = retry(call, exceptions=(requests.RequestException,))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    time.sleep(delay_s)
+    return payload
 
 
 def sic_map(ciks: Iterable[str], path: Path, *, base_url: str, user_agent: str,
@@ -183,23 +270,7 @@ class ScreenIngester(Ingester):
                                      f"{self._every_days}; `--force` to run it now")
 
     def _get_json(self, url: str, path: Path) -> dict[str, Any]:
-        if path.exists():
-            age = dt.datetime.now() - dt.datetime.fromtimestamp(path.stat().st_mtime)
-            if age < dt.timedelta(days=7):
-                return json.loads(path.read_text(encoding="utf-8"))
-
-        def call() -> dict[str, Any]:
-            response = requests.get(url, headers={"User-Agent": self._user_agent}, timeout=90)
-            if response.status_code == 404:
-                return {"data": []}          # nobody filed that tag for the period
-            response.raise_for_status()
-            return response.json()
-
-        payload = retry(call, exceptions=(requests.RequestException,))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload), encoding="utf-8")
-        time.sleep(self._delay_s)
-        return payload
+        return cached_json(url, path, user_agent=self._user_agent, delay_s=self._delay_s)
 
     def _sic_map(self, ciks: set[str]) -> dict[str, list[Any]]:
         """``{cik: [sic, description, fetched_iso]}``, fetching only what is missing or old."""
@@ -235,7 +306,7 @@ class ScreenIngester(Ingester):
             log.info("%d ticker(s) without a SEC CIK left out of the screen (ETFs, recent "
                      "renames): %s", len(missing), missing[:10], extra={"source": SOURCE})
         year = screen_year(dt.date.today())
-        chosen: dict[tuple[str, str], dict[str, Any]] = {}
+        candidates: dict[tuple[str, str], dict[int, dict[str, dict[str, Any]]]] = {}
         for metric, spec in self._concepts.items():
             unit = spec.get("unit", "USD")
             for period in periods_for(metric, spec, year):
@@ -251,9 +322,9 @@ class ScreenIngester(Ingester):
                         self._failures.append(f"{tag} {period}: {exc}")
                         continue
                     for cik, row in rows.items():
-                        chosen.setdefault((cik, f"{metric}:{period}"), row)
-        records = [{k: v for k, v in row.items() if k != "_preference"}
-                   for row in chosen.values()]
+                        candidates.setdefault((cik, metric), {}).setdefault(
+                            preference, {})[period] = row
+        records = resolved_records(candidates)
         log.info("Screen: %d values for %d companies, fiscal year CY%d.", len(records),
                  len(ciks), year, extra={"source": SOURCE})
         if not records:

@@ -1,9 +1,10 @@
 """📋 Desplegar capital — level 4: is it time to execute the plan? (CLAUDE.md section 2).
 
-The last step of the checklist, and the only page that talks about putting money in. It
-answers three questions in order, and the order is the point: whether today is a day to
-execute at all (levels 1-3 as gates), how large the tranche is and how many orders it
-deserves, and what it costs to bring the pesos to IBKR.
+The last step of the checklist, and the only page that talks about putting money in — or
+taking it out. In order, and the order is the point: whether today is a day to execute at
+all (levels 1-3 as gates), how large the tranche is, whether a held position deserves it
+before a new one (§15.5 point 1), what and at what price, what it costs to bring the pesos
+to IBKR, and — last — what the written plan says before selling.
 
 Private: it shows the account's cash and deposits. Not in ``PUBLIC_PAGES``.
 
@@ -17,14 +18,20 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import BAD, CAUTION, GOOD, MISSING, colored, money, number, pct
+from app.format import (BAD, CAUTION, GOOD, MISSING, colored, money, number, pct,
+                        reported_amount)
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
+from transform import behavior as bh
+from transform import discipline as dc
 from transform import funding as fx
 from transform import per_share
 from transform import portfolio as port
 from transform import regime as rg
+from transform import thesis as th
 from transform import valuation as val
+from transform.adjustments import total_return_index
+from transform.price_action import as_series
 
 settings = load_settings()
 local = settings.raw
@@ -135,8 +142,72 @@ else:
                "nº4), el panel no puede decir a qué posición va el tramo: un drift contra un "
                "objetivo inexistente parecería equilibrio.")
 
-# --- 3. What, and at what price ---------------------------------------------------------
-st.subheader("3 · ¿Qué, y a qué precio?")
+# --- 3. Reinforce before opening (§15.5, point 1) ---------------------------------------
+st.subheader("3 · ¿Reforzar antes de abrir?")
+DISCIPLINE = dict(local.get("panel", {}).get("discipline") or {})
+BEHAVIOR = dict(local.get("panel", {}).get("behavior") or {})
+held = sorted(positions["ticker"]) if not positions.empty else []
+tracked_cards = {str(c["ticker"]): c for c in settings.tracked_companies if c.get("ticker")}
+valued_held = port.valuation(positions, port.latest_prices(app_data.prices_for(held))) \
+    if held else pd.DataFrame()
+nav_total_frame = port.nav_series(nav) if not nav.empty else pd.DataFrame()
+nav_total = float(nav_total_frame["value"].iloc[-1]) if not nav_total_frame.empty else None
+portfolio_cfg = dict(local.get("portfolio") or {})
+max_position = portfolio_cfg.get("max_position")
+sec_obs = app_data.sec_observations()
+
+# Metrics a rule may name that are amounts; the rest are ratios (thesis.evaluable_metrics).
+AMOUNT_METRICS = {"revenue_ttm", "net_income_ttm", "fcf_ttm", "net_buybacks_ttm",
+                  "long_term_debt", "equity", "cash"}
+
+
+def metric_value(metric, value) -> str:
+    if value is None or pd.isna(value):
+        return MISSING
+    return reported_amount(value) if metric in AMOUNT_METRICS else pct(value)
+
+
+REINFORCE_LABELS = {
+    "improving": ("Tesis intacta y su métrica mejora", GOOD),
+    "flat": ("Tesis intacta, métrica sin cambio", None),
+    "unknown": ("No evaluable", None),
+    "worsening": ("Intacta, pero la métrica va hacia el umbral", CAUTION),
+    "at_limit": ("En tu tope de tamaño", CAUTION),
+    "no_card": ("Sin ficha de tesis", CAUTION),
+    "breached": ("Invalidación CRUZADA", BAD),
+}
+if not held:
+    st.caption("Sin posiciones abiertas en el último extracto: el tramo va a una posición "
+               "nueva (sección 4).")
+else:
+    table3 = dc.reinforce(held, tracked_cards, by_ticker, sec_obs, valued_held, today,
+                          lookback_days=int(DISCIPLINE.get("lookback_days", 100)),
+                          hurdle_rate=level3.get("hurdle_rate"), nav_total=nav_total,
+                          max_position=max_position)
+    st.markdown(
+        "| Posición | Estado | Métrica de tu regla | Hace ~un trimestre | Hoy | Margen hasta "
+        "el umbral | Peso en la cuenta | Nota |\n|---|---|---|---|---|---|---|---|\n"
+        + "\n".join(
+            f"| **{r.ticker}** | {colored(*REINFORCE_LABELS[r.status])} | "
+            f"{f'`{r.metric}` {r.operator} {r.threshold}' if r.metric else MISSING} | "
+            f"{metric_value(r.metric, r.value_before)} | {metric_value(r.metric, r.value_now)} | "
+            f"{pct(r.headroom) if r.headroom is not None and pd.notna(r.headroom) else MISSING} | "
+            f"{pct(r.weight) if r.weight is not None and pd.notna(r.weight) else MISSING} | "
+            f"{r.note or ''} |"
+            for r in table3.itertuples()))
+    st.caption(
+        "Antes de abrir una posición nueva, reforzar una que ya tienes **si su tesis sigue "
+        "viva y su propia métrica mejora**. La métrica es la de tu `invalidation_rule`: el "
+        "panel no elige por ti qué cifra importa. «Hace ~un trimestre» y «Hoy» son cifras "
+        "presentadas a cada fecha (sin mirar el futuro, §9.4); «Margen» es la distancia "
+        "relativa al umbral, positiva en el lado seguro. **El orden es el de la tesis, nunca "
+        "el del precio**: que haya subido no es razón para añadir, ni que haya bajado para "
+        "promediar. Si ninguna mejora, abrir una nueva es coherente con el plan."
+        + ("" if max_position is not None else
+           " Sin tope escrito (`portfolio.max_position`) no se comprueba el tamaño."))
+
+# --- 4. What, and at what price ---------------------------------------------------------
+st.subheader("4 · ¿Qué, y a qué precio?")
 cards = {str(c["ticker"]): c for c in settings.researched_companies if c.get("ticker")}
 candidates = sorted(set(cards) | (set(positions["ticker"]) if not positions.empty else set())
                     | set(targets))
@@ -257,8 +328,8 @@ else:
               "mismo. Detalle completo en 🏢 Empresa."
         )
 
-# --- 4. The deposit ---------------------------------------------------------------------
-st.subheader("4 · El depósito: de pesos a IBKR")
+# --- 5. The deposit ---------------------------------------------------------------------
+st.subheader("5 · El depósito: de pesos a IBKR")
 st.markdown(
     "Dos costes viajan con cada aporte y piden hábitos opuestos:\n"
     "- **Proporcional** — el diferencial del cambio frente a la TRM. Es el mismo porcentaje "
@@ -349,3 +420,111 @@ st.caption(
     "rendimiento esperado, que es un supuesto tuyo y no una medición. Regla práctica: si el "
     "fijo por transferencia pesa más que un mes de rentabilidad esperada del dinero que "
     "espera, agrupa.")
+
+
+# --- 6. Before selling (§15.5, point 1) -------------------------------------------------
+st.subheader("6 · Antes de vender")
+all_trades = app_data.trades()
+sold_or_held = sorted({str(t) for t in all_trades["ticker"]} | set(held) | {"SPY"}) \
+    if not all_trades.empty else sorted(set(held) | {"SPY"})
+history_prices = app_data.prices_for(sold_or_held)
+history_actions = app_data.corporate_actions()
+
+
+def total_return(ticker: str) -> pd.Series:
+    own = history_prices[history_prices["series_id"] == f"{ticker}:close_raw"]
+    if own.empty:
+        return pd.Series(dtype=float)
+    return as_series(total_return_index(own.assign(ts=own["ts"].str[:10]), history_actions,
+                                        ticker, today.date().isoformat()))
+
+
+sales = bh.sales_after(all_trades, {t: total_return(t) for t in sold_or_held}, today)
+kept_rising = int((sales["after"] > 0).sum()) if not sales.empty else 0
+missed = sales["after_usd"].sum(min_count=1) if not sales.empty else None
+missed_spy = (sales["spy_after"] * sales["proceeds"]).sum(min_count=1) \
+    if not sales.empty else None
+history_line = (
+    f"Tus ventas anteriores: **{kept_rising} de {len(sales)} siguieron subiendo** después de "
+    f"venderlas, y en conjunto lo vendido "
+    + (f"ganó {money(missed, public=False)} más" if missed >= 0 else
+       f"perdió {money(-missed, public=False)}: vender lo evitó")
+    + (f" (ese dinero en SPY: {money(missed_spy, public=False)})"
+       if missed_spy is not None and pd.notna(missed_spy) else "") + "."
+    if not sales.empty and missed is not None and pd.notna(missed) else "")
+
+if not held:
+    st.caption("Sin posiciones abiertas: nada que vender.")
+else:
+    min_days = int(BEHAVIOR.get("min_holding_days", 90))
+    open_lots, _disposals, _unmatched = port.fifo_lots(all_trades)
+    sell_pick = st.selectbox("Qué piensas vender", held, key="sell_pick")
+    sell_cik = str(by_ticker.get(sell_pick) or (tracked_cards.get(sell_pick) or {}).get("cik")
+                   or "").zfill(10)
+    fundamentals = th.evaluable_metrics(sec_obs, sell_cik, today, level3.get("hurdle_rate")) \
+        if sell_cik.strip("0") else {}
+    check = dc.before_selling(sell_pick, tracked_cards.get(sell_pick), fundamentals,
+                              valued_held, open_lots, today, min_holding_days=min_days)
+    rule_state = {True: ("CRUZADO", BAD), False: ("no cruzado", GOOD),
+                  None: ("no evaluable" if check.has_card else "sin ficha", None)}
+    state, state_tone = rule_state[check.invalidation_breached]
+    rows6 = [
+        ("✅" if check.has_card else "⚠️", "Ficha de tesis",
+         "escrita" if check.has_card else "sin ficha — no hay criterio escrito"),
+        ("🔴" if check.invalidation_breached else "⚪", "Criterio de invalidación",
+         colored(state, state_tone)
+         + (f" — «{check.invalidation}»" if check.invalidation else "")),
+        ("🎯" if check.exit_triggered else "⚪", "Reglas de salida",
+         (f"{len(check.exit_triggered)} alcanzada(s) de {check.exit_rules}"
+          if check.exit_rules else "ninguna escrita — §2 las pide antes de comprar")
+         + (f"; sin evaluar: {', '.join(check.exit_unevaluable)}"
+            if check.exit_unevaluable else "")),
+        ("⚠️" if check.before_horizon else "⚪", "Tiempo en cartera",
+         (f"{check.held_days} días el lote más antiguo, {check.newest_lot_days} el más nuevo; "
+          f"tu horizonte mínimo escrito: {min_days} días")
+         if check.held_days is not None else MISSING),
+        ("⚪", "Resultado abierto", pct(check.unrealized_return)),
+    ]
+    st.markdown("| | Comprobación | Estado |\n|---|---|---|\n"
+                + "\n".join(f"| {i} | {c} | {v} |" for i, c, v in rows6))
+    for rule in check.exit_triggered:
+        st.markdown(f"🎯 **{rule['rule_id']}** ({rule['kind']}) — disparador escrito: "
+                    f"«{rule['trigger']}» → acción escrita: «**{rule['action']}**». "
+                    f"{rule['detail']}")
+    for rule in check.exit_prose:
+        st.markdown(f"📝 **{rule.get('rule_id')}** (solo texto, la juzgas tú): "
+                    f"«{rule.get('trigger')}» → «{rule.get('action')}»")
+    reasons = " ".join(check.reasons)
+    if check.backing == dc.BACKED:
+        st.info(f"**Una regla que escribiste antes respalda esta venta.** {reasons} Ejecuta "
+                "lo que dice la acción escrita: una regla de rebalanceo pide vender una "
+                "parte, no cerrar.")
+    else:
+        st.warning(
+            ("**Ninguna regla escrita respalda esta venta.** " if check.backing == dc.UNBACKED
+             else "**Sin ficha no hay criterio de venta.** ")
+            + reasons + (" " + history_line if history_line else "")
+            + " Si aun así vendes, escribe por qué en 📓 Diario **antes** de hacerlo.")
+    st.caption("El panel no bloquea ninguna orden y no dice «vende» ni «mantén»: pone delante "
+               "lo que escribiste y lo que hicieron tus ventas anteriores. La decisión es "
+               "tuya (§2, §12).")
+
+if not sales.empty:
+    with st.expander(f"Tus ventas y lo que pasó después ({len(sales)})"):
+        st.dataframe(pd.DataFrame({
+            "Fecha": sales["day"].dt.date.astype(str),
+            "Empresa": sales["ticker"],
+            "Días tenida": sales["holding_days"].round(0),
+            "Resultado de la venta": sales["realized_return"],
+            "Lo que hizo después": sales["after"],
+            "SPY después": sales["spy_after"],
+            "Dejado de ganar (USD)": sales["after_usd"],
+        }), hide_index=True, width="stretch", column_config={
+            "Resultado de la venta": st.column_config.NumberColumn(format="percent"),
+            "Lo que hizo después": st.column_config.NumberColumn(format="percent"),
+            "SPY después": st.column_config.NumberColumn(format="percent"),
+            "Dejado de ganar (USD)": st.column_config.NumberColumn(format="localized"),
+        })
+        st.caption("Rentabilidad total (con dividendos) desde el día de la venta hasta hoy. "
+                   "«Dejado de ganar» negativo = vender evitó esa pérdida. Días tenida, "
+                   "ponderados por importe cuando la venta cerró varios lotes (FIFO).")

@@ -85,6 +85,60 @@ def _since(series: pd.Series | None, day: pd.Timestamp, end: pd.Timestamp) -> fl
     return float(end_v.iloc[-1] / start_v.iloc[-1] - 1)
 
 
+SALE_COLUMNS = ["day", "ticker", "proceeds", "cost", "realized_pnl", "realized_return",
+                "holding_days", "after", "spy_after", "after_usd"]
+
+
+def _per_sale(disposals: pd.DataFrame, indices: Mapping[str, pd.Series],
+              end: pd.Timestamp) -> pd.DataFrame:
+    """Disposals (with a ``day`` column) grouped into sales. See :func:`sales_after`."""
+    if disposals.empty:
+        return pd.DataFrame(columns=SALE_COLUMNS)
+    frame = disposals.assign(weighted_days=disposals["holding_days"].astype(float)
+                             * disposals["proceeds"].astype(float))
+    # One sale = one ticker on one day, however many lots it closed.
+    out = frame.groupby(["day", "ticker"]).agg(
+        proceeds=("proceeds", "sum"), cost=("cost", "sum"),
+        realized_pnl=("realized_pnl", "sum"), weighted_days=("weighted_days", "sum"),
+    ).reset_index()
+    out["realized_return"] = out["realized_pnl"] / out["cost"].where(out["cost"] > 0)
+    # Holding period weighted by proceeds, as in the mirror: a sale that closed an old lot
+    # and a new one is "held" for the money-weighted mix of both.
+    out["holding_days"] = out["weighted_days"] / out["proceeds"].where(out["proceeds"] > 0)
+    out["after"] = [_since(indices.get(t), d, end) for t, d in zip(out["ticker"], out["day"])]
+    out["spy_after"] = [_since(indices.get("SPY"), d, end) for d in out["day"]]
+    out["after_usd"] = out["after"] * out["proceeds"]
+    return out[SALE_COLUMNS].astype({"after": float, "spy_after": float, "after_usd": float})
+
+
+def sales_after(trades: pd.DataFrame, indices: Mapping[str, pd.Series], as_of: Any, *,
+                window_days: int | None = None) -> pd.DataFrame:
+    """Every sale, and what the sold stock did afterwards (📋 Desplegar, "before selling").
+
+    One row per ticker and day: ``proceeds``, ``realized_return`` (the sale's result over
+    its FIFO cost, both commissions in), ``holding_days`` (weighted by proceeds), ``after``
+    (the sold stock's total return from the sale to ``as_of``), ``spy_after`` and
+    ``after_usd`` = ``after × proceeds``, positive when the shares kept rising after they
+    were sold. ``None`` where the price series is missing — unknown, never zero.
+
+    ``indices``: total-return series per sold ticker and ``SPY`` — the same input as
+    :func:`mirror`, whose totals are the sums of these rows. ``window_days=None`` keeps
+    every sale in the data, newest first.
+    """
+    end = pd.Timestamp(as_of).normalize()
+    if trades is None or trades.empty:
+        return pd.DataFrame(columns=SALE_COLUMNS)
+    _lots, disposals, _unmatched = portfolio.fifo_lots(trades)
+    if disposals.empty:
+        return pd.DataFrame(columns=SALE_COLUMNS)
+    disposals = disposals.assign(day=pd.to_datetime(disposals["ts"].astype(str).str[:10]))
+    disposals = disposals[disposals["day"] <= end]
+    if window_days is not None:
+        disposals = disposals[disposals["day"] > end - pd.Timedelta(days=window_days)]
+    return _per_sale(disposals, indices, end).sort_values("day", ascending=False) \
+        .reset_index(drop=True)
+
+
 def mirror(trades: pd.DataFrame, nav: pd.DataFrame, nav_cash: pd.DataFrame,
            valued: pd.DataFrame, indices: Mapping[str, pd.Series], as_of: Any, *,
            window_days: int = 365, min_holding_days: int = 90) -> Mirror:
@@ -123,18 +177,13 @@ def mirror(trades: pd.DataFrame, nav: pd.DataFrame, nav_cash: pd.DataFrame,
         held_median = _weighted_median(days, weights)
         before = float(weights[days < min_holding_days].sum() / weights.sum()) \
             if weights.sum() > 0 else None
-        # One sale = one ticker on one day, however many lots it closed.
-        per_sale = disposals.groupby(["day", "ticker"]).agg(
-            pnl=("realized_pnl", "sum"), proceeds=("proceeds", "sum")).reset_index()
-        at_gain = int((per_sale["pnl"] > 0).sum())
-        at_loss = int((per_sale["pnl"] < 0).sum())
-        moves = [(_since(indices.get(r.ticker), r.day, end),
-                  _since(indices.get("SPY"), r.day, end), r.proceeds)
-                 for r in per_sale.itertuples()]
-        if all(m is not None for m, _, _ in moves):
-            after = float(sum(m * v for m, _, v in moves))
-        if all(s is not None for _, s, _ in moves):
-            after_spy = float(sum(s * v for _, s, v in moves))
+        per_sale = _per_sale(disposals, indices, end)
+        at_gain = int((per_sale["realized_pnl"] > 0).sum())
+        at_loss = int((per_sale["realized_pnl"] < 0).sum())
+        if per_sale["after"].notna().all():
+            after = float((per_sale["after"] * per_sale["proceeds"]).sum())
+        if per_sale["spy_after"].notna().all():
+            after_spy = float((per_sale["spy_after"] * per_sale["proceeds"]).sum())
 
     open_gain = open_loss = 0
     if valued is not None and not valued.empty and "unrealized_pnl" in valued:
