@@ -54,6 +54,14 @@ universe:
   #    # 0.12 = 12 %). Empresa y Desplegar calculan la rentabilidad que da el precio de hoy
   #    # con él. La dilución va dentro: réstala. También vale en una entrada de watchlist.
   #    growth_assumption: 0.12
+  #    # Opcional (§15.5 punto 3): tres escenarios con su probabilidad (suman 1). Cada uno
+  #    # como crecimiento del FCF por acción (`growth`) o como múltiplo del precio de hoy a
+  #    # `years` años (`multiple`: sirve también si la empresa quema caja o la SEC no la lee).
+  #    scenarios:
+  #      years: 5
+  #      bear: {prob: 0.25, multiple: 0.4, note: "la tesis falla"}
+  #      base: {prob: 0.5, growth: 0.12}
+  #      bull: {prob: 0.25, multiple: 4.0}
   #    # Reglas de salida (§2 nivel 4): se escriben ANTES de comprar. `trigger` y `action`
   #    # son texto y obligatorios; `rule` es opcional y es lo que la alerta evalúa sola.
   #    # Métricas de `rule`: las de invalidation_rule, más `price` (último cierre CRUDO:
@@ -80,6 +88,10 @@ portfolio:
   # Tus límites de tamaño, fracción del patrimonio con el efectivo (Cartera los comprueba).
   max_position: null
   max_per_thesis_category: null
+  # Presupuesto de pérdida (§15.5 punto 3): la parte de TODA la cuenta que aceptas perder si
+  # una tesis sale mal. Con los escenarios de cada ficha, Empresa y Desplegar calculan el
+  # tamaño máximo que lo respeta. Fracción: 0.02 = 2 %. En null, no se calcula.
+  loss_budget: null
 
 # Plan de aportes (§13, entrada de usuario nº1). Determina cuántas posiciones son
 # razonables y si la comisión es material por ticket.

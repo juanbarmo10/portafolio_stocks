@@ -225,6 +225,7 @@ def validate_theses(companies: list[dict[str, Any]]) -> None:
         problem = growth_assumption_problem(entry)
         if problem:
             problems.append(f"{entry['ticker']}: {problem}")
+        problems.extend(scenario_problems(entry))
     if problems:
         raise ValueError(
             "Incomplete thesis cards in config (CLAUDE.md section 5.2 — a company "
@@ -286,6 +287,64 @@ def growth_assumption_problem(entry: dict[str, Any]) -> str | None:
     return None
 
 
+SCENARIO_NAMES = ("bear", "base", "bull")
+
+
+def scenario_problems(entry: dict[str, Any]) -> list[str]:
+    """What is wrong with a card's optional ``scenarios`` block (CLAUDE.md §15.5, point 3).
+
+    Three scenarios — ``bear``, ``base``, ``bull`` — each with a ``prob`` and exactly one of
+    ``growth`` (FCF per share, yearly, a fraction) or ``multiple`` (times today's price after
+    ``years``). The probabilities add up to 1, and the bear case is not better than the base,
+    nor the base than the bull, when written the same way: a swapped pair would size a
+    position on the wrong tail.
+    """
+    spec = entry.get("scenarios")
+    if spec is None:
+        return []
+    label = entry.get("ticker") or "<unnamed>"
+    if not isinstance(spec, dict):
+        return [f"{label}: scenarios must be a mapping with bear, base and bull"]
+    problems = []
+    years = spec.get("years")
+    if years is not None and (isinstance(years, bool) or not isinstance(years, int)
+                              or not 1 <= years <= 20):
+        problems.append(f"{label}: scenarios.years must be a whole number of years, 1..20")
+    total, values = 0.0, {}
+    for name in SCENARIO_NAMES:
+        s = spec.get(name)
+        if not isinstance(s, dict):
+            problems.append(f"{label}: scenarios.{name} is missing")
+            continue
+        prob = s.get("prob")
+        if isinstance(prob, bool) or not isinstance(prob, (int, float)) or not 0 <= prob <= 1:
+            problems.append(f"{label}: scenarios.{name}.prob must be a fraction 0..1 "
+                            "(0.25 for 25 %)")
+        else:
+            total += float(prob)
+        kinds = [k for k in ("growth", "multiple") if s.get(k) is not None]
+        if len(kinds) != 1:
+            problems.append(f"{label}: scenarios.{name} needs exactly one of growth or multiple")
+            continue
+        value = s[kinds[0]]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            problems.append(f"{label}: scenarios.{name}.{kinds[0]} must be a number")
+        elif kinds[0] == "growth" and not -0.5 <= value <= 1.0:
+            problems.append(f"{label}: scenarios.{name}.growth {value} is outside −0.5..1.0 — "
+                            "write 0.12 for 12 %")
+        elif kinds[0] == "multiple" and value < 0:
+            problems.append(f"{label}: scenarios.{name}.multiple cannot be negative")
+        else:
+            values[name] = (kinds[0], float(value))
+    if abs(total - 1.0) > 0.01 and not any("prob" in p for p in problems):
+        problems.append(f"{label}: scenario probabilities add up to {total:.2f}, not 1")
+    for low, high in (("bear", "base"), ("base", "bull")):
+        if low in values and high in values and values[low][0] == values[high][0] \
+                and values[low][1] > values[high][1]:
+            problems.append(f"{label}: scenarios.{low} is better than scenarios.{high}")
+    return problems
+
+
 def validate_watchlist(
     watchlist: list[dict[str, Any]], tracked: list[dict[str, Any]]
 ) -> None:
@@ -316,6 +375,7 @@ def validate_watchlist(
         problem = growth_assumption_problem(entry)
         if problem:
             problems.append(f"{entry['ticker']}: {problem}")
+        problems.extend(scenario_problems(entry))
 
     both = {str(e.get("ticker")) for e in watchlist} & {
         str(e.get("ticker")) for e in tracked
@@ -414,4 +474,9 @@ def load_settings() -> Settings:
     validate_theses(settings.tracked_companies)
     validate_watchlist(settings.watchlist_companies, settings.tracked_companies)
     validate_peers(raw.get("universe", {}).get("peers"))
+    budget = raw.get("portfolio", {}).get("loss_budget")
+    if budget is not None and (isinstance(budget, bool) or not isinstance(budget, (int, float))
+                               or not 0 < budget <= 1):
+        raise ValueError(f"portfolio.loss_budget {budget!r} must be a fraction 0..1 of the "
+                         "account (0.02 for 2 %), or null")
     return settings

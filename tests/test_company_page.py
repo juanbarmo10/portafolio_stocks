@@ -464,3 +464,35 @@ def test_the_peers_table_has_the_median_and_says_who_has_no_figures(tmp_path, mo
     assert "Frente a los de Colombia" in text and "▶ Filial de MSFT" in text
     st.cache_data.clear()
     config.load_settings.cache_clear()
+
+
+# --- Scenarios (§15.5 point 3) -----------------------------------------------------------
+
+SCENARIOS = CARD + """
+      scenarios:
+        years: 5
+        bear: {prob: 0.25, multiple: 0.4, note: "la nube se abarata"}
+        base: {prob: 0.5, multiple: 1.5}
+        bull: {prob: 0.25, multiple: 4.0}
+portfolio:
+  loss_budget: 0.02
+"""
+
+
+def test_the_scenarios_give_the_expected_return_and_the_size_the_budget_allows(tmp_path,
+                                                                                monkeypatch):
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(SCENARIOS, encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+    db_path = tmp_path / "company.db"
+    seed_database(db_path)
+    monkeypatch.setattr(app_data, "db_path", lambda: db_path)
+    st.cache_data.clear()
+    text = rendered_text(render())
+    assert "Tus escenarios y el tamaño que admiten" in text
+    assert "la nube se abarata" in text and "× 0,40" in text
+    assert "Probabilidad de perder dinero" in text and "25 %" in text
+    assert "3,3 %" in text, "2 % budget / 60 % bear loss"
+    st.cache_data.clear()
+    config.load_settings.cache_clear()

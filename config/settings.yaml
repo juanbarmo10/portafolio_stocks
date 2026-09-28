@@ -796,6 +796,13 @@ panel:
   behavior:
     window_days: 365
     min_holding_days: 90
+  # Escenarios de la ficha (Empresa y Desplegar, transform/scenarios.py, §15.5 punto 3).
+  # Horizonte al que se llevan todos los escenarios si la ficha no escribe `years`, y la
+  # fracción de Kelly que se enseña como TECHO (nunca objetivo): con probabilidades que son
+  # conjeturas, el Kelly completo es la forma más rápida de arruinarse siendo optimista.
+  scenarios:
+    horizon_years: 5
+    kelly_fraction: 0.25
   # Reforzar antes de abrir (📋 Desplegar, transform/discipline.py, §15.5 punto 1): la
   # métrica de tu `invalidation_rule` hoy frente a hace `lookback_days`, con lo presentado a
   # cada fecha. 100 días para que entre una presentación trimestral en medio; no optimizado.

@@ -28,6 +28,7 @@ from transform import funding as fx
 from transform import per_share
 from transform import portfolio as port
 from transform import regime as rg
+from transform import scenarios as scn
 from transform import thesis as th
 from transform import valuation as val
 from transform.adjustments import total_return_index
@@ -281,6 +282,40 @@ else:
     near_pick = [n for n in near if n.startswith(pick + " ")]
     checks.append(("⚠️" if near_pick else "✅", f"Resultados en {earnings_window} días",
                    near_pick[0] if near_pick else "no"))
+    # Scenarios and size (§15.5 point 3): the weight this tranche would leave, against the
+    # ceiling that follows from what the card says could go wrong.
+    SCEN = dict(local.get("panel", {}).get("scenarios") or {})
+    RDCF_S = dict(local.get("panel", {}).get("valuation", {}).get("reverse_dcf") or {})
+    val_pick = app_data.valuation_now(cik, pick, today.date().isoformat(), app_data.db_mtime())
+    outlook = scn.assess(card.get("scenarios"),
+                         val_pick if val_pick.market_cap is not None else None,
+                         years=int(SCEN.get("horizon_years", 5)),
+                         terminal_growth=float(RDCF_S.get("terminal_growth", 0.025)),
+                         dcf_years=int(RDCF_S.get("years", 10)),
+                         kelly_share=float(SCEN.get("kelly_fraction", 0.25)),
+                         loss_budget=portfolio_cfg.get("loss_budget"),
+                         max_position=max_position)
+    if outlook is None:
+        checks.append(("⚠️", "Escenarios (`scenarios`)",
+                       "sin escribir — sin ellos no hay techo de tamaño (ver 🏢 Empresa)"))
+    else:
+        checks.append(("✅" if outlook.expected_return is not None else "⚠️",
+                       "Escenarios (`scenarios`)",
+                       f"rentabilidad esperada {pct(outlook.expected_return)} al año; "
+                       f"probabilidad de perder {pct(outlook.loss_probability, decimals=0)}; "
+                       f"peor caída {pct(-outlook.worst_loss) if outlook.worst_loss else MISSING}"))
+        held_value = 0.0
+        if not valued_held.empty and pick in set(valued_held["ticker"]):
+            v = valued_held.loc[valued_held["ticker"] == pick, "market_value"].iloc[0]
+            held_value = float(v) if pd.notna(v) else 0.0
+        after = None if not nav_total else (held_value + amount) / nav_total
+        over = after is not None and outlook.ceiling is not None and after > outlook.ceiling
+        checks.append(("⚠️" if over or outlook.ceiling is None else "✅", "Tamaño tras el tramo",
+                       (f"pesaría {pct(after, decimals=1)} de la cuenta" if after is not None
+                        else MISSING)
+                       + (f" frente a un techo de {pct(outlook.ceiling, decimals=1)}"
+                          if outlook.ceiling is not None else
+                          " — sin techo: escribe `portfolio.loss_budget`")))
     st.markdown("| | Comprobación | Estado |\n|---|---|---|\n"
                 + "\n".join(f"| {i} | {c} | {colored(v, ICON_TONES.get(i))} |"
                              for i, c, v in checks))

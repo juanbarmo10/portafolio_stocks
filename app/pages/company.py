@@ -57,6 +57,7 @@ from transform import thesis as th
 from transform import price_action as pa
 from transform import quarterly as qt
 from transform import screen as sc
+from transform import scenarios as scn
 from transform import sfc
 from transform import valuation as val
 from transform.adjustments import split_adjusted, total_return_index
@@ -888,6 +889,84 @@ else:
         + ("" if hurdle is not None else "Sin `hurdle_rate`, no hay con qué compararla: el "
            f"bono a 10 años rinde {pct(treasury / 100) if treasury is not None else MISSING}.")
     )
+
+# Scenarios and size (§15.5 point 3): the card's three cases, what they imply at today's
+# price, and how large the position can be for the loss the user accepts. Every number comes
+# from the card; without one the block says how to write it.
+SCEN = dict(settings.raw.get("panel", {}).get("scenarios") or {})
+PORT_CFG = dict(settings.raw.get("portfolio") or {})
+spec = card.get("scenarios")
+st.markdown("**Tus escenarios y el tamaño que admiten**")
+if not spec:
+    if not public:
+        st.caption("Sin escenarios en la ficha. Tres casos con su probabilidad, cada uno como "
+                   "crecimiento del FCF por acción (`growth`) o como múltiplo del precio de hoy "
+                   "a N años (`multiple`, que sirve también para una empresa que quema caja o "
+                   "que la SEC no lee):")
+        st.code("scenarios:\n  years: 5\n"
+                "  bear: {prob: 0.25, multiple: 0.4, note: \"la tesis falla\"}\n"
+                "  base: {prob: 0.5, growth: 0.12}\n"
+                "  bull: {prob: 0.25, multiple: 4.0}", language="yaml")
+else:
+    budget = PORT_CFG.get("loss_budget")
+    result = scn.assess(spec, now if now.market_cap is not None else None,
+                        years=int(SCEN.get("horizon_years", 5)),
+                        terminal_growth=float(RDCF.get("terminal_growth", 0.025)),
+                        dcf_years=int(RDCF.get("years", 10)),
+                        kelly_share=float(SCEN.get("kelly_fraction", 0.25)),
+                        loss_budget=budget, max_position=PORT_CFG.get("max_position"))
+    n = result.years
+    st.dataframe(pd.DataFrame([{
+        "Escenario": scn.LABELS[x.name], "Probabilidad": pct(x.prob, decimals=0),
+        "Lo que escribiste": (f"FCF por acción {pct(x.growth, decimals=0)} al año"
+                              if x.growth is not None else
+                              f"precio × {number(x.multiple_written, decimals=2)} en {n} años"),
+        "Rentabilidad anual": pct(x.annual_return) if x.annual_return is not None else MISSING,
+        f"Tu dinero en {n} años": (f"× {number(x.multiple, decimals=2)}"
+                                   if x.multiple is not None else MISSING),
+        "Nota": x.note,
+    } for x in result.scenarios]), hide_index=True, width="stretch")
+    row = st.columns(4)
+    row[0].metric("Rentabilidad esperada, anual", pct(result.expected_return),
+                  help="Del dinero esperado al final ((Σ prob × múltiplo)^(1/años) − 1), no "
+                       "de la media de las rentabilidades anuales, que la exagera (§9.10).")
+    row[1].metric("Probabilidad de perder dinero", pct(result.loss_probability, decimals=0))
+    row[2].metric("Peor caída escrita", pct(-result.worst_loss) if result.worst_loss else
+                  ("ninguna" if result.worst_loss == 0 else MISSING))
+    row[3].metric("Techo de tamaño", pct(result.ceiling, decimals=1),
+                  help="El menor de: presupuesto de pérdida / peor caída, Kelly fraccional y tu "
+                       "`portfolio.max_position`. Un techo, nunca un objetivo.")
+    lines = []
+    if result.size_by_budget is not None:
+        lines.append(f"con tu presupuesto de pérdida del **{pct(budget, decimals=1)}** de la "
+                     f"cuenta, el escenario pesimista cuesta eso con un peso del "
+                     f"**{pct(result.size_by_budget, decimals=1)}**; si la tesis se fuera a cero, "
+                     f"con uno del **{pct(result.size_if_zero, decimals=1)}**")
+    if result.kelly is not None:
+        lines.append(f"Kelly completo sobre tus escenarios: {pct(result.kelly, decimals=0)} "
+                     f"(se enseña × {number(float(SCEN.get('kelly_fraction', 0.25)), decimals=2)}"
+                     f" = **{pct(result.kelly_ceiling, decimals=1)}**, como techo)")
+    if not public:
+        account_now = app_data.account_observations()
+        if not account_now.empty:
+            held_now = port.latest_positions(account_now)
+            held_now = held_now[held_now["ticker"] == ticker]
+            nav_now = port.nav_series(account_now)
+            if not held_now.empty and not nav_now.empty:
+                valued_now = port.valuation(held_now, port.latest_prices(
+                    app_data.prices_for([ticker])))
+                value_now = valued_now["market_value"].iloc[0]
+                if pd.notna(value_now):
+                    weight_now = float(value_now) / float(nav_now["value"].iloc[-1])
+                    lines.append(f"hoy pesa el **{pct(weight_now, decimals=1)}** de la cuenta")
+                    if result.ceiling is not None and weight_now > result.ceiling:
+                        st.warning(f"Pesa el {pct(weight_now, decimals=1)} de la cuenta, por "
+                                   f"encima del techo que sale de lo que escribiste "
+                                   f"({pct(result.ceiling, decimals=1)}).")
+    st.caption(("Tamaño: " + "; ".join(lines) + ". " if lines else "")
+               + " ".join(result.notes)
+               + " Los escenarios y sus probabilidades son tuyos: el panel solo hace la "
+                 "aritmética. Una probabilidad optimista hace optimista todo lo de arriba.")
 
 # --- 4. The price ------------------------------------------------------------------------
 
