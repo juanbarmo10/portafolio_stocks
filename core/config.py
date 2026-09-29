@@ -28,6 +28,8 @@ import yaml
 from dotenv import load_dotenv
 
 from transform.catalysts import problems as catalyst_problems
+from transform.themes import parse as parse_themes
+from transform.themes import problems as theme_problems
 
 # Repository root = two levels up from this file (core/config.py -> repo root).
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
@@ -138,6 +140,12 @@ class Settings:
         raw = self.raw.get("universe", {}).get("peers") or {}
         return {str(t).upper(): [str(p).upper() for p in (group or [])]
                 for t, group in raw.items()}
+
+    @property
+    def themes(self) -> list[Any]:
+        """``universe.themes`` as :class:`transform.themes.Theme`, with the tracked cards
+        whose ``thesis_category`` names a theme added to it (CLAUDE.md §15.5, point 10)."""
+        return parse_themes(self.raw.get("universe", {}).get("themes"), self.tracked_companies)
 
     def source(self, name: str) -> dict[str, Any]:
         """Return the parameter block for a named data source (e.g. 'fred', 'sec')."""
@@ -517,6 +525,9 @@ def load_settings() -> Settings:
     validate_watchlist(settings.watchlist_companies, settings.tracked_companies)
     validate_peers(raw.get("universe", {}).get("peers"))
     validate_policy(raw.get("portfolio"))
+    if found := theme_problems(raw.get("universe", {}).get("themes")):
+        raise ValueError("Invalid universe.themes (CLAUDE.md §15.5 point 10):\n  "
+                         + "\n  ".join(found))
     if found := catalyst_problems(raw.get("catalysts")):
         raise ValueError("Invalid catalysts (CLAUDE.md §15.5 point 9):\n  "
                          + "\n  ".join(found))

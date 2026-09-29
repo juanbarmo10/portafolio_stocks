@@ -82,6 +82,12 @@ universe:
 # Cartera objetivo: pesos por posición y por thesis_category, para que el drift
 # signifique algo (§13, entrada de usuario nº4). La cartera REAL nunca se escribe
 # aquí: se lee del Flex Query de IBKR.
+# Temas (§15.5 punto 10), dentro de `universe:`: un ETF de referencia por tema, para separar
+# si una posición ganó por la empresa o por su tema. Una ficha cuya `thesis_category`
+# coincida con el nombre de un tema entra sola.
+#  themes:
+#    - {name: "Biotecnología", etf: XBI, tickers: [XXXX]}
+
 portfolio:
   target_weights: {}           # ej. { AAPL: 0.08, MSFT: 0.08 }
   target_by_thesis_category: {}

@@ -226,7 +226,8 @@ class PricesIngester(Ingester):
 
     @staticmethod
     def tickers_for(settings: Settings) -> list[str]:
-        """Market references (section 5.1), plus every company written down, deduplicated.
+        """Market references (section 5.1), every company written down and the ETFs the
+        pages compare them with, deduplicated.
 
         "Written down" includes the watchlist: a candidate under study needs its price
         history as much as a company with a thesis does. Held tickers are added separately
@@ -236,7 +237,13 @@ class PricesIngester(Ingester):
         written = [
             str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")
         ]
-        return list(dict.fromkeys([*settings.market_references, *written]))
+        # The ETFs a page compares against: each theme's (§15.5 point 10) and a card's own
+        # ``benchmark``, which until 2026-09-29 was drawn only if it happened to be a
+        # market reference already.
+        comparisons = [t.etf for t in settings.themes] + [
+            str(c["benchmark"]).upper() for c in settings.researched_companies
+            if c.get("benchmark")]
+        return list(dict.fromkeys([*settings.market_references, *written, *comparisons]))
 
     def attach_database(self, conn: Any) -> None:
         """Add whatever the account actually holds to the download list.

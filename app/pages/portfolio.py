@@ -36,6 +36,7 @@ from transform import corporate_actions as reorg
 from transform import bcb
 from transform import portfolio
 from transform import risk
+from transform import themes as themes_tf
 from transform.adjustments import total_return_index
 from transform.price_action import as_series
 
@@ -359,6 +360,78 @@ else:
             "de fallo nadie ha escrito: añádelas a `universe.tracked` en "
             "`config/settings.local.yaml`."
         )
+
+# --- 4a. Thematic exposure (§15.5 point 10) -------------------------------------------
+# Private: the themes are the user's own grouping, from settings.local.yaml. Each theme's ETF
+# against SPY, and each holding's return against SPY split into its theme's part and its own.
+THEMES = settings.themes
+if not public:
+    st.subheader("Exposición temática")
+    if not THEMES:
+        st.caption("Sin temas escritos. En `universe.themes` de `settings.local.yaml`, un ETF "
+                   "de referencia por tema (por ejemplo XBI para biotecnología) con sus tickers: "
+                   "el panel separa entonces si una posición ganó por la empresa o por su tema.")
+    else:
+        theme_tickers = sorted({"SPY", *(t.etf for t in THEMES),
+                                *(m for t in THEMES for m in t.tickers)})
+        theme_rows = app_data.prices_for(theme_tickers)
+        theme_actions = app_data.corporate_actions()
+        as_of_theme = pd.Timestamp.today().normalize()
+
+        def theme_tr(ticker: str) -> pd.Series:
+            own = theme_rows[theme_rows["series_id"] == f"{ticker}:close_raw"]
+            if own.empty:
+                return pd.Series(dtype=float)
+            return as_series(total_return_index(own.assign(ts=own["ts"].str[:10]),
+                                                theme_actions, ticker,
+                                                as_of_theme.date().isoformat()))
+
+        theme_series = {t: theme_tr(t) for t in theme_tickers}
+        held_weights = {row["ticker"]: float(row["weight"]) for row in valued.to_dict("records")
+                        if pd.notna(row.get("weight"))} if not valued.empty else {}
+        table_t = themes_tf.theme_table(THEMES, theme_series, as_of_theme, held_weights)
+        st.dataframe(
+            color_by_sign(pd.DataFrame({
+                "Tema": table_t["theme"], "ETF": table_t["etf"],
+                "3 m frente a SPY": table_t["vs_spy_3m"],
+                "6 m frente a SPY": table_t["vs_spy_6m"],
+                "12 m frente a SPY": table_t["vs_spy_12m"],
+                "En cartera": table_t["held"], "Peso en acciones": table_t["weight"],
+                "Miembros": table_t["members"],
+            }), {"3 m frente a SPY": True, "6 m frente a SPY": True, "12 m frente a SPY": True}),
+            hide_index=True, width="stretch",
+            column_config={c: st.column_config.NumberColumn(format="percent") for c in (
+                "3 m frente a SPY", "6 m frente a SPY", "12 m frente a SPY",
+                "Peso en acciones")},
+        )
+        rows_split = []
+        for ticker in held_weights:
+            for theme in themes_tf.themes_of(ticker, THEMES):
+                one = themes_tf.split(theme_series.get(ticker, pd.Series(dtype=float)),
+                                      theme_series[theme.etf], theme_series["SPY"],
+                                      as_of_theme, {"12m": 365})[0]
+                rows_split.append({"Posición": ticker, "Tema": f"{theme.name} ({theme.etf})",
+                                   "Frente a SPY": one.company_vs_spy,
+                                   "Del tema frente a SPY": one.theme_vs_spy,
+                                   "De la empresa frente a su tema": one.company_vs_theme})
+        if rows_split:
+            st.markdown("**12 meses: ¿la empresa o su tema?**")
+            split_frame = pd.DataFrame(rows_split)
+            st.dataframe(
+                color_by_sign(split_frame, {c: True for c in split_frame.columns[2:]}),
+                hide_index=True, width="stretch",
+                column_config={c: st.column_config.NumberColumn(format="percent")
+                               for c in split_frame.columns[2:]})
+        missing = [t for t in held_weights if not themes_tf.themes_of(t, THEMES)]
+        st.caption(
+            "Con dividendos. Mide la **acción** en los últimos 12 meses, no tu posición (que "
+            "pudiste comprar después). «Frente a SPY» = (1 + acción) / (1 + SPY) − 1, y se "
+            "descompone "
+            "**exactamente** en el tema frente a SPY por la empresa frente a su tema. Si casi "
+            "todo lo explica el tema, la posición es una apuesta al tema; si lo explica la "
+            "empresa, es tu tesis. Un ETF sube o baja con decenas de empresas: no dice nada "
+            "de la tuya, solo separa las dos apuestas."
+            + (f" Sin tema: {', '.join(sorted(missing))}." if missing else ""))
 
 # --- 4b. Risk, size and shared failure modes (§15.1.8, §5.3) --------------------------
 # Private: its tables are not in the public allow-list of columns (test_public_mode), and

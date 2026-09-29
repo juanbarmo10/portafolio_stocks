@@ -51,6 +51,7 @@ from core.config import load_settings
 from transform import bcb
 from transform import catalysts as cat
 from transform import entry_context as ec
+from transform import themes as themes_tf
 from transform import filing_signals as fs
 from transform import inflection as infl
 from transform import ownership as own
@@ -1089,7 +1090,10 @@ st.divider()
 st.subheader("4 · El precio")
 # The benchmark is SPY; a card may name its sector ETF too (`benchmark: XLV`), since a
 # stock that beats the index while its whole sector did better has not done much.
-benchmarks = ["SPY"] + ([str(card["benchmark"])] if card.get("benchmark") else [])
+benchmarks = ["SPY"] + ([str(card["benchmark"]).upper()] if card.get("benchmark") else [])
+# And the ETF of each theme it belongs to (§15.5 point 10) — local only, like the themes.
+company_themes = [] if public else themes_tf.themes_of(ticker, settings.themes)
+benchmarks += [t.etf for t in company_themes if t.etf not in benchmarks]
 views = price_view((ticker, *benchmarks), as_of_iso, app_data.db_mtime())
 stock = views[ticker]
 if stock["price"].empty:
@@ -1120,10 +1124,26 @@ else:
             y=alt.Y("valor:Q", title="Base 100, con dividendos", scale=alt.Scale(zero=False)),
             color=alt.Color("Serie:N", legend=alt.Legend(orient="top", title=None),
                             scale=alt.Scale(domain=[ticker, *benchmarks],
-                                            range=["#2a78d6", "#eb6834", "#3a9d5d"])),
+                                            range=["#2a78d6", "#eb6834", "#3a9d5d",
+                                                   "#8a5cd1", "#c9a227"])),
         ).properties(height=220),
         width="stretch",
     )
+    # The company or its theme (§15.5 point 10): the return against SPY splits exactly into
+    # the theme's part and the company's own.
+    for theme in company_themes:
+        parts = themes_tf.split(stock["tr"], views[theme.etf]["tr"], views["SPY"]["tr"],
+                                as_of_iso)
+        pieces = [f"{p.horizon.replace('m', ' meses')}: tema {pct(p.theme_vs_spy)} frente a "
+                  f"SPY, empresa {pct(p.company_vs_theme)} frente a su tema"
+                  for p in parts if p.company_vs_spy is not None]
+        st.caption(
+            f"**¿La empresa o su tema?** Tema «{theme.name}» ({theme.etf}). "
+            + ("; ".join(pieces) + ". " if pieces else
+               f"Sin precios suficientes de {theme.etf} todavía (`run_ingest.py --only "
+               "prices`). ")
+            + "Si casi todo lo explica el tema, lo que tienes es una apuesta al tema; si lo "
+            "explica la empresa, es tu tesis.")
     b = pa.behaviour(stock["tr"], views["SPY"]["tr"], as_of_iso, days=365)
     row = st.columns(4)
     row[0].metric("Rentabilidad 1 año", pct(b.total_return), help="Con dividendos.",

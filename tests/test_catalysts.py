@@ -52,7 +52,7 @@ def test_past_and_far_catalysts_are_not_upcoming():
     past, far = cat.parse([entry(date="2026-09-20"), entry(date="2027-03-01")])
     assert cat.upcoming([past, far], TODAY) == [far]
     assert cat.upcoming([past, far], TODAY, within_days=14) == []
-    assert cat.upcoming([far], TODAY, tickers=["HIMS"]) == []
+    assert cat.upcoming([far], TODAY, tickers=["CCC"]) == []
 
 
 def test_the_alert_fires_once_per_date_and_again_when_it_moves():
