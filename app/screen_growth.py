@@ -126,6 +126,9 @@ def render(settings: Any, status: Callable[[str], str], researched: set[str]) ->
         "P / ventas": shown["price_to_sales"],
         "Volumen diario (M)": shown["dollar_volume"] / 1e6,
         "Recuento dudoso": shown["cap_suspect"],
+        "Precio 6 m": shown["return_6m"],
+        "Precio 12 m": shown["return_12m"],
+        "Percentil 12 m": shown["rs_12m"] * 100,
     })
     percent = st.column_config.NumberColumn(format="percent")
     st.dataframe(
@@ -160,6 +163,18 @@ def render(settings: Any, status: Callable[[str], str], researched: set[str]) ->
             "Capitalización (M)": st.column_config.NumberColumn(format="%.0f"),
             "P / ventas": st.column_config.NumberColumn(format="%.1f×"),
             "Volumen diario (M)": st.column_config.NumberColumn(format="%.1f"),
+            "Precio 6 m": st.column_config.NumberColumn(
+                format="percent", help="Rentabilidad de precio (sin dividendos) a 6 meses, hasta "
+                                       "el cierre del día del cribado."),
+            "Precio 12 m": st.column_config.NumberColumn(
+                format="percent", help="Rentabilidad de precio (sin dividendos) a 12 meses. "
+                                       "Vacío si cotiza desde hace menos de un año."),
+            "Percentil 12 m": st.column_config.NumberColumn(
+                format="%.0f", help="Fuerza relativa: qué parte del universo invertible "
+                                    "(capitalización y volumen mínimos por defecto, fijos "
+                                    "aunque cambies los filtros) rindió menos a 12 meses. 90 "
+                                    "= mejor que el 90 %. Contexto, no señal: el momentum no "
+                                    "está validado (cambió de signo en el S&P 500)."),
             "Recuento dudoso": st.column_config.CheckboxColumn(
                 help="El volumen de un día supera la capitalización: la empresa etiquetó sus "
                      "acciones en otra escala (miles o millones). Capitalización vacía."),
@@ -171,7 +186,9 @@ def render(settings: Any, status: Callable[[str], str], researched: set[str]) ->
         "como predictores de la rentabilidad (§9.7). Una casilla vacía es un dato que no "
         "existe o un cociente sobre una base negativa, nunca una estimación. Un crecimiento "
         "sobre una base minúscula (una empresa que empieza a facturar) sube arriba del todo: "
-        "el filtro de ingresos mínimos lo aparta.")
+        "el filtro de ingresos mínimos lo aparta. Las columnas de precio y su percentil son "
+        "**contexto**, sin color y sin orden: en el S&P 500 el momentum a 12 meses cambió de "
+        "signo entre 2017-2021 y 2022-2026, así que haber subido no dice que vaya a seguir.")
 
     st.subheader("Pasar una candidata a estudio")
     options = [t for t in shown["ticker"].dropna() if t not in researched]

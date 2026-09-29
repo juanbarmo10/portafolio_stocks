@@ -120,6 +120,20 @@ journal: []
 #    review_after: 2027-04-01
 #    review: ""          # al revisarla: ¿fue buena DECISIÓN con lo que sabía entonces?
 
+# Catalizadores (§15.5 punto 9): fechas que mueven el precio y que ninguna fuente gratuita
+# publica de forma estructurada — decisión de la FDA (PDUFA), resultados de un ensayo, fin
+# de un lockup. Hoy, Empresa y Desplegar los enseñan, y Telegram avisa cuando uno empieza
+# dentro de panel.level3.catalyst_window_days (14). `source` es obligatorio: de dónde sale
+# la fecha (8-K, nota de prensa, folleto). Una ventana («datos en el 4T») lleva `from`: la
+# cuenta atrás es a su comienzo. Si la fecha cambia, cámbiala aquí: no se guarda copia.
+catalysts: []
+#  - ticker: XXXX
+#    kind: pdufa             # pdufa | readout | lockup | other
+#    date: 2026-12-15        # la fecha, o el final de la ventana
+#    from: 2026-10-01        # opcional: comienzo de la ventana
+#    label: "Decisión de la FDA sobre …"
+#    source: "8-K del 2026-08-05, nota de prensa"
+
 # Coste de pasar pesos a IBKR (📋 Desplegar capital). Por cada depósito del extracto, los
 # COP que costó: el extracto sabe los USD abonados, no los pesos pagados. Con 3+ depósitos
 # de distinto tamaño el panel separa el coste fijo del proporcional; una tarifa conocida

@@ -363,10 +363,13 @@ def growth_view(mtime: float) -> pd.DataFrame:
     names = {str(r["cik"]): (str(r["ticker"]), r.get("name"))
              for r in registry.to_dict("records")}
     sics = dict(zip(registry["cik"], registry["sic"])) if "sic" in registry else {}
-    jump = float(load_settings().raw.get("panel", {}).get("per_share", {})
-                 .get("jump_threshold", 0.5))
+    raw = load_settings().raw
+    jump = float(raw.get("panel", {}).get("per_share", {}).get("jump_threshold", 0.5))
+    # The relative-strength reference is the investable universe of the user's default
+    # filters — fixed, so a percentile does not move with the page's own filters.
+    defaults = raw.get("screen", {}).get("growth", {}).get("defaults", {}) or {}
     return gs.growth_table(fundamentals, observations(PRICE_SOURCE, mtime), names, sics,
-                           jump_threshold=jump)
+                           jump_threshold=jump, reference=defaults)
 
 
 @st.cache_data(show_spinner="Comparando con los pares…")

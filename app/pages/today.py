@@ -25,6 +25,7 @@ from app.format import (BAD, GOOD, MISSING, VERDICT_TONES, altair_chart, color_c
                         number, tone)
 from core.config import load_settings
 from ingest.macro_calendar import current_calendar
+from transform import catalysts as cat
 from transform import macro
 from transform import portfolio as port
 from transform import regime as rg
@@ -100,12 +101,18 @@ if not events.empty:
             kind = "estimada" if int(row.get("is_estimated") or 0) else "confirmada"
             upcoming.append((day.strftime("%Y-%m-%d"), f"Resultados de {ciks[row['cik']]}",
                              f"fecha {kind}"))
+# Hand-written catalysts (§15.5 point 9): local only, like the config they live in.
+if not public:
+    for c in cat.upcoming(cat.from_settings(settings.raw), as_of, within_days=14):  # the page's horizon
+        upcoming.append((c.start.isoformat() if not c.is_window else c.when,
+                         f"{c.kind_label} — {c.ticker}", f"{c.label} · fuente: {c.source}"))
 if upcoming:
     st.dataframe(pd.DataFrame(sorted(upcoming), columns=["Cuándo", "Qué", "Nota"]),
                  hide_index=True, width="stretch")
     st.caption("Con un dato macro de alto impacto en las 48 h siguientes, §2 propone "
                "posponer el aporte; con resultados en 5 días, no abrir posición sin decisión "
-               "explícita. Las alertas de Telegram avisan de ambos.")
+               "explícita; con un catalizador escrito (FDA, ensayo, lockup), decidir antes. Las "
+               "alertas de Telegram avisan de los tres.")
 else:
     st.caption("Nada de alto impacto en los próximos 14 días.")
 

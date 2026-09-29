@@ -520,3 +520,31 @@ def test_the_segments_table_and_a_change_of_measure_reach_the_page(company_app):
     text = rendered_text(render())
     assert "Por segmento" in text and "Cloud" in text and "33,3 %" in text
     assert "Cambio de medida" in text and "EBITDA ajustado del segmento" in text
+
+
+def test_a_written_catalyst_shows_with_its_source_and_only_locally(tmp_path, monkeypatch):
+    """§15.5 point 9: the date, its countdown and where it came from; never in public."""
+    soon = (pd.Timestamp.today().normalize() + pd.Timedelta(days=10)).date().isoformat()
+    local = tmp_path / "settings.local.yaml"
+    local.write_text(CARD + f"""
+catalysts:
+  - ticker: MSFT
+    kind: other
+    date: {soon}
+    label: "Evento de prueba"
+    source: "nota de prensa de prueba"
+""", encoding="utf-8")
+    monkeypatch.setattr(config, "SETTINGS_LOCAL_PATH", local)
+    config.load_settings.cache_clear()
+    db_path = tmp_path / "company.db"
+    seed_database(db_path)
+    monkeypatch.setattr(app_data, "db_path", lambda: db_path)
+    st.cache_data.clear()
+    text = rendered_text(render())
+    assert "Evento de prueba" in text and "nota de prensa de prueba" in text
+    assert "en 10 días" in text
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    config.load_settings.cache_clear()
+    st.cache_data.clear()
+    assert "Evento de prueba" not in rendered_text(render())
+    st.cache_data.clear()

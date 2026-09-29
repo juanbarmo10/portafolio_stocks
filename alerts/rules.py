@@ -18,6 +18,8 @@ amended_filing         a held company filed an amended 10-K/10-Q → possible re
 filing_signal          a held or studied company filed something actionable: late filing,
                        non-reliance, delisting notice, auditor change, impairment, or a
                        shelf / sale while burning cash (transform/filing_signals.py)
+catalyst_soon          a hand-written catalyst (FDA decision, trial readout, lockup) starts
+                       within N days (transform/catalysts.py)
 (ingest failure)       not a rule: ``run_ingest.py`` raises it from its own failure list
 =====================  ==================================================================
 
@@ -45,6 +47,7 @@ from core.config import Settings
 from core.logging_setup import get_logger
 from ingest.macro_calendar import current_calendar
 from transform import allocation, discipline, inflection, portfolio
+from transform import catalysts as cat
 from transform import regime as rg
 from transform import thesis as th
 
@@ -76,11 +79,13 @@ class Snapshot:
     regime: pd.DataFrame | None = None                  # regime_frame(), or None
     regime_labels: dict[str, str] = field(default_factory=dict)
     earnings_window_days: int = th.EARNINGS_WINDOW_DAYS
+    catalyst_window_days: int = 14
     hurdle_rate: float | None = None
     researched: dict[str, str] = field(default_factory=dict)   # CIK → ticker (studied)
     nav: pd.DataFrame = field(default_factory=pd.DataFrame)    # NAV:total, [ts, value]
     nav_cash: pd.DataFrame = field(default_factory=pd.DataFrame)
     policy: Mapping[str, Any] = field(default_factory=dict)    # settings `portfolio`
+    catalysts: list[cat.Catalyst] = field(default_factory=list)  # settings `catalysts`
 
     @property
     def today(self) -> str:
@@ -391,6 +396,22 @@ def cash_above_limit(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
     ))]
 
 
+def catalyst_soon(snap: Snapshot, params: Mapping[str, Any]) -> list[Alert]:
+    """A hand-written catalyst starts within ``within_days``. Keyed by the catalyst and its
+    dates, so it is sent once — and again if the date is moved."""
+    today = snap.now.date()
+    within = int(params.get("within_days") or snap.catalyst_window_days)
+    out = []
+    for c in cat.upcoming(snap.catalysts, today, within_days=within):
+        out.append(Alert("catalyst_soon", f"catalyst_soon:{c.key}", (
+            f"🧪 {c.ticker}: {c.kind_label.lower()} {c.when} ({cat.countdown(c, today)}).\n"
+            f"{c.label}\nFuente de la fecha: {c.source}\n"
+            "Es un evento binario con fecha conocida: decide antes si entras, esperas o "
+            "reduces, y escríbelo en el diario (§2)."
+        )))
+    return out
+
+
 RULES: dict[str, Callable[[Snapshot, Mapping[str, Any]], list[Alert]]] = {
     "macro_release_soon": macro_release_soon,
     "earnings_soon": earnings_soon,
@@ -402,6 +423,7 @@ RULES: dict[str, Callable[[Snapshot, Mapping[str, Any]], list[Alert]]] = {
     "filing_signal": filing_signal,
     "cash_above_limit": cash_above_limit,
     "fundamental_inflection": fundamental_inflection,
+    "catalyst_soon": catalyst_soon,
 }
 
 
@@ -527,12 +549,14 @@ def load_snapshot(conn: Any, settings: Settings, now: pd.Timestamp | None = None
         regime=None if built is None else built.frame,
         regime_labels={} if built is None else {r.key: r.label for r in built.rules},
         earnings_window_days=int(level3.get("earnings_window_days", th.EARNINGS_WINDOW_DAYS)),
+        catalyst_window_days=int(level3.get("catalyst_window_days", 14)),
         hurdle_rate=level3.get("hurdle_rate"),
         researched=researched,
         nav=portfolio.nav_series(account) if not account.empty else pd.DataFrame(),
         nav_cash=portfolio.nav_series(account, portfolio.NAV_CASH) if not account.empty
         else pd.DataFrame(),
         policy=dict(settings.raw.get("portfolio") or {}),
+        catalysts=cat.from_settings(settings.raw),
     )
 
 

@@ -24,6 +24,7 @@ from core.config import load_settings
 from ingest.macro_calendar import current_calendar
 from transform import allocation as al
 from transform import behavior as bh
+from transform import catalysts as cat
 from transform import discipline as dc
 from transform import funding as fx
 from transform import per_share
@@ -40,6 +41,7 @@ settings = load_settings()
 local = settings.raw
 level3 = local.get("panel", {}).get("level3", {})
 earnings_window = int(level3.get("earnings_window_days", 5))
+catalyst_window = int(level3.get("catalyst_window_days", 14))
 funding_cfg = dict(local.get("funding") or {})
 contribution = dict(local.get("contributions") or {})
 
@@ -95,6 +97,12 @@ if not events.empty:
 gates.append(("🟡" if near else "🟢", f"Resultados en {earnings_window} días",
               "; ".join(near) + " — no abrir posición en ellas sin decisión explícita"
               if near else "ninguno en cartera ni en estudio"))
+# Hand-written catalysts (§15.5 point 9): an FDA decision, a trial readout, a lockup expiry.
+catalysts_near = cat.upcoming(cat.from_settings(local), today.date(), within_days=catalyst_window)
+gates.append(("🟡" if catalysts_near else "🟢", f"Catalizador en {catalyst_window} días",
+              "; ".join(f"{c.ticker}: {c.kind_label.lower()} {c.when}" for c in catalysts_near)
+              + " — decide antes si entras, esperas o reduces" if catalysts_near
+              else "ninguno escrito en la ventana"))
 
 ICON_TONES = {"🟢": GOOD, "🟡": CAUTION, "🔴": BAD, "✅": GOOD, "⚠️": CAUTION}
 st.markdown("| | Puerta | Estado |\n|---|---|---|\n"
@@ -328,6 +336,11 @@ else:
     near_pick = [n for n in near if n.startswith(pick + " ")]
     checks.append(("⚠️" if near_pick else "✅", f"Resultados en {earnings_window} días",
                    near_pick[0] if near_pick else "no"))
+    catalyst_pick = [c for c in catalysts_near if c.ticker == pick]
+    if catalyst_pick:
+        checks.append(("⚠️", f"Catalizador en {catalyst_window} días",
+                       "; ".join(f"{c.kind_label.lower()} {c.when}: {c.label}"
+                                 for c in catalyst_pick)))
     # Scenarios and size (§15.5 point 3): the weight this tranche would leave, against the
     # ceiling that follows from what the card says could go wrong.
     SCEN = dict(local.get("panel", {}).get("scenarios") or {})

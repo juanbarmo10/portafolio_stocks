@@ -604,6 +604,10 @@ panel:
     # decisión explícita. Es el análogo del unlock: evento binario con fecha conocida.
     # Umbral, así que vive aquí y no dentro de una página (§10).
     earnings_window_days: 5
+    # Catalizadores escritos a mano (§15.5 punto 9): Hoy, Desplegar y la alerta avisan
+    # cuando uno EMPIEZA dentro de estos días. Dos semanas para decidir con calma antes de un
+    # evento binario; elegido por ese principio, sin mirar ningún dato.
+    catalyst_window_days: 14
 
   # Nivel 4 — cartera real.
   portfolio:
@@ -901,6 +905,11 @@ alerts:
     # mirar ningún dato, por principio (10 pp de crecimiento es un cambio de ritmo que se ve;
     # 3 pp de margen bruto, uno que en un negocio maduro casi no ocurre). Tuyos para cambiar.
     - {kind: fundamental_inflection, acceleration: 0.10, gross_margin: 0.03, lookback_days: 30}
+    # Un catalizador escrito a mano (`catalysts` en settings.local.yaml: decisión de la FDA,
+    # resultados de un ensayo, fin de un lockup) empieza dentro de la ventana
+    # panel.level3.catalyst_window_days. Un aviso por catalizador y fecha: si mueves la
+    # fecha, vuelve a avisar.
+    - {kind: catalyst_soon}
   # No es una regla evaluada: la dispara run_ingest.py con su propia lista de fallos. Es
   # la vía por la que llega a Telegram un token de IBKR caducado (§4.1).
   ingest_failure: true
@@ -1192,7 +1201,12 @@ screen:
     run_every_days: 90
     quarter_lag_days: 50          # un trimestre entra cuando cerró hace ≥ 50 días (10-Q: 40-45)
     volume_sessions: 60           # mediana del volumen en dólares sobre estas sesiones
-    price_period: "6mo"           # yfinance: solo un resumen, nunca una historia de precios
+    price_history_days: 400       # yfinance: se baja un poco más de un año y se guarda solo
+                                  # un resumen, nunca la historia de precios
+    # Fuerza relativa como CONTEXTO (§15.5 punto 8): rentabilidad de precio a 6 y 12 meses y
+    # su percentil dentro de todo el universo del cribado. Se enseña y NO se ordena por ella:
+    # el momentum 12-1 cambió de signo en el S&P 500 (RESEARCH.md §2.49).
+    return_horizons_days: {6m: 182, 12m: 365}
     batch_size: 200               # medido: ~35 s por lote de 200
     min_price_coverage: 0.5       # con menos, la fuente probablemente cambió: fallo ruidoso
     # Filtros por defecto de la página, editables allí. Decididos por el usuario el

@@ -27,6 +27,8 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
+from transform.catalysts import problems as catalyst_problems
+
 # Repository root = two levels up from this file (core/config.py -> repo root).
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 CONFIG_DIR: Path = REPO_ROOT / "config"
@@ -515,6 +517,9 @@ def load_settings() -> Settings:
     validate_watchlist(settings.watchlist_companies, settings.tracked_companies)
     validate_peers(raw.get("universe", {}).get("peers"))
     validate_policy(raw.get("portfolio"))
+    if found := catalyst_problems(raw.get("catalysts")):
+        raise ValueError("Invalid catalysts (CLAUDE.md §15.5 point 9):\n  "
+                         + "\n  ".join(found))
     budget = raw.get("portfolio", {}).get("loss_budget")
     if budget is not None and (isinstance(budget, bool) or not isinstance(budget, (int, float))
                                or not 0 < budget <= 1):

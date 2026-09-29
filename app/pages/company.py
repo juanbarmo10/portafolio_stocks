@@ -49,6 +49,7 @@ from app.format import (
 )
 from core.config import load_settings
 from transform import bcb
+from transform import catalysts as cat
 from transform import entry_context as ec
 from transform import filing_signals as fs
 from transform import inflection as infl
@@ -1163,6 +1164,24 @@ else:
             "significación** y con signo distinto según el periodo; una muy estirada rindió "
             "**más** (+8,5 puntos, casi todo desde 2022). Ninguna de las dos es regla: el "
             "precio solo no decide; la tesis y el 10-Q sí.")
+    # Relative strength (§15.5 point 8): the percentile within the growth screen's whole
+    # universe, at the screen's own price date — the company's return on that same day,
+    # never today's return against the universe of another day. Context, not a signal.
+    universe = app_data.growth_view(app_data.db_mtime())
+    mine = universe[universe["cik"] == cik] if not universe.empty else universe
+    if not mine.empty and pd.notna(mine.iloc[0]["rs_12m"]):
+        r = mine.iloc[0]
+        ranked = f"{int((universe['investable'] & universe['return_12m'].notna()).sum()):,}" \
+            .replace(",", ".")
+        six = (f"; a 6 meses {pct(r['return_6m'])}, percentil {r['rs_6m'] * 100:.0f}"
+               if pd.notna(r["rs_6m"]) else "")
+        st.caption(
+            f"**Fuerza relativa** (cribado de crecimiento, precios del {r['price_date']}): a 12 "
+            f"meses {pct(r['return_12m'])}, **percentil {r['rs_12m'] * 100:.0f}** frente a "
+            f"{ranked} empresas invertibles (capitalización y volumen mínimos del "
+            f"cribado){six}. "
+            + "Contexto, no señal: el momentum a 12 meses cambió de signo en el S&P 500 "
+            "entre periodos, así que haber subido más que el resto no dice que vaya a seguir.")
 
     events = app_data.events()
     confirmed = events[(events["category"] == "earnings") & (events["cik"] == cik)
@@ -1591,6 +1610,24 @@ with calendar_column:
                 "Anuncios anteriores (8-K item 2.02): "
                 + " · ".join(past["ts"].astype(str))
             )
+    # Hand-written catalysts (§15.5 point 9): local only, like settings.local.yaml.
+    if not public:
+        today_ = dt.date.fromisoformat(as_of_iso)
+        mine_ = [c for c in cat.from_settings(settings.raw) if c.ticker == ticker]
+        ahead = cat.upcoming(mine_, today_)
+        st.markdown("**Catalizadores**")
+        for c in ahead:
+            st.warning(f"**{c.when}** ({cat.countdown(c, today_)}) — {c.kind_label}: "
+                       f"{c.label}. Fuente: {c.source}.")
+        gone = [c for c in mine_ if c not in ahead]
+        if gone:
+            st.caption("Pasados: " + " · ".join(f"{c.end} {c.kind_label.lower()}"
+                                                 for c in gone))
+        if not mine_:
+            st.caption("Ninguno escrito. Las fechas de la FDA (PDUFA), de resultados de un "
+                       "ensayo o del fin de un lockup no están en ninguna fuente gratuita "
+                       "estructurada: se escriben a mano en `catalysts` de "
+                       "`settings.local.yaml`, con la fuente de cada fecha.")
 
 with filings_column:
     st.markdown("**Últimas presentaciones**")

@@ -295,3 +295,56 @@ def test_a_wrong_basic_count_falls_back_to_a_plausible_diluted_one():
                             pd.concat([PRICES, extra_p]), REGISTRY).set_index("ticker")
     assert table.loc["CCC", "market_cap"] == pytest.approx(11.0 * 1e6)
     assert not table.loc["CCC", "cap_suspect"]
+
+
+# --- Relative strength (§15.5 point 8) ------------------------------------------------------
+
+def test_a_return_is_right_across_a_split_and_needs_its_full_span():
+    """The source's closes are split-adjusted within one download, so the ratio is the true
+    return even with a split in between; a listing younger than the span has no return."""
+    days = pd.date_range("2025-01-01", "2026-01-01", freq="D")
+    close = pd.Series(50.0, index=days)          # adjusted: 100 before a 2:1 split = 50
+    close.iloc[-1] = 75.0
+    history = pd.DataFrame({"Close": close, "Volume": 1.0,
+                            "Stock Splits": 0.0}, index=days)
+    history.loc["2025-09-01", "Stock Splits"] = 2.0
+    summary = ig.price_summary(history, 3, {"6m": 182, "12m": 365, "24m": 730})
+    assert summary["returns"]["12m"] == pytest.approx(0.5)
+    assert summary["returns"]["6m"] == pytest.approx(0.5)
+    assert summary["returns"]["24m"] is None, "no close two years back"
+
+
+def test_a_return_whose_anchor_is_too_old_is_unknown_not_a_longer_span():
+    # Target 2025-03-01 falls in a hole: the nearest earlier close is 2025-01-02, 58 days off.
+    days = [pd.Timestamp("2025-01-02"), *pd.date_range("2025-06-01", "2026-03-01", freq="D")]
+    history = pd.DataFrame({"Close": 10.0, "Volume": 1.0}, index=pd.DatetimeIndex(days))
+    summary = ig.price_summary(history, 3, {"12m": 365})
+    assert summary["returns"]["12m"] is None, "the nearest close is months before the target"
+
+
+def test_relative_strength_ranks_only_known_returns():
+    rs = gs.relative_strength(pd.Series([0.10, None, -0.20, 0.50]))
+    assert rs.tolist()[0] == pytest.approx(2 / 3) and rs.tolist()[3] == pytest.approx(1.0)
+    assert pd.isna(rs.iloc[1]), "unknown is not the worst"
+
+
+def test_the_table_carries_returns_and_their_percentile_over_the_whole_universe():
+    extra = pd.DataFrame([price(A, "return_12m", 0.4), price(B, "return_12m", -0.1)])
+    table = gs.growth_table(FUNDAMENTALS, pd.concat([PRICES, extra]), REGISTRY)
+    by = table.set_index("cik")
+    assert by.loc[A, "return_12m"] == pytest.approx(0.4) and by.loc[A, "rs_12m"] == 1.0
+    assert by.loc[B, "rs_12m"] == 0.5
+
+
+def test_the_percentile_is_against_the_investable_universe_only():
+    """A penny stock falling 99 % must not lift every ordinary company's percentile, and a
+    company outside the reference is still placed against it."""
+    table = pd.DataFrame({"return_12m": [0.10, -0.99, 0.30, -0.20],
+                          "market_cap": [5e9, 1e6, 2e9, None],
+                          "dollar_volume": [5e7, 1e3, 2e7, 5e7]})
+    inside = gs.reference_universe(table, {"min_market_cap": 3e8, "min_dollar_volume": 1e6})
+    assert inside.tolist() == [True, False, True, False], "unknown cap is not a pass"
+    rs = gs.relative_strength(table["return_12m"], inside)
+    assert rs.tolist() == pytest.approx([0.5, 0.0, 1.0, 0.0])
+    everyone = gs.relative_strength(table["return_12m"])
+    assert everyone[0] == pytest.approx(0.75), "against every row it would read higher"

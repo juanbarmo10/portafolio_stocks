@@ -18,9 +18,11 @@ What is fetched, and why this shape (verified against the API on 2026-09-28):
   filers: most present the statement as year-to-date sums (section 9.14). So FCF, its margin
   and SBC are the latest calendar year's.
 - **Cash and short-term investments** at each recent quarter end, for the runway.
-- **Price, median dollar volume and splits** from yfinance, for the companies with revenue in
-  a recent quarter. yfinance is a scraper (section 4.3): one summary per company, never a
-  price history, and a missing price leaves the market cap unknown.
+- **Price, median dollar volume, splits and the 6- and 12-month price returns** from
+  yfinance, for the companies with revenue in a recent quarter. yfinance is a scraper
+  (section 4.3): one summary per company, never a price history, and a missing price leaves
+  the market cap unknown. The returns are the relative-strength context of §15.5 point 8:
+  shown, never sorted by (the 12-1 momentum changed sign in the S&P 500, RESEARCH §2.49).
 
 Every row is keyed by **CIK** (section 9.3), prices included: the ticker is only how
 yfinance is asked. The companies go to the ``companies`` registry with their SIC code, as the
@@ -38,7 +40,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
@@ -54,6 +56,9 @@ log = get_logger(__name__)
 
 SOURCE = "sec_growth"
 PRICE_SOURCE = "yfinance_screen"
+# A return's anchor close may sit this many days before its target date (weekends, holidays),
+# no more: an older one would measure a longer span than the one named.
+ANCHOR_SLACK_DAYS = 7
 
 # Diluted shares only for the market cap of a company that files no total basic count (two
 # share classes, such as Duolingo); dilution itself is measured on basic shares (§9.15).
@@ -111,13 +116,20 @@ def registry_rows(registry: dict[str, tuple[str, str]], tickers: dict[str, str],
             for cik in sorted(tickers) if cik not in researched]
 
 
-def price_summary(history: pd.DataFrame, sessions: int) -> dict[str, Any] | None:
-    """Last close, median daily dollar volume over the last ``sessions`` and the splits in
-    one yfinance history (``auto_adjust=False, actions=True``). ``None`` without a close.
+def price_summary(history: pd.DataFrame, sessions: int,
+                  horizons: Mapping[str, int] | None = None) -> dict[str, Any] | None:
+    """Last close, median daily dollar volume over the last ``sessions``, the splits, and the
+    price return over each ``{name: days}`` horizon, from one yfinance history
+    (``auto_adjust=False, actions=True``). ``None`` without a close.
 
     The close is split-adjusted by the source, and the last one has no later split to be
     adjusted by, so it is the raw close (section 9.1). Price × volume is invariant to a
-    split, so the dollar volume needs no reconstruction either.
+    split, so the dollar volume needs no reconstruction either; and a return is a ratio of
+    two closes of the same download, adjusted by the same factors, so it is right across a
+    split too. A return needs a close on or before ``last day − days`` and no more than
+    ``ANCHOR_SLACK_DAYS`` before it: a younger listing, or a hole in the source, leaves it
+    ``None`` rather than measured over a shorter span (section 12). Price only, without
+    dividends.
     """
     if history is None or history.empty or "Close" not in history:
         return None
@@ -128,10 +140,21 @@ def price_summary(history: pd.DataFrame, sessions: int) -> dict[str, Any] | None
     volume = (tail["Close"] * tail["Volume"]).median() if "Volume" in tail else None
     splits = frame["Stock Splits"] if "Stock Splits" in frame else pd.Series(dtype=float)
     splits = splits[splits.fillna(0) > 0]
-    return {"close": float(frame["Close"].iloc[-1]),
-            "day": pd.Timestamp(frame.index[-1]).date().isoformat(),
+    days = pd.DatetimeIndex(frame.index).tz_localize(None).normalize()
+    closes = pd.Series(frame["Close"].to_numpy(dtype=float), index=days)
+    last_day, last = closes.index[-1], float(closes.iloc[-1])
+    returns: dict[str, float | None] = {}
+    for name, span in (horizons or {}).items():
+        target = last_day - pd.Timedelta(days=int(span))
+        before = closes[closes.index <= target]
+        ok = (not before.empty and before.iloc[-1] > 0
+              and (target - before.index[-1]).days <= ANCHOR_SLACK_DAYS)
+        returns[name] = last / float(before.iloc[-1]) - 1 if ok else None
+    return {"close": last,
+            "day": last_day.date().isoformat(),
             "dollar_volume": None if volume is None or pd.isna(volume) else float(volume),
-            "splits": {pd.Timestamp(d).date().isoformat(): float(r) for d, r in splits.items()}}
+            "splits": {pd.Timestamp(d).date().isoformat(): float(r) for d, r in splits.items()},
+            "returns": returns}
 
 
 class GrowthScreenIngester(Ingester):
@@ -155,7 +178,9 @@ class GrowthScreenIngester(Ingester):
         self._every_days = int(growth.get("run_every_days", 90))
         self._lag_days = int(growth.get("quarter_lag_days", 50))
         self._sessions = int(growth.get("volume_sessions", 60))
-        self._period = str(growth.get("price_period", "6mo"))
+        self._history_days = int(growth.get("price_history_days", 400))
+        self._horizons = {str(k): int(v) for k, v in
+                          (growth.get("return_horizons_days") or {}).items()}
         self._batch = int(growth.get("batch_size", 200))
         self._min_price_coverage = float(growth.get("min_price_coverage", 0.5))
         self._researched = {str(c["cik"]).zfill(10) for c in settings.researched_companies
@@ -212,7 +237,9 @@ class GrowthScreenIngester(Ingester):
         yf_log.setLevel(logging.CRITICAL)   # one ERROR per unserved ticker; counted below
         try:
             return retry(lambda: yfinance.download(
-                symbols, period=self._period, auto_adjust=False, actions=True,
+                symbols, start=(dt.date.today()
+                                - dt.timedelta(days=self._history_days)).isoformat(),
+                auto_adjust=False, actions=True,
                 group_by="ticker", threads=True, progress=False), attempts=2)
         finally:
             yf_log.setLevel(previous)
@@ -237,7 +264,7 @@ class GrowthScreenIngester(Ingester):
                     history = data[symbol] if len(batch) > 1 else data
                 except (KeyError, TypeError):
                     continue
-                summary = price_summary(history, self._sessions)
+                summary = price_summary(history, self._sessions, self._horizons)
                 if summary is None:
                     continue
                 priced += 1
@@ -248,6 +275,10 @@ class GrowthScreenIngester(Ingester):
                 if summary["dollar_volume"] is not None:
                     rows.append({**base, "series_id": f"{cik}:dollar_volume", "ts": stamp,
                                  "value": summary["dollar_volume"]})
+                for name, value in summary["returns"].items():
+                    if value is not None:
+                        rows.append({**base, "series_id": f"{cik}:return_{name}", "ts": stamp,
+                                     "value": value})
                 for day, ratio in summary["splits"].items():
                     rows.append({**base, "series_id": f"{cik}:split", "ts": f"{day}T00:00:00+00:00",
                                  "value": ratio})
