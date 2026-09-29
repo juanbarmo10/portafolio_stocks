@@ -28,7 +28,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-import numpy as np
 import pandas as pd
 
 from validation.metrics import benjamini_hochberg, sign_flip_pvalue
