@@ -114,3 +114,17 @@ def test_discrimination_respects_its_window():
     out = discrimination(Built(), "k", start="2012-01-01", end="2013-01-01")
     assert out["window"] == "2012-01-02 → 2012-12-31"
     assert out["off_in_correction"] == 1.0
+
+
+def test_the_permutation_in_blocks_gives_the_same_pvalue_as_all_at_once():
+    """Blocks keep memory bounded (the PEAD study was killed for a 10.000 × 60.000 matrix)
+    and, drawing the same random numbers in the same order, change nothing."""
+    import numpy as np  # noqa: PLC0415
+
+    from validation.metrics import permutation_pvalue  # noqa: PLC0415
+
+    rng = np.random.default_rng(1)
+    signal, base = rng.normal(0.01, 1, 40), rng.normal(0, 1, 300)
+    whole = permutation_pvalue(signal, base, n=2000, seed=7, max_cells=10**9)
+    blocks = permutation_pvalue(signal, base, n=2000, seed=7, max_cells=1000)
+    assert whole == blocks

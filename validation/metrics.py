@@ -58,7 +58,8 @@ def forward_return(prices: pd.Series, at: pd.Timestamp, horizon_days: int) -> fl
 
 
 def permutation_pvalue(
-    signal: Sequence[float], baseline: Sequence[float], *, n: int = 10_000, seed: int = 0
+    signal: Sequence[float], baseline: Sequence[float], *, n: int = 10_000, seed: int = 0,
+    max_cells: int = 5_000_000,
 ) -> float | None:
     """Two-sided permutation p-value that the two groups' means differ.
 
@@ -66,6 +67,11 @@ def permutation_pvalue(
     shuffles whose absolute mean difference is at least the observed one, with the usual
     +1 correction so it is never exactly zero (a finite shuffle cannot prove p = 0).
     ``None`` if either group is empty.
+
+    The shuffles are drawn in blocks of at most ``max_cells`` values. All at once, a pool of
+    60.000 points and 10.000 shuffles is a 10.000 × 60.000 matrix — ~5 GB for the random
+    numbers alone, and the post-earnings study was killed for it (2026-09-28). The generator
+    yields the same numbers in the same order either way, so the result is identical.
     """
     sig = np.asarray(signal, dtype=float)
     base = np.asarray(baseline, dtype=float)
@@ -74,11 +80,15 @@ def permutation_pvalue(
     observed = abs(sig.mean() - base.mean())
     pool = np.concatenate([sig, base])
     rng = np.random.default_rng(seed)
-    order = rng.random((n, pool.size)).argsort(axis=1)
-    shuffled = pool[order]
-    diffs = np.abs(shuffled[:, :sig.size].mean(axis=1) - shuffled[:, sig.size:].mean(axis=1))
-    # A tiny tolerance: identical sums computed in another order differ in the last bit.
-    extreme = int((diffs >= observed - 1e-12).sum())
+    rows = max(1, int(max_cells) // pool.size)
+    extreme = 0
+    for start in range(0, n, rows):
+        order = rng.random((min(rows, n - start), pool.size)).argsort(axis=1)
+        shuffled = pool[order]
+        diffs = np.abs(shuffled[:, :sig.size].mean(axis=1)
+                       - shuffled[:, sig.size:].mean(axis=1))
+        # A tiny tolerance: identical sums computed in another order differ in the last bit.
+        extreme += int((diffs >= observed - 1e-12).sum())
     return (extreme + 1) / (n + 1)
 
 
