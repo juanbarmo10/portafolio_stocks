@@ -1011,6 +1011,39 @@ insider_small_study:
   # quebraron o dejaron de cotizar, y una pequeña donde los directivos compraron y que luego
   # se hundió es justo ese caso. El sesgo FAVORECE a la señal; se cuenta cuántas faltan.
 
+# --- "No comprar cuchillos cayendo" y sobreextensión (CLAUDE.md §15.5 punto 12) ----------
+# Escrito el 2026-09-29 ANTES de calcular ninguna condición ni rentabilidad. Una sola
+# ejecución: `python run_validation.py --knife`. Pregunta: dentro del S&P 500, ¿comprar una
+# acción que cae con fuerza (o que está muy estirada) rinde peor que comprar el resto del
+# índice ese mismo día? Solo si pasa, la condición se convierte en PUERTA en Desplegar
+# («no se compra salvo decisión escrita»); si no, se enseña como descripción, sin veredicto.
+knife_study:
+  first_date: "2018-01-02"          # los cierres empiezan en 2017; la media de 200 los necesita
+  universe: sp500_at_date           # miembro ese día y con precio
+  grid_step_days: 91                # una fecha por trimestre: menos solape entre horizontes
+  # Condiciones, fijas y escritas antes (§9.7): nada se ajusta después de ver el resultado.
+  conditions:
+    knife: {sma_sessions: 200, return_days: 91, max_return: -0.20}   # bajo la media Y ≤ −20 % en 3 meses
+    overextended: {sma_sessions: 200, min_ratio_to_sma: 1.30}       # ≥ 30 % sobre la media
+  horizons_days: [90, 180]          # exceso sobre SPY desde la sesión siguiente
+  benchmark: SPY                    # precio ajustado por splits, sin dividendos, los dos lados
+  min_names: 5                      # una fecha cuenta si al menos 5 acciones cumplen la condición
+  # Comparación DENTRO de cada fecha (lección de este estudio antes de hacerlo: los
+  # cuchillos se amontonan en las caídas del mercado, y comparar contra todos los días
+  # normales mediría el mercado, no la regla). Por fecha: exceso medio de las que cumplen la
+  # condición menos el del resto de miembros ese día. Prueba: permutación de signos entre
+  # fechas (cada fecha, una observación), BH sobre las 4 pruebas (2 condiciones × 2 horizontes).
+  permutations: 10000
+  seed: 0
+  fdr_alpha: 0.10
+  halves_split: "2021-12-31"
+  # Regla de decisión, escrita antes: una condición se vuelve PUERTA solo si, a 180 días, la
+  # diferencia media es NEGATIVA (rinde peor que el resto), significativa tras BH, y negativa
+  # en las dos mitades. Si no, no hay puerta.
+  decision_horizons: [180]
+  # ⚠️ Supervivencia, dicha antes: faltan miembros que salieron sin precio; entre ellos, los
+  # cuchillos que acabaron en quiebra. El sesgo juega EN CONTRA de la puerta.
+
 # --- Estudio de la deriva posterior a resultados, PEAD (CLAUDE.md §15.5 punto 6) --------
 # Escrito el 2026-09-28 ANTES de descargar ninguna fecha de resultados y de calcular nada.
 # Una sola ejecución: `python run_validation.py --pead`. Pregunta: tras un anuncio de
