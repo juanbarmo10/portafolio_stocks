@@ -951,6 +951,45 @@ insider_study:
   # dos mitades. Si no, el panel no la enseña como señal.
   decision_horizons: [90, 180]
 
+# --- Compras de directivos en empresas PEQUEÑAS (CLAUDE.md §15.5 punto 7) ---------------
+# Escrito el 2026-09-29 ANTES de bajar ningún precio de estas empresas y de calcular ninguna
+# rentabilidad (solo se contaron eventos: 6.565 grupos y 4.923 compras de CEO/CFO en 4.023
+# valores, S&P incluido). Una sola ejecución: `python run_validation.py --insiders-small`.
+# Pregunta: fuera del S&P 500, donde la literatura encuentra el efecto más fuerte, ¿las
+# compras de directivos preceden rentabilidad por encima de las pequeñas empresas?
+insider_small_study:
+  # Mismas compras y MISMAS definiciones de señal que insider_study (no se ajustan a este
+  # universo): grupo de 3 directivos en 30 días, o CEO/CFO por ≥ 100.000 USD; un evento por
+  # empresa cada 180 días; fechado por la presentación (§9.4).
+  signals_from: insider_study
+  universe: not_sp500_at_event      # fuera del S&P 500 ese día
+  # Liquidez, medida SOLO con los 60 días anteriores al evento (nada del futuro): sin ella
+  # entran microcaps donde la propia compra mueve el precio y el diferencial se come todo.
+  min_price: 2.0
+  min_median_dollar_volume: 1000000
+  liquidity_window_days: 60
+  price_start: "2016-10-01"         # 60 días antes del primer evento para la liquidez
+  benchmark: IWM                    # Russell 2000: pequeñas contra pequeñas
+  horizons_days: [30, 90, 180]
+  baseline_step_days: 30            # mismas empresas, rejilla mensual lejos de sus eventos
+  fdr_alpha: 0.10                   # BH sobre las 6 pruebas
+  permutations: 10000
+  seed: 0
+  halves_split: "2021-12-31"
+  # Placebo, por la lección del PEAD (§2.61: una regla puede cumplirse por la razón
+  # equivocada). Las mismas empresas, fechas desplazadas `placebo_shift_days` ANTES de cada
+  # evento. Si el placebo rinde tanto como el evento, el efecto es de la empresa, no de la
+  # compra.
+  placebo_shift_days: 120
+  # Regla de decisión, escrita antes: VALIDADA solo si es significativa tras BH a 90 o 180
+  # días, con exceso medio POSITIVO sobre la base, el mismo signo en las dos mitades, Y el
+  # evento supera al placebo del mismo horizonte (diferencia positiva). Si no, el panel no la
+  # enseña como señal.
+  decision_horizons: [90, 180]
+  # ⚠️ Supervivencia, dicha antes: yfinance no sirve la historia de muchas empresas que
+  # quebraron o dejaron de cotizar, y una pequeña donde los directivos compraron y que luego
+  # se hundió es justo ese caso. El sesgo FAVORECE a la señal; se cuenta cuántas faltan.
+
 # --- Estudio de la deriva posterior a resultados, PEAD (CLAUDE.md §15.5 punto 6) --------
 # Escrito el 2026-09-28 ANTES de descargar ninguna fecha de resultados y de calcular nada.
 # Una sola ejecución: `python run_validation.py --pead`. Pregunta: tras un anuncio de
