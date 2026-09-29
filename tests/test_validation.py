@@ -128,3 +128,16 @@ def test_the_permutation_in_blocks_gives_the_same_pvalue_as_all_at_once():
     whole = permutation_pvalue(signal, base, n=2000, seed=7, max_cells=10**9)
     blocks = permutation_pvalue(signal, base, n=2000, seed=7, max_cells=1000)
     assert whole == blocks
+
+
+def test_a_forward_return_never_enters_years_after_its_date():
+    """Found 2026-09-29: a series starting in 2017 gave a 2017 return for a 1999 date, and
+    the PEAD and insider baselines compared it with SPY's 1999 return."""
+    from validation.metrics import forward_return
+
+    s = pd.Series([10.0, 11.0, 12.0, 13.0],
+                  index=pd.to_datetime(["2017-01-03", "2017-02-01", "2017-04-10", "2017-06-01"]))
+    assert forward_return(s, pd.Timestamp("1999-03-01"), 90) is None, "no close near the date"
+    assert forward_return(s, pd.Timestamp("2017-01-02"), 90) == pytest.approx(12 / 10 - 1)
+    holed = s.drop(pd.Timestamp("2017-04-10"))
+    assert forward_return(holed, pd.Timestamp("2017-01-02"), 90) is None, "exit 7 weeks late"

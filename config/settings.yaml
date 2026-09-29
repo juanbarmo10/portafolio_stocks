@@ -1110,6 +1110,19 @@ insider_small_study:
 # acción que cae con fuerza (o que está muy estirada) rinde peor que comprar el resto del
 # índice ese mismo día? Solo si pasa, la condición se convierte en PUERTA en Desplegar
 # («no se compra salvo decisión escrita»); si no, se enseña como descripción, sin veredicto.
+
+# --- Laboratorio de reglas (lab/, run_lab.py) ---------------------------------------------
+# Para TUS hipótesis, con la misma disciplina que los estudios de arriba. `holdout_from`
+# reserva el final del periodo: ninguna prueba lo ve hasta que se pide con --holdout, una
+# vez, con la regla ya fijada. Mover esta fecha después de mirar es hacer trampa (§9.7).
+lab:
+  first_date: "2017-01-01"        # pruebas por acción: los cierres de los miembros empiezan
+                                  # en 2017
+  first_date_timing: "1999-01-01" # pruebas de mercado: SPY desde 1998; cada señal empieza
+                                  # donde empiezan sus datos (el semáforo, 2011)
+  holdout_from: "2025-01-01"      # ~21 meses reservados; ~8 años para explorar
+  fdr_alpha: 0.10
+
 knife_study:
   first_date: "2018-01-02"          # los cierres empiezan en 2017; la media de 200 los necesita
   universe: sp500_at_date           # miembro ese día y con precio

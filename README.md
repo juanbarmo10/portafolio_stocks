@@ -314,6 +314,7 @@ python run_alerts.py                 # evalúa las reglas y envía a Telegram lo
 python run_alerts.py --dry-run       # enseña qué dispararía, sin enviar ni registrar
 python run_alerts.py --test-message  # comprueba la configuración del bot
 python run_validation.py             # informe de validación del semáforo (reproducible)
+python run_lab.py bateria            # laboratorio: todas las reglas (ver «Laboratorio de reglas»)
 python run_validation.py --insiders  # estudio de compras de directivos
 python run_validation.py --factors   # calidad, devengos y momentum en el S&P 500
 ```
@@ -382,6 +383,44 @@ ruff check .
 ```
 
 ---
+
+## Laboratorio de reglas
+
+`lab/` y `run_lab.py` abren el marco de validación a hipótesis propias, sobre los datos que
+el panel ya guarda y sin red:
+
+```bash
+python run_lab.py reglas                                   # el catálogo (22 reglas)
+python run_lab.py probar knife --param max_return=-0.3     # una regla, otros parámetros
+python run_lab.py bateria                                  # todas, con sus valores por defecto
+python run_lab.py estrategia low_accruals --top 30         # simulación de cartera (no valida)
+python run_lab.py aportes brake --param variant=V2_tendencia
+python run_lab.py registro                                 # todo lo probado, con BH global
+```
+
+Para experimentos en Python, `experimentos/plantilla.py`. El laboratorio aplica solo las
+reglas de la casa:
+- los datos macro se leen por fecha de publicación y los fundamentales por fecha de
+  presentación;
+- la entrada es al cierre de la sesión siguiente;
+- se mide la rentabilidad total frente a una base, nunca frente a cero;
+- las observaciones son independientes (rejilla de ventanas que no se solapan);
+- se prueba por permutación y se enseñan las dos mitades del periodo;
+- **cada prueba queda en un registro**, y la corrección por pruebas múltiples cuenta todas
+  las que hayas hecho, no solo la última;
+- `lab.holdout_from` reserva el final del periodo hasta que se pida una vez con `--holdout`.
+
+Tres pruebas cubren todas las reglas:
+- **temporal:** una señal de mercado; lo que rindió el activo tras «encendida» frente a
+  «apagada»;
+- **transversal:** una puntuación por acción; dentro de cada fecha, las marcadas frente al
+  resto, lo que anula el movimiento del mercado;
+- **de eventos:** fechas por acción, frente a las mismas acciones en días normales y a un
+  placebo.
+
+La simulación de estrategia existe para ver una curva, no para validar: una curva que bate a
+SPY no prueba nada sin las pruebas y el holdout.
+
 
 ## Configuración
 

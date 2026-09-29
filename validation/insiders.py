@@ -243,7 +243,9 @@ def study(purchases: pd.DataFrame, closes: pd.DataFrame, actions: Any, intervals
     usable = scored.dropna(subset=[f"excess_{horizons[0]}"])
     base = excess_returns(wide, spy, member,
                           baseline_points(usable, member, step_days=int(cfg["baseline_step_days"]),
-                                          away_days=int(cfg["cooldown_days"])), horizons)
+                                          away_days=int(cfg.get("baseline_away_days",
+                                                                cfg["cooldown_days"]))),
+                          horizons)
     results = run(usable, base, cfg)
     counts = {
         "purchases": len(purchases),

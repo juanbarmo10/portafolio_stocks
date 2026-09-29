@@ -154,8 +154,12 @@ def study(purchases: pd.DataFrame, prices: Mapping[str, pd.DataFrame], intervals
                        + pd.Timedelta(days=int(cfg["liquidity_window_days"]))]
     scored = excess(in_window, closes, bench, member, liquid, cfg, horizons)
     usable = scored.dropna(subset=[f"excess_{horizons[0]}"]) if not scored.empty else scored
+    # `baseline_away_days` (optional; the protocol's cooldown by default) exists for the
+    # sensitivity run of 2026-09-29: excluding ±cooldown around the events biases the
+    # baseline (RESEARCH.md §2.74). The pre-registered run keeps the protocol.
     base = excess(baseline_points(usable, closes, step_days=int(cfg["baseline_step_days"]),
-                                  away_days=cooldown_days),
+                                  away_days=int(cfg.get("baseline_away_days",
+                                                        cooldown_days))),
                   closes, bench, member, liquid, cfg, horizons)
     shifted = usable[["signal", "symbol", "date"]].assign(
         date=usable["date"] - pd.Timedelta(days=int(cfg["placebo_shift_days"])))

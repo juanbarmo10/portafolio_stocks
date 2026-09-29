@@ -37,9 +37,20 @@ def grid_dates(index: pd.DatetimeIndex, step_days: int, offset: int = 0) -> pd.D
     return pd.DatetimeIndex(chosen)
 
 
-def forward_return(prices: pd.Series, at: pd.Timestamp, horizon_days: int) -> float | None:
+MAX_GAP_DAYS = 10
+
+
+def forward_return(prices: pd.Series, at: pd.Timestamp, horizon_days: int,
+                   max_gap_days: int = MAX_GAP_DAYS) -> float | None:
     """Return from the close of the **first session after** ``at`` to the first close at
-    least ``horizon_days`` later. ``None`` when either end is missing.
+    least ``horizon_days`` later. ``None`` when either end is missing — **or is more than
+    ``max_gap_days`` from where it should be**.
+
+    ⚠️ The gap limit fixes a silent bug found on 2026-09-29: a series that starts years after
+    ``at`` (a member's closes begin in 2017, the calendar in 1998) used to enter at its first
+    close and return a 2017 return labelled 1999, compared against SPY's return of 1999. That
+    inflated the baselines of the PEAD (§2.61) and S&P 500 insider (§2.42) studies. A gap
+    after a delisting or a hole in the source is refused the same way.
 
     Entering the next session, not the same one: a signal dated ``at`` rests on data
     published during that day, and some of it lands after the close (the Fed's H.4.1 comes
@@ -51,8 +62,11 @@ def forward_return(prices: pd.Series, at: pd.Timestamp, horizon_days: int) -> fl
     if after.empty or after.iloc[0] <= 0:
         return None
     entry_day, entry = after.index[0], float(after.iloc[0])
-    exit_ = series.loc[series.index >= entry_day + pd.Timedelta(days=horizon_days)]
-    if exit_.empty:
+    if (entry_day - pd.Timestamp(at)).days > max_gap_days:
+        return None
+    target = entry_day + pd.Timedelta(days=horizon_days)
+    exit_ = series.loc[series.index >= target]
+    if exit_.empty or (exit_.index[0] - target).days > max_gap_days:
         return None
     return float(exit_.iloc[0]) / entry - 1.0
 
