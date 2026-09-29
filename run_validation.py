@@ -10,6 +10,7 @@ Usage:
     python run_validation.py --insiders         # the insider-purchase study
     python run_validation.py --factors          # quality, accruals and momentum
     python run_validation.py --pead             # drift after earnings (§15.5 point 6)
+    python run_validation.py --insiders-small   # insider purchases outside the S&P 500
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Run the factor study (settings.yaml factor_study).")
     parser.add_argument("--pead", action="store_true",
                         help="Run the post-earnings drift study (settings.yaml pead_study).")
+    parser.add_argument("--insiders-small", action="store_true",
+                        help="Run the small-company insider study (insider_small_study).")
     parser.add_argument("--refresh", action="store_true",
                         help="With --factors: download the members' companyfacts again.")
     args = parser.parse_args(argv)
@@ -50,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
         return factor_study(settings, args.out, refresh=args.refresh)
     if args.pead:
         return pead_study(settings, args.out)
+    if args.insiders_small:
+        return insider_small_study(settings, args.out)
     level2 = settings.raw["panel"]["level2"]
     cfg = settings.raw.get("validation", {})
 
@@ -295,6 +300,74 @@ def pead_study(settings, out: str | None) -> int:
     text = study.report(outcome, cfg, date.today().isoformat())
     if failures:
         text += f"\n- Empresas que no se pudieron descargar: {len(failures)} (fuera del estudio)."
+    print(text)
+    if out:
+        with open(out, "w", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    return 0
+
+
+def insider_small_study(settings, out: str | None) -> int:
+    """Form 4 purchases (cached), the price and volume history of every company with an event
+    (downloaded once and cached outside the database), then the pre-registered study."""
+    import logging  # noqa: PLC0415
+    import pickle  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    import pandas as pd  # noqa: PLC0415
+
+    from ingest import insiders as ingest_insiders  # noqa: PLC0415
+    from ingest.universe import yf_symbol  # noqa: PLC0415
+    from validation import insiders as base_study  # noqa: PLC0415
+    from validation import insiders_small as study  # noqa: PLC0415
+
+    cfg = settings.raw["insider_small_study"]
+    parent = settings.raw[str(cfg["signals_from"])]
+    sec = settings.source("sec")
+    agent = settings.secret(str(sec.get("user_agent_env", "SEC_USER_AGENT")))
+    cache = Path(str(sec.get("cache_dir", ".cache/sec")))
+    frames = [f for q in ingest_insiders.quarters(parent["first_quarter"], date.today())
+              if (f := ingest_insiders.load_quarter(q, parent["source_url"], agent,
+                                                    cache / "form345")) is not None]
+    purchases = pd.concat(frames, ignore_index=True)
+    symbols = sorted({base_study.normalize_symbol(x) for x in purchases["symbol"].dropna()})
+
+    price_cache = Path(".cache/insider_small/prices.pkl")
+    if price_cache.exists():
+        prices = pickle.loads(price_cache.read_bytes())
+    else:
+        import yfinance  # noqa: PLC0415
+
+        logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+        prices = {}
+        wanted = symbols + [str(cfg["benchmark"])]
+        for i in range(0, len(wanted), 200):
+            batch = wanted[i:i + 200]
+            data = yfinance.download([yf_symbol(t) for t in batch], start=cfg["price_start"],
+                                     auto_adjust=False, group_by="ticker", threads=True,
+                                     progress=False)
+            for ticker in batch:
+                try:
+                    frame = data[yf_symbol(ticker)] if len(batch) > 1 else data
+                except (KeyError, TypeError):
+                    continue
+                frame = frame[["Close", "Volume"]].dropna(subset=["Close"])
+                if len(frame):
+                    prices[ticker] = frame.rename(columns={"Close": "close",
+                                                           "Volume": "volume"})
+            log.info("Small-company study: prices for %d of %d symbols so far.", len(prices),
+                     min(i + 200, len(wanted)))
+        price_cache.parent.mkdir(parents=True, exist_ok=True)
+        price_cache.write_bytes(pickle.dumps(prices))
+
+    conn = open_connection(settings.db_path)
+    try:
+        intervals = read_table(conn, "universe_membership")
+    finally:
+        conn.close()
+    outcome = study.study(purchases, prices, intervals, parent["signals"],
+                          int(parent["cooldown_days"]), cfg)
+    text = study.report(outcome, cfg, date.today().isoformat())
     print(text)
     if out:
         with open(out, "w", encoding="utf-8") as handle:
