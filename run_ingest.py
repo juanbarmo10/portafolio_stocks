@@ -27,6 +27,7 @@ from db import loader
 from ingest.base import Ingester
 from ingest.bcb import BcbIngester
 from ingest.fred import FredIngester
+from ingest.insider_activity import InsiderActivityIngester
 from ingest.local_fx import LocalFxIngester
 from ingest.macro_calendar import MacroCalendarIngester
 from ingest.peers import PeersIngester
@@ -57,6 +58,8 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "ibkr": (IbkrFlexIngester.is_available, IbkrFlexIngester),
     "sec": (SecXbrlIngester.is_available, SecXbrlIngester),
     "sec_filings": (SecFilingsIngester.is_available, SecFilingsIngester),
+    # Insider purchases and sales of the watched companies, as context (user request).
+    "insider_activity": (InsiderActivityIngester.is_available, InsiderActivityIngester),
     # Segment revenue and profit from each filing's XBRL (§15.5 point 15).
     "segments": (SegmentsIngester.is_available, SegmentsIngester),
     "short_interest": (ShortInterestIngester.is_available, ShortInterestIngester),

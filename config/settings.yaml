@@ -473,6 +473,13 @@ sources:
     sgs_series:
       432: selic_target
 
+  # --- Compras y ventas de directivos (ingest/insider_activity.py, pedido del usuario) ------
+  # Contexto, NO señal: los estudios de §2.42 y §2.62 no validaron las compras. Cada Form 4 de
+  # las empresas estudiadas y en cartera, solo compras (P) y ventas (S) de consejeros y
+  # directivos, con la venta de plan 10b5-1 separada de la discrecional.
+  insider_activity:
+    years: 3
+
   # --- Segmentos de negocio (ingest/segments.py, §15.5 punto 15) -------------------------
   # Del XBRL de cada 10-Q/10-K: companyfacts y frames no traen hechos con dimensión. Los
   # ingresos usan los mismos conceptos que los fundamentales; el RESULTADO por segmento es una

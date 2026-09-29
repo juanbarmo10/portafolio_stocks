@@ -51,6 +51,7 @@ from core.config import load_settings
 from transform import bcb
 from transform import filing_signals as fs
 from transform import inflection as infl
+from transform import insider_activity as ia
 from transform import per_share
 from transform import fundamentals as fun
 from transform import portfolio as port
@@ -1373,6 +1374,43 @@ if len(shares) >= 2:
 
 st.divider()
 st.subheader("6 · Presentaciones y calendario")
+
+# Insider buying and selling (user request, 2026-09-29): context, not a signal — the studies
+# found purchases do not precede better returns (RESEARCH.md §2.42, §2.62). Neutral colours
+# on purpose: green would say "good for the holder", which the evidence does not support.
+form4 = app_data.observations("sec_form4", app_data.db_mtime())
+insiders = ia.assess(form4, cik, as_of_iso) if not form4.empty else None
+if insiders is not None and not insiders.monthly.empty:
+    st.markdown("**Compras y ventas de directivos** · Form 4, consejeros y directivos, en bolsa")
+    order = list(ia.KINDS.values())
+    palette = ["#2a78d6", "#eb6834", "#f2b48a", "#9aa5b1"]
+    altair_chart(
+        alt.Chart(insiders.monthly).mark_bar().encode(
+            x=alt.X("month:T", title=None),
+            y=alt.Y("value:Q", title="USD al mes (ventas hacia abajo)", stack=True),
+            color=alt.Color("label:N", sort=order,
+                            scale=alt.Scale(domain=order, range=palette),
+                            legend=alt.Legend(orient="top", title=None)),
+            tooltip=[alt.Tooltip("month:T", title="Mes", format="%Y-%m"),
+                     alt.Tooltip("label:N", title="Tipo"),
+                     alt.Tooltip("value:Q", title="USD", format=",.0f")],
+        ).properties(height=200),
+        width="stretch", amounts=True,
+    )
+    def usd(value: float) -> str:
+        return reported_amount(value) if value else "ninguna"
+
+    st.caption(
+        f"Últimos 12 meses: compras {usd(insiders.buy_12m)}"
+        + (f" ({insiders.buyers_12m} compra(s) de directivos)" if insiders.buyers_12m else "")
+        + f" · ventas {usd(insiders.sell_12m)}, de ellas discrecionales "
+        f"{usd(insiders.discretionary_12m)}. Última presentación: "
+        f"{insiders.last_filed}. **Contexto, no señal:** en los estudios del panel, las compras de "
+        "directivos no precedieron mejor rentabilidad, ni en el S&P 500 ni en las pequeñas "
+        "(suelen llegar tras caídas fuertes). Las ventas con plan 10b5-1 se programan meses "
+        "antes y dicen poco: los directivos venden acciones que cobran como sueldo. Lo que más "
+        "informa es una compra, o una ola de ventas discrecionales. Fuera: ejercicios de "
+        "opciones, retenciones por impuestos, regalos y fondos que solo son dueños del 10 %.")
 
 company_filings = filings[filings["cik"] == cik] if not filings.empty else pd.DataFrame()
 company_events = events[events["cik"] == cik] if not events.empty else pd.DataFrame()
