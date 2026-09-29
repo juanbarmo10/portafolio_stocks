@@ -1043,6 +1043,11 @@ knife_study:
   decision_horizons: [180]
   # ⚠️ Supervivencia, dicha antes: faltan miembros que salieron sin precio; entre ellos, los
   # cuchillos que acabaron en quiebra. El sesgo juega EN CONTRA de la puerta.
+  # RESULTADO de la única ejecución (2026-09-29, RESEARCH.md §2.65), escrito DESPUÉS y sin
+  # tocar nada de lo de arriba: ninguna condición es puerta. «knife» −1,94 pp a 180 d, p 0,55,
+  # signo distinto por mitades. «overextended» +8,50 pp (al revés de la intuición), casi todo
+  # desde 2022. Empresa y Desplegar las enseñan como descripción, sin bloquear.
+  verdict: {knife: false, overextended: false}
 
 # --- Estudio de la deriva posterior a resultados, PEAD (CLAUDE.md §15.5 punto 6) --------
 # Escrito el 2026-09-28 ANTES de descargar ninguna fecha de resultados y de calcular nada.

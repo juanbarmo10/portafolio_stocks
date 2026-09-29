@@ -32,7 +32,8 @@ from transform import regime as rg
 from transform import scenarios as scn
 from transform import thesis as th
 from transform import valuation as val
-from transform.adjustments import total_return_index
+from transform import entry_context as ec
+from transform.adjustments import split_adjusted, total_return_index
 from transform.price_action import as_series
 
 settings = load_settings()
@@ -361,6 +362,28 @@ else:
                        + (f" frente a un techo de {pct(outlook.ceiling, decimals=1)}"
                           if outlook.ceiling is not None else
                           " — sin techo: escribe `portfolio.loss_budget`")))
+    # Where the price stands (§15.5 point 12): description, not a gate — the knife study
+    # found no evidence for either condition (knife_study.verdict in settings.yaml).
+    KNIFE = dict(local.get("knife_study") or {})
+    raw_pick = app_data.prices_for([pick])
+    if KNIFE and not raw_pick.empty:
+        own_pick = raw_pick[raw_pick["series_id"] == f"{pick}:close_raw"].assign(
+            ts=lambda d: d["ts"].str[:10])
+        entry = ec.assess(as_series(split_adjusted(own_pick, app_data.corporate_actions(), pick,
+                                                   today.date().isoformat())),
+                          today, KNIFE["conditions"])
+        gates = dict(KNIFE.get("verdict") or {})
+        if entry is not None:
+            flag = "knife" if entry.knife else "overextended" if entry.overextended else None
+            text = {"knife": "cae con fuerza (bajo su media y −20 % en 3 meses)",
+                    "overextended": "muy estirada (+30 % sobre su media)"}.get(
+                        flag, "ni cae con fuerza ni está muy estirada")
+            gated = bool(flag and gates.get(flag))
+            checks.append(("⚠️" if gated else "⚪", "Dónde está el precio",
+                           f"{text}; {pct(entry.distance_to_sma)} frente a su media de 200 "
+                           f"sesiones, {pct(entry.return_3m)} en 3 meses"
+                           + (" — PUERTA: no se compra sin decisión escrita" if gated else
+                              " (descripción: el estudio no lo validó como regla)")))
     st.markdown("| | Comprobación | Estado |\n|---|---|---|\n"
                 + "\n".join(f"| {i} | {c} | {colored(v, ICON_TONES.get(i))} |"
                              for i, c, v in checks))

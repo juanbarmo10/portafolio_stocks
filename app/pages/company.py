@@ -49,6 +49,7 @@ from app.format import (
 )
 from core.config import load_settings
 from transform import bcb
+from transform import entry_context as ec
 from transform import filing_signals as fs
 from transform import inflection as infl
 from transform import ownership as own
@@ -1141,6 +1142,27 @@ else:
     row[1].metric("Caída desde el máximo", pct(b.drawdown_now),
                   help="Del cierre más alto del último año al de hoy.")
     row[2].metric("Peor caída del año", pct(b.max_drawdown))
+
+    # Where the price stands before buying (§15.5 points 8 and 12): the conditions of the
+    # knife study, as description. They became no gate: the study's single run found no
+    # evidence for either (RESEARCH.md §2.65), and the verdict lives in config.
+    KNIFE = dict(settings.raw.get("knife_study") or {})
+    entry = ec.assess(stock["price"], as_of_iso, KNIFE["conditions"]) if KNIFE else None
+    if entry is not None:
+        row[3].metric("Frente a su media de 200 sesiones", pct(entry.distance_to_sma),
+                      help="Precio ajustado por splits sobre la media de las últimas 200 "
+                           "sesiones.")
+        state = ("cae con fuerza (bajo su media y −20 % o peor en 3 meses)" if entry.knife
+                 else "muy estirada (+30 % o más sobre su media)" if entry.overextended
+                 else "ni cae con fuerza ni está muy estirada")
+        st.caption(
+            f"**Antes de comprar:** 1 mes {pct(entry.return_1m)} · 3 meses "
+            f"{pct(entry.return_3m)} · 12 meses {pct(entry.return_12m)} · hoy {state}. "
+            "Probado en el S&P 500 (2018-2026) comparando cada fecha con el resto del índice: "
+            "comprar una acción que cae con fuerza rindió 1,9 puntos menos a 6 meses, **sin "
+            "significación** y con signo distinto según el periodo; una muy estirada rindió "
+            "**más** (+8,5 puntos, casi todo desde 2022). Ninguna de las dos es regla: el "
+            "precio solo no decide; la tesis y el 10-Q sí.")
 
     events = app_data.events()
     confirmed = events[(events["category"] == "earnings") & (events["cik"] == cik)

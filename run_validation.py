@@ -11,6 +11,7 @@ Usage:
     python run_validation.py --factors          # quality, accruals and momentum
     python run_validation.py --pead             # drift after earnings (§15.5 point 6)
     python run_validation.py --insiders-small   # insider purchases outside the S&P 500
+    python run_validation.py --knife            # falling knives and overextension
 """
 
 from __future__ import annotations
@@ -41,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Run the post-earnings drift study (settings.yaml pead_study).")
     parser.add_argument("--insiders-small", action="store_true",
                         help="Run the small-company insider study (insider_small_study).")
+    parser.add_argument("--knife", action="store_true",
+                        help="Run the falling-knife / overextension study (knife_study).")
     parser.add_argument("--refresh", action="store_true",
                         help="With --factors: download the members' companyfacts again.")
     args = parser.parse_args(argv)
@@ -55,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
         return pead_study(settings, args.out)
     if args.insiders_small:
         return insider_small_study(settings, args.out)
+    if args.knife:
+        return knife_study(settings, args.out)
     level2 = settings.raw["panel"]["level2"]
     cfg = settings.raw.get("validation", {})
 
@@ -367,6 +372,29 @@ def insider_small_study(settings, out: str | None) -> int:
         conn.close()
     outcome = study.study(purchases, prices, intervals, parent["signals"],
                           int(parent["cooldown_days"]), cfg)
+    text = study.report(outcome, cfg, date.today().isoformat())
+    print(text)
+    if out:
+        with open(out, "w", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    return 0
+
+
+def knife_study(settings, out: str | None) -> int:
+    """The pre-registered falling-knife / overextension study, once, on the S&P 500 members'
+    closes already in the database (``ingest/universe``)."""
+    from validation import knife as study  # noqa: PLC0415
+
+    cfg = settings.raw["knife_study"]
+    conn = open_connection(settings.db_path)
+    try:
+        intervals = read_table(conn, "universe_membership")
+        tickers = sorted(set(intervals["ticker"])) + [str(cfg["benchmark"])]
+        closes = read_observations(conn, series_ids=[f"{t}:close_raw" for t in tickers])
+        actions = read_table(conn, "corporate_actions")
+    finally:
+        conn.close()
+    outcome = study.study(closes, actions, intervals, cfg)
     text = study.report(outcome, cfg, date.today().isoformat())
     print(text)
     if out:
