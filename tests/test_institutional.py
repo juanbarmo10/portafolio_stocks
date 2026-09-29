@@ -81,3 +81,26 @@ def test_filers_are_stored_without_an_ingestion_stamp(tmp_path):
     conn = loader.init_db(tmp_path / "f.db")
     assert loader.upsert_filers(conn, [{"cik": "0000000001", "name": "Fondo"}]) == 1
     assert conn.execute("SELECT name FROM filers").fetchone()[0] == "Fondo"
+
+
+def test_nothing_new_since_the_last_run_is_skipped_and_force_rebuilds(tmp_path, monkeypatch):
+    """The versions cost ~156 s to rebuild and change once a quarter: with the same SEC files
+    and the same companies there is nothing to recompute."""
+    from types import SimpleNamespace
+
+    from core.config import load_settings
+
+    ingester = ing.InstitutionalIngester(load_settings())
+    ingester._cache = tmp_path
+    page = '<a href="/files/2026q2_form13f.zip">x</a>'
+    monkeypatch.setattr(ingester, "_get", lambda url, **kw: SimpleNamespace(text=page))
+    monkeypatch.setattr(ingester, "_cusips", lambda: {CUSIP: CIK})
+    cached = tmp_path / "form13f" / "2026q2_form13f.zip.csv.gz"
+    cached.parent.mkdir(parents=True)
+    pd.DataFrame([row("a1", "2026-08-10", "", 100)]).to_csv(cached, index=False,
+                                                             compression="gzip")
+    cached.with_suffix(".cusips").write_text(CUSIP, encoding="utf-8")
+    assert not ingester.fetch().empty, "first run builds the versions"
+    assert ingester.fetch().empty, "same files, same companies: skipped"
+    ingester.force = True
+    assert not ingester.fetch().empty, "--force rebuilds"

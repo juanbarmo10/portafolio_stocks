@@ -18,6 +18,11 @@ amended_filing         a held company filed an amended 10-K/10-Q → possible re
 filing_signal          a held or studied company filed something actionable: late filing,
                        non-reliance, delisting notice, auditor change, impairment, or a
                        shelf / sale while burning cash (transform/filing_signals.py)
+cash_above_limit       cash above the written policy's maximum for longer than its grace
+                       period (transform/allocation.py)
+fundamental_inflection a new quarter of a held or studied company whose growth or gross
+                       margin turned by more than the written thresholds
+                       (transform/inflection.py)
 catalyst_soon          a hand-written catalyst (FDA decision, trial readout, lockup) starts
                        within N days (transform/catalysts.py)
 (ingest failure)       not a rule: ``run_ingest.py`` raises it from its own failure list

@@ -172,6 +172,7 @@ class InstitutionalIngester(Ingester):
         self._ibkr_cusips: dict[str, str] = {}
         self._failures: list[str] = []
         self._filers: list[dict[str, Any]] = []
+        self.force = False
 
     @staticmethod
     def is_available(settings: Settings) -> bool:
@@ -257,6 +258,17 @@ class InstitutionalIngester(Ingester):
         links = sorted({link for link in re.findall(r'href="([^"]*form13f\.zip)"', page)
                         if (end := window_end(link.split("/")[-1])) and end >= since},
                        key=lambda link: window_end(link.split("/")[-1]))
+        # Nothing new since the last good run — the same SEC files and the same watched
+        # companies — means nothing to recompute: the versions are already in the database
+        # (upserts never delete). Rebuilding them anyway cost ~156 s every morning for a
+        # figure that changes once a quarter (measured 2026-09-29).
+        stamp = {"files": [link.split("/")[-1] for link in links], "cusips": sorted(wanted)}
+        memo = self._cache / "form13f" / "last_run.json"
+        if not self.force and memo.exists() and \
+                json.loads(memo.read_text(encoding="utf-8")) == stamp:
+            log.info("13F: no new file and no new company since the last run; skipped.",
+                     extra={"source": SOURCE})
+            return empty_observations()
         frames = []
         for link in links:
             name = link.split("/")[-1]
@@ -297,6 +309,9 @@ class InstitutionalIngester(Ingester):
         records = versions(rows, cik_of)
         log.info("13F: %d version(s) of %d manager(s) across %d file(s).", len(records),
                  len(self._filers), len(frames), extra={"source": SOURCE})
+        if not self._failures:
+            memo.parent.mkdir(parents=True, exist_ok=True)
+            memo.write_text(json.dumps(stamp), encoding="utf-8")
         return self.validate(pd.DataFrame(records)) if records else empty_observations()
 
     def fetch_tables(self) -> dict[str, list[dict[str, Any]]]:

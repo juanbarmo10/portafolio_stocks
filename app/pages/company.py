@@ -96,11 +96,13 @@ under_study = {str(entry.get("ticker")) for entry in watchlist}
 # candidate does — the numbers are what a card is written from — marked so it is never
 # forgotten that the position already exists (§5.1).
 held_no_card: set[str] = set()
+held_all: set[str] = set()      # everything held, card or not: for the selector's label
 if not public and app_data.database_ready():
     account_now = app_data.account_observations()
     held_now = port.latest_positions(account_now) if not account_now.empty else pd.DataFrame()
     registry_held = app_data.companies()
     carded = {str(c.get("ticker")) for c in cards}
+    held_all = {str(t) for t in (held_now["ticker"] if not held_now.empty else [])}
     for held_ticker in (held_now["ticker"] if not held_now.empty else []):
         match = registry_held[registry_held["ticker"] == held_ticker] \
             if not registry_held.empty else registry_held
@@ -171,8 +173,13 @@ left, right = st.columns([1, 1])
 with left:
     ticker = st.selectbox(
         "Empresa", sorted(by_ticker), index=0,
+        # A company under study that is ALSO held says both (found 2026-09-29: DUOL, HIMS
+        # and NU were bought on 09-28 and the selector still read "en estudio").
         format_func=lambda t: (f"{t} · en cartera, sin ficha" if t in held_no_card else
-                               f"{t} · en estudio" if t in under_study else t),
+                               f"{t} · en estudio · en cartera" if t in under_study
+                               and t in held_all else
+                               f"{t} · en estudio" if t in under_study else
+                               f"{t} · en cartera" if t in held_all else t),
     )
 with right:
     as_of = st.date_input(

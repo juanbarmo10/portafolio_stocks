@@ -206,7 +206,9 @@ def test_a_failed_source_is_recorded_as_an_alert(isolated_db, monkeypatch):
     finally:
         conn.close()
     assert len(rows) == 1 and rows[0][0].startswith("ingest_failure:ibkr:")
-    assert json.loads(rows[0][1])["delivered"] is False
+    payload = json.loads(rows[0][1])
+    assert payload["delivered"] is False
+    assert "RuntimeError: Flex token expired" in payload["text"], "the reason travels with it"
 
 
 def test_a_broken_alert_path_does_not_mask_the_ingest_result(isolated_db, monkeypatch):

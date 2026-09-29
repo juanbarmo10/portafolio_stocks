@@ -51,6 +51,10 @@ sources:
     # output_type=4 devuelve solo la publicación inicial de cada dato: es lo que permite
     # guardar ts_release honesto y evitar look-ahead (§9.4).
     output_type: 4
+    # 60 s y no los 20 por defecto: la primera petición diaria de NFCI (publicaciones desde
+    # 2011) agotaba 20 s cada mañana y respondía en 2 s al tercer intento (medido
+    # 2026-09-25 → 29, cinco días seguidos, siempre NFCI).
+    request_timeout_s: 60
     series:
       - CPIAUCSL      # IPC general
       - PCEPILFE      # PCE subyacente (la métrica que mira la Fed)

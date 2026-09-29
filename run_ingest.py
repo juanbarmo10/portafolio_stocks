@@ -252,13 +252,18 @@ def run(args: argparse.Namespace) -> int:
                         "Ingester '%s' loaded its data but %d unit(s) failed: %s",
                         name, len(partial), partial, extra={"source": name},
                     )
-                    failures.append(f"{name} ({', '.join(partial)})")
-            except Exception:
+                    shown = partial[:3] + ([f"y {len(partial) - 3} más"] if len(partial) > 3
+                                           else [])
+                    failures.append(f"{name} ({'; '.join(shown)})")
+            except Exception as exc:
                 # One broken source must not abort the rest of the run, but the failure
                 # is logged with a traceback and turns the exit code non-zero, so the
                 # orchestrator notices (section 8, phase 4: "any ingester failing" alerts).
                 log.exception("Ingester '%s' failed.", name, extra={"source": name})
-                failures.append(name)
+                # The reason travels with the name: an alert that says only "institutional
+                # failed" sends the reader to a log on another machine (found 2026-09-29).
+                # Secrets are struck out before sending (alerts/telegram.py).
+                failures.append(f"{name} ({type(exc).__name__}: {str(exc)[:200]})")
 
         if failures:
             log.error("Ingest finished with %d failed source(s): %s", len(failures), failures)
