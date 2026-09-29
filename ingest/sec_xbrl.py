@@ -111,8 +111,12 @@ def extract_metric(
     spec: Mapping[str, Any],
     cik: str,
     windows: Mapping[str, Iterable[int]],
+    taxonomy: str = TAXONOMY,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Pull one normalized metric out of a companyfacts document.
+
+    ``taxonomy`` is ``us-gaap`` unless a foreign filer's ``ifrs-full`` facts are wanted
+    (``ingest/sector_groups``); the tags in ``spec`` must belong to it.
 
     Concepts are tried in the configured order, and the **first** one that has a value for
     a given ``(period, end, filed)`` wins. Later preferences fill only the gaps, so a
@@ -123,7 +127,7 @@ def extract_metric(
         ``(records, stats)`` — observation dicts, plus counters for what was skipped
         (wrong unit, unclassifiable duration, missing value).
     """
-    concepts = facts.get(TAXONOMY, {})
+    concepts = facts.get(taxonomy, {})
     wanted_unit = spec.get("unit", "USD")
     stats = {"wrong_unit": 0, "unclassified_period": 0, "no_value": 0}
     chosen: dict[tuple[str, str, str], tuple[int, float]] = {}

@@ -231,7 +231,7 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 
 | Dato | Fuente | Acceso |
 |---|---|---|
-| Macro (CPI, PCE, NFP, fed funds, dólar, curva, spread HY, NFCI, VIX) | FRED | REST, clave gratuita |
+| Macro (CPI, PCE, NFP, fed funds, dólar, curva, spread HY, NFCI, VIX, petróleo WTI y Brent, tipo real a 10 años) | FRED | REST, clave gratuita |
 | Fundamentales auditados | SEC EDGAR XBRL | `data.sec.gov`, sin clave |
 | Cribado trimestral del S&P 500 | SEC XBRL `frames` | un concepto para todas las empresas de un año: ~40 peticiones en vez de 500. Sin fecha de presentación, así que solo sirve para el cribado de hoy, nunca para un backtest |
 | Propiedad institucional | Ficheros 13F de la SEC (uno por ventana de presentación, ~100 MB, reducidos al vuelo) | posiciones largas de gestores > 100 M USD, trimestrales y 45 días tarde; enmiendas aplicadas en orden y fechadas por su presentación |
@@ -241,6 +241,8 @@ Todas gratuitas. Es una restricción del proyecto, no una circunstancia.
 | Pares de NU en Colombia | Superintendencia Financiera, CUIF en datos.gov.co (`mxk5-ce6w`) | cuentas mensuales de cada entidad vigilada; el resultado es acumulado desde enero y no hay fecha de publicación (primera vista o cierre + 60 días) |
 | Pares fuera del cribado (DiDi) | SEC `companyfacts`, ejercicios completos | en la moneda en que presentan; solo cocientes. Un emisor que pasó a IFRS deja de leerse |
 | Cribado de crecimiento (todas las empresas de la SEC) | SEC XBRL `frames` trimestral + yfinance (último cierre, volumen y splits) | cada empresa en su último trimestre presentado: el cuarto trimestre natural casi no existe en `frames` (va dentro del 10-K). Un solo concepto de ingresos por empresa, el total, porque algunas etiquetan una partida con otro concepto |
+| Grupos de sector con emisores extranjeros (mineras de plata) | SEC `companyfacts`, ejercicios completos en US GAAP **o IFRS** (40-F) | la SEC no ofrece `frames` para IFRS: cada empresa se lee en la taxonomía de su último informe anual. Solo la deuda con etiqueta estándar; una deuda corriente de 0 no prueba que no haya deuda |
+| Oro, plata y mineras | yfinance (futuros de COMEX, SLV, GDX, SIL, SILJ) | las series LBMA ya no están en FRED |
 | Fechas de presentación y enmiendas | SEC submissions | `data.sec.gov`, sin clave |
 | Mapa ticker↔CIK | SEC `company_tickers.json` | sin clave |
 | Precios diarios OHLC y acciones corporativas | yfinance | sin clave |
@@ -417,7 +419,8 @@ app/        Streamlit multipágina (st.navigation)
               ├── 🏠 Hoy       nivel 1 point-in-time + resumen del checklist y lo que viene
               ├── 📈 Mercado   nivel 2 y el semáforo de régimen, con el voto de cada señal
               ├── 🔎 Cribado   trimestral: qué empresas merecen una ficha (S&P 500 por
-              │                calidad y precio, o todas las de la SEC por crecimiento)
+              │                calidad y precio, todas las de la SEC por crecimiento, o un
+              │                grupo de sector por salud financiera, IFRS incluido)
               │                (captura de valor y precio; solo local)
               ├── 🏢 Empresa   nivel 3: fundamentales trimestre a trimestre y balance,
               │                valoración (múltiplos, DCF inverso), el precio frente al

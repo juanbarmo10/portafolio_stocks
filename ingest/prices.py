@@ -243,6 +243,8 @@ class PricesIngester(Ingester):
         comparisons = [t.etf for t in settings.themes] + [
             str(c["benchmark"]).upper() for c in settings.researched_companies
             if c.get("benchmark")]
+        # And every company of a sector group (§15.5 point 14): its market cap needs a price.
+        comparisons += [t for group in settings.sector_groups.values() for t in group]
         return list(dict.fromkeys([*settings.market_references, *written, *comparisons]))
 
     def attach_database(self, conn: Any) -> None:

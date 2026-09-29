@@ -22,10 +22,13 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app.format import (BAD, CAUTION, GOOD, MISSING, VERDICT_TONES, altair_chart, color_cells,
-                        colored, number, pct, reported_amount, tinted, tone, verdict_delta)
+from app.format import (BAD, CAUTION, GOOD, MISSING, VERDICT_TONES, altair_chart, color_by_sign,
+                        color_cells, colored, number, pct, reported_amount, tinted, tone, verdict_delta)
 from core.config import load_settings
+from transform import metals
 from transform import regime as rg
+from transform import themes as themes_tf
+from transform.adjustments import total_return_index
 from transform.breadth import (
     advance_decline,
     net_new_highs,
@@ -40,6 +43,7 @@ from transform.breadth import (
     wide_closes,
 )
 from transform.macro import latest
+from transform.price_action import as_series
 
 LINE = "#2a78d6"
 VERDICT_COLORS = {
@@ -419,12 +423,103 @@ st.caption(f"Datos del {vix.ts or MISSING}. VIX3M desde 2007-12 y VIX desde 2000
            "y de 2010 respectivamente, la fecha de publicación es derivada (+3 días hábiles, "
            "el máximo medido): la serie no se revisa, solo se desconoce cuándo salió.")
 
+# --- 6. Metals and miners (§15.5 point 14) ------------------------------------------------------
+# Context, not a recommendation: a metal pays no coupon and has no valuation in the sense of
+# question 3. Whether to hold any is the user's written policy.
+
+st.subheader("6 · Metales y mineras")
+METALS = ["SPY", "GLD", "SLV", "GDX", "SIL", "SILJ"]
+METAL_LABELS = {"GLD": "Oro (GLD)", "SLV": "Plata (SLV)", "GDX": "Mineras de oro (GDX)",
+                "SIL": "Mineras de plata (SIL)", "SILJ": "Mineras de plata pequeñas (SILJ)"}
+
+
+@st.cache_data(show_spinner="Leyendo los metales…")
+def metals_view(as_of_iso: str, mtime: float) -> tuple[dict, dict]:
+    rows = app_data.prices_for([*METALS, "GC=F", "SI=F"])
+    actions = app_data.corporate_actions()
+    tr = {}
+    for t in METALS:
+        own = rows[rows["series_id"] == f"{t}:close_raw"]
+        tr[t] = as_series(total_return_index(own.assign(ts=own["ts"].str[:10]), actions, t,
+                                             as_of_iso)) if not own.empty else as_series(None)
+    raw = {t: as_series(rows[rows["series_id"] == f"{t}:close_raw"]) for t in ("GC=F", "SI=F")}
+    return tr, raw
+
+
+as_of_metals = pd.Timestamp.today().normalize()
+metal_tr, futures = metals_view(as_of_metals.date().isoformat(), app_data.db_mtime())
+gold_silver = metals.ratio(futures["GC=F"], futures["SI=F"])
+if gold_silver.empty:
+    st.caption("Sin precios de los metales todavía: `python run_ingest.py --only prices`.")
+else:
+    real = latest(fred, "DFII10", pd.Timestamp.today())
+    cols = st.columns(4)
+    cols[0].metric("Oro (USD/onza)", number(float(futures["GC=F"].iloc[-1]), decimals=0))
+    cols[1].metric("Plata (USD/onza)", number(float(futures["SI=F"].iloc[-1])))
+    share = metals.percentile_of_last(gold_silver)
+    cols[2].metric("Oro / plata", number(float(gold_silver.iloc[-1]), decimals=1),
+                   help="Onzas de plata que compra una onza de oro. Alto = la plata está "
+                        "barata FRENTE AL ORO, que no es lo mismo que barata.")
+    cols[3].metric("Tipo real 10 años", f"{number(real.value)} %" if real.value is not None
+                   else MISSING,
+                   help="Lo que paga el bono del Tesoro protegido de inflación. El oro no paga "
+                        "nada: cuando el tipo real sube, tener oro cuesta más.")
+    since = gold_silver[gold_silver.index >= as_of_metals - pd.DateOffset(years=10)]
+    altair_chart(
+        alt.Chart(pd.DataFrame({"date": since.index, "cociente": since.to_numpy()}))
+        .mark_line(strokeWidth=1.5, color=LINE)
+        .encode(x=alt.X("date:T", title=None),
+                y=alt.Y("cociente:Q", title="Onzas de plata por onza de oro",
+                        scale=alt.Scale(zero=False)),
+                tooltip=[alt.Tooltip("date:T", title="Fecha"),
+                         alt.Tooltip("cociente:Q", title="Oro / plata", format=".1f")])
+        .properties(height=200), width="stretch")
+    rows_m = []
+    for t, label in METAL_LABELS.items():
+        row = {"Activo": label}
+        for name, days in (("1 año", 365), ("3 años", 1095)):
+            own = themes_tf.horizon_return(metal_tr[t], as_of_metals, days)
+            spy = themes_tf.horizon_return(metal_tr["SPY"], as_of_metals, days)
+            row[name] = own
+            row[f"{name} frente a SPY"] = themes_tf.relative(own, spy)
+        rows_m.append(row)
+    returns_frame = pd.DataFrame(rows_m)
+    st.dataframe(color_by_sign(returns_frame, {c: True for c in returns_frame.columns[1:]}),
+                 hide_index=True, width="stretch",
+                 column_config={c: st.column_config.NumberColumn(format="percent")
+                                for c in returns_frame.columns[1:]})
+    episodes = metals.drawdown_episodes(
+        metal_tr["SPY"][metal_tr["SPY"].index >= pd.Timestamp("2005-01-01")])
+    falls = metals.cushion(episodes, {t: metal_tr[t] for t in ("GLD", "SLV", "GDX", "SIL")})
+    if not falls.empty:
+        st.markdown("**Cuando el mercado cayó** — caídas de SPY del 10 % o más desde un máximo, "
+                    "con dividendos, y lo que hizo cada uno en el mismo tramo")
+        fall_frame = pd.DataFrame({
+            "Máximo": falls["peak"], "Mínimo": falls["trough"], "SPY": falls["depth"],
+            "Oro (GLD)": falls["GLD"], "Plata (SLV)": falls["SLV"],
+            "Mineras de oro (GDX)": falls["GDX"], "Mineras de plata (SIL)": falls["SIL"]})
+        st.dataframe(color_by_sign(fall_frame, {c: True for c in fall_frame.columns[2:]}),
+                     hide_index=True, width="stretch",
+                     column_config={c: st.column_config.NumberColumn(format="percent")
+                                    for c in fall_frame.columns[2:]})
+    st.caption(
+        f"Oro y plata: futuros más cercanos de COMEX, cierre del "
+        f"{futures['GC=F'].index[-1].date()}. Cociente oro / plata en el percentil "
+        f"{share * 100:.0f} de su historia desde 2000. " if share is not None else "")
+    st.caption(
+        "**Cómo leerlo.** Oro y plata no generan caja: no hay precio «justo» que calcular, solo "
+        "contexto (el tipo real, el dólar) y comportamiento. La tabla de caídas dice si "
+        "habrían amortiguado a la cartera cuando el mercado cayó; una celda vacía es un activo "
+        "que aún no cotizaba. Las mineras son **empresas apalancadas al metal**: suben y caen "
+        "más que él, porque sus costes son casi fijos. Para comparar su salud financiera, 🔎 "
+        "Cribado → Grupos de sector.")
+
 # --- 6. Short interest (private) ----------------------------------------------------------------
 
 # Private only: the list is the watchlist plus whatever FINRA was asked about because it
 # is HELD, so publishing it would publish the positions.
 if not public:
-    st.subheader("6 · Interés corto")
+    st.subheader("7 · Interés corto")
     tickers = sorted({str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")})
     finra = app_data.observations("finra", app_data.db_mtime())
     # FINRA was asked about the written universe AND what is held (its ingester adds the

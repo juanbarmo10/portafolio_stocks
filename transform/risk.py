@@ -10,7 +10,8 @@ Two questions a weight alone does not answer:
 - **What do the positions have in common?** (§5.3: diversification is by failure mode, not
   by number of tickers.) Each holding's weekly return is regressed on a few factor proxies
   built from data the panel already has — the market, the 10-year yield, the dollar, small
-  against large, technology against the market, cyclical against defensive consumption.
+  against large, technology against the market, cyclical against defensive consumption,
+  and crude oil (WTI, from FRED; §15.5 point 13).
   A scenario ("rates +1 pp") times those sensitivities says which positions tend to fall
   together. **Estimated from past co-movement, not a forecast**, with the uncertainty
   shown: a sensitivity whose t-statistic is below 2 is marked as not distinguishable
@@ -109,6 +110,32 @@ def limit_breaches(weights: Mapping[str, float], categories: Mapping[str, str | 
     return out
 
 
+def correlation_with_basket(weights: Mapping[str, float], indices: Mapping[str, pd.Series],
+                            others: Sequence[str], end: Any, days: int = 365,
+                            min_weeks: int = 26) -> dict[str, float]:
+    """Weekly correlation of each of ``others`` with the basket ``weights`` (renormalised to
+    sum 1, held fixed over the window). A name without ``min_weeks`` in common is left out."""
+    total = sum(w for w in weights.values() if w > 0)
+    if not total:
+        return {}
+    start = pd.Timestamp(end) - pd.Timedelta(days=days)
+    returns = {t: weekly(s[(s.index > start) & (s.index <= pd.Timestamp(end))]).pct_change()
+               for t, s in indices.items() if s is not None and not s.empty}
+    members = [t for t in weights if t in returns and weights[t] > 0]
+    if not members:
+        return {}
+    frame = pd.DataFrame({t: returns[t] for t in members}).dropna()
+    basket = sum(frame[t] * (weights[t] / total) for t in members)
+    out = {}
+    for name in others:
+        if name not in returns:
+            continue
+        both = pd.concat([basket.rename("b"), returns[name].rename("o")], axis=1).dropna()
+        if len(both) >= min_weeks:
+            out[name] = float(both["b"].corr(both["o"]))
+    return out
+
+
 # --- Factor sensitivities and shared failure modes ---------------------------------------
 
 # name → (label, how it is built, scenario shock, scenario label)
@@ -123,6 +150,10 @@ FACTORS = {
              "la tecnología pierde 10 % frente al mercado"),
     "consumer": ("Consumo cíclico − defensivo", "XLY − XLP semanal", -0.10,
                  "el consumo cíclico pierde 10 % frente al defensivo"),
+    # §15.5 point 13: fuel is a cost for some businesses (drivers' fuel, freight) and an
+    # income for others, and an oil shock moves inflation and rates. +30 % is roughly a
+    # large supply shock in a few months (2022); a scenario, chosen by that principle.
+    "oil": ("Petróleo (WTI)", "WTI semanal, FRED", 0.30, "el petróleo sube 30 %"),
 }
 
 
@@ -135,12 +166,25 @@ def weekly(series: pd.Series) -> pd.Series:
     return clean.resample("W-FRI").last().dropna()
 
 
+def oil_returns(price: pd.Series | None) -> pd.Series | None:
+    """Weekly % change of a crude price, ``None`` without data. A week whose previous close
+    is not positive is dropped: WTI settled at −37.63 USD on 2020-04-20, and a percentage
+    change through zero is not a return."""
+    if price is None or price.empty:
+        return None
+    level = weekly(price)
+    previous = level.shift(1)
+    change = level / previous - 1
+    return change[previous > 0]
+
+
 def factor_returns(indices: Mapping[str, pd.Series], yield10: pd.Series,
-                   dollar: pd.Series) -> pd.DataFrame:
+                   dollar: pd.Series, oil: pd.Series | None = None) -> pd.DataFrame:
     """Weekly factor proxies (``FACTORS``). ``indices`` holds total-return indices of SPY,
-    IWM, XLK, XLY, XLP; ``yield10`` is the 10-year yield in percent; ``dollar`` a level."""
+    IWM, XLK, XLY, XLP; ``yield10`` is the 10-year yield in percent; ``dollar`` a level;
+    ``oil`` the WTI price (optional: without it the factor is simply absent)."""
     r = {k: weekly(v).pct_change() for k, v in indices.items()}
-    out = pd.DataFrame({
+    columns = {
         "market": r.get("SPY"),
         "rates": weekly(yield10).diff() if yield10 is not None and not yield10.empty else None,
         "dollar": weekly(dollar).pct_change() if dollar is not None and not dollar.empty
@@ -148,8 +192,14 @@ def factor_returns(indices: Mapping[str, pd.Series], yield10: pd.Series,
         "size": r.get("IWM") - r.get("SPY") if "IWM" in r and "SPY" in r else None,
         "tech": r.get("XLK") - r.get("SPY") if "XLK" in r and "SPY" in r else None,
         "consumer": r.get("XLY") - r.get("XLP") if "XLY" in r and "XLP" in r else None,
-    })
-    return out.dropna(how="all")
+        "oil": oil_returns(oil),
+    }
+    # An absent factor is an absent column, not one of NaN that would empty every regression
+    # at its dropna(); with no factor at all, an empty frame on a date index.
+    present = {k: v for k, v in columns.items() if v is not None and not v.dropna().empty}
+    if not present:
+        return pd.DataFrame(index=pd.DatetimeIndex([]))
+    return pd.DataFrame(present).dropna(how="all")
 
 
 @dataclass(frozen=True)
@@ -171,6 +221,8 @@ def sensitivity(stock: pd.Series, factors: pd.DataFrame, ticker: str,
                 min_weeks: int = 52) -> Sensitivity | None:
     """OLS of the stock's weekly return on the factors (with intercept). ``None`` below
     ``min_weeks`` of complete data — a year of weeks is the least that says anything."""
+    if factors is None or factors.empty or not len(factors.columns):
+        return None
     y = weekly(stock).pct_change().rename("y")
     data = pd.concat([y, factors], axis=1, join="inner").dropna()
     if len(data) < min_weeks:

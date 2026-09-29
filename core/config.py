@@ -142,6 +142,14 @@ class Settings:
                 for t, group in raw.items()}
 
     @property
+    def sector_groups(self) -> dict[str, list[str]]:
+        """``{group name: [tickers]}`` compared on fiscal years, whatever their taxonomy
+        (CLAUDE.md §15.5, point 14; ``ingest/sector_groups``). Data only, never universe."""
+        raw = self.raw.get("universe", {}).get("sector_groups") or {}
+        return {str(name): [str(t).strip().upper() for t in (group or [])]
+                for name, group in raw.items()}
+
+    @property
     def themes(self) -> list[Any]:
         """``universe.themes`` as :class:`transform.themes.Theme`, with the tracked cards
         whose ``thesis_category`` names a theme added to it (CLAUDE.md §15.5, point 10)."""
@@ -525,6 +533,13 @@ def load_settings() -> Settings:
     validate_watchlist(settings.watchlist_companies, settings.tracked_companies)
     validate_peers(raw.get("universe", {}).get("peers"))
     validate_policy(raw.get("portfolio"))
+    groups = raw.get("universe", {}).get("sector_groups")
+    if groups is not None and (not isinstance(groups, dict) or not all(
+            isinstance(g, list) and all(isinstance(t, str) and t.strip() for t in g)
+            for g in groups.values())):
+        raise ValueError("Invalid universe.sector_groups (CLAUDE.md §15.5 point 14): must be "
+                         "{group name: [TICKER, ...]} — a string would be read one letter at "
+                         "a time")
     if found := theme_problems(raw.get("universe", {}).get("themes")):
         raise ValueError("Invalid universe.themes (CLAUDE.md §15.5 point 10):\n  "
                          + "\n  ".join(found))

@@ -33,6 +33,7 @@ from ingest.local_fx import LocalFxIngester
 from ingest.macro_calendar import MacroCalendarIngester
 from ingest.otc_volume import OtcVolumeIngester
 from ingest.peers import PeersIngester
+from ingest.sector_groups import SectorGroupsIngester
 from ingest.ibkr_flex import (
     IbkrFlexIngester,
     cash_transactions_frame,
@@ -76,6 +77,7 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "sfc": (SfcIngester.is_available, SfcIngester),
     # Annual figures for the peers the growth screen cannot read (DiDi: 20-F, yuan).
     "peers": (PeersIngester.is_available, PeersIngester),
+    "sector_groups": (SectorGroupsIngester.is_available, SectorGroupsIngester),
     # Local only: its config lives in settings.local.yaml (section 11).
     "local_fx": (LocalFxIngester.is_available, LocalFxIngester),
     # Quarterly; last, so the universe and the registry it reads are already fresh.

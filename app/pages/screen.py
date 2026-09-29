@@ -1,8 +1,10 @@
 """🔎 Cribado — which companies deserve a thesis (CLAUDE.md §15.1, question 3 of section 2).
 
-Once a quarter, two modes: the current S&P 500 plus the researched companies on audited
-annual figures (``ingest/screen``, ``transform/screen``), or — "Crecimiento", §15.5 point 2 —
-every SEC filer at its latest reported quarter (``app/screen_growth``). The output is a short list
+Once a quarter, three modes: the current S&P 500 plus the researched companies on audited
+annual figures (``ingest/screen``, ``transform/screen``); "Crecimiento" (§15.5 point 2), every
+SEC filer at its latest reported quarter (``app/screen_growth``); and "Grupos de sector"
+(§15.5 point 14), a group the user lists, foreign IFRS filers included, compared on its
+balance sheet (``app/screen_sector``). The output is a short list
 of companies to **study** on the company page — the screen never says "buy", and nothing on
 it is fresher than the last annual report (sections 2, 12).
 
@@ -18,7 +20,7 @@ import pandas as pd
 import streamlit as st
 
 from app import data as app_data
-from app import screen_growth
+from app import screen_growth, screen_sector
 from app.format import MISSING, color_by_sign
 from core.config import load_settings
 from ingest.screen import SOURCE
@@ -61,13 +63,19 @@ def status(ticker: str) -> str:
 
 
 GROWTH = "Crecimiento · todas las empresas de la SEC"
+SECTOR = "Grupos de sector · salud financiera"
 mode = st.radio(
-    "Modo", ["Calidad y precio · S&P 500", GROWTH], horizontal=True, key="screen_mode",
+    "Modo", ["Calidad y precio · S&P 500", GROWTH, SECTOR], horizontal=True, key="screen_mode",
     help="Calidad y precio: el S&P 500 con cifras anuales, filtrado por dilución, SBC, caja y "
          "tamaño. Crecimiento: todas las que presentan en la SEC, cada una en su último "
-         "trimestre, para buscar crecimiento que acelera y de buena calidad (§15.5).")
+         "trimestre, para buscar crecimiento que acelera y de buena calidad (§15.5). Grupos de "
+         "sector: las empresas que tú listas (por ejemplo, mineras de plata), también las "
+         "extranjeras en IFRS, comparadas por su balance y su caja.")
 if mode == GROWTH:
     screen_growth.render(settings, status, tracked | watch)
+    st.stop()
+if mode == SECTOR:
+    screen_sector.render(settings, status)
     st.stop()
 
 table = app_data.screen_view(app_data.db_mtime())

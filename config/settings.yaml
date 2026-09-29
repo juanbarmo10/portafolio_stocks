@@ -30,6 +30,11 @@ universe:
     # aquí a propósito: cambiarían el denominador con los años (panel.level2).
     sectors:  [XLK, XLU, XLP, XLF, XLE, XLV, XLY, XLI, XLB]
     assets:   [TLT, GLD]
+    # Metales y sus mineras (§15.5 punto 14), verificados el 2026-09-29: SLV (plata física),
+    # los futuros más cercanos de COMEX (GC=F oro, SI=F plata; solo para el cociente
+    # oro/plata, que con GLD/SLV saldría en otra escala) y los ETF de mineras: GDX (oro),
+    # SIL y SILJ (plata, grandes y pequeñas). Contexto: no son posiciones ni votan.
+    metals:   [SLV, "GC=F", "SI=F", GDX, SIL, SILJ]
     # DXY no se toma de un feed de precios: entra por FRED como DTWEXBGS (ver sources.fred).
 
   # 2) Universo de seguimiento: empresas con ficha de tesis completa (§5.2).
@@ -82,6 +87,17 @@ sources:
       - WTREGEN       # cuenta general del Tesoro en la Fed (millones USD, semanal)
       - WLRRAL        # repos inversos, nivel del miércoles (millones USD, semanal)
       - DEXBZUS       # reales por dólar (H.10, diaria): contexto de NU (§2.43)
+      # Petróleo (§15.5 punto 13), verificado el 2026-09-29: diarias, dólares por barril,
+      # vintages de ALFRED desde 2011-04-06. Contexto del nivel 1 (presión de inflación →
+      # Fed) y factor de riesgo de la cartera. NO votan en el semáforo: sus ocho votos son
+      # fijos y añadir uno después de ver resultados es justo lo que §9.7 prohíbe.
+      - DCOILWTICO    # WTI (Cushing)
+      - DCOILBRENTEU  # Brent
+      # Tipo real a 10 años (TIPS), verificado el 2026-09-29, vintages desde 2005: el motor
+      # principal del oro, que no paga cupón y compite con el bono real (§15.5 punto 14).
+      # Las series LBMA de oro y plata YA NO existen en FRED (400, verificado el mismo día):
+      # el precio de los metales entra por GLD, SLV y los futuros de COMEX (yfinance).
+      - DFII10        # rendimiento real del tesoro a 10 años
     # Historia ANTERIOR al archivo de vintages (ALFRED), con fecha de publicación DERIVADA.
     # Solo para series que NO se revisan, verificado y no supuesto (RESEARCH.md §2.30): el
     # 2026-09-24, la primera publicación coincide con el valor actual en 4.012 de 4.012
@@ -246,8 +262,10 @@ sources:
         # del S&P que el cribado tomaba SIN deuda — KHC, CSX, CVS… con el EV infravalorado.
         # SeniorLongTermNotes: VeriSign. NO DebtInstrumentCarryingAmount: es un desglose que
         # suma instrumentos y puede incluir la parte corriente.
+        # 2026-09-29: LongTermNotesPayable — Hecla presenta así sus 268,6 M de notas; sin
+        # él, su deuda salía 0 (solo tenía etiquetada la corriente, que sí es 0).
         tags: [LongTermDebtNoncurrent, LongTermDebt, LongTermDebtAndCapitalLeaseObligations,
-               SeniorLongTermNotes, ConvertibleDebtNoncurrent]
+               SeniorLongTermNotes, ConvertibleDebtNoncurrent, LongTermNotesPayable]
       # --- Tabla trimestral y balance (§15.1.3, 2026-09-25). Verificados contra los
       # companyfacts de MSFT, HIMS y AT&T antes de escribirlos, no de memoria.
       # Margen bruto SOLO de `GrossProfit`: no se deriva restando el coste de ventas, porque
@@ -298,6 +316,50 @@ sources:
         kind: instant
         unit: USD
         tags: [ShortTermInvestments, MarketableSecuritiesCurrent, AvailableForSaleSecuritiesDebtSecuritiesCurrent]
+      # Amortización y agotamiento (§15.5 punto 14): con el resultado operativo da el EBITDA
+      # con el que se mide la deuda neta de una minera. Hecla y Coeur usan el primero.
+      depreciation:
+        kind: duration
+        unit: USD
+        tags: [DepreciationDepletionAndAmortization, DepreciationAndAmortization,
+               DepreciationAmortizationAndAccretionNet]
+
+    # Las MISMAS métricas en IFRS (`ifrs-full`), para emisores extranjeros que presentan 40-F
+    # o 20-F (ingest/sector_groups.py). Solo ANUALES: sus trimestres van en 6-K, sin XBRL.
+    # Etiquetas verificadas el 2026-09-29 sobre ocho mineras (Pan American, First Majestic,
+    # Endeavour, Fortuna, Silvercorp, Avino, Americas Gold & Silver, Wheaton). ⚠️ Varias
+    # etiquetas solo existen en ejercicios viejos (el beneficio bruto de First Majestic, en
+    # 2017; la deuda de algunas, hasta 2018-2021): cada cifra se lee SOLO en el último
+    # ejercicio, y falta si no está, nunca se toma la de otro año.
+    ifrs_concepts:
+      revenue: {kind: duration, unit: USD, tags: [Revenue, RevenueFromContractsWithCustomers]}
+      gross_profit: {kind: duration, unit: USD, tags: [GrossProfit]}
+      operating_income: {kind: duration, unit: USD, tags: [ProfitLossFromOperatingActivities]}
+      net_income: {kind: duration, unit: USD, tags: [ProfitLoss]}
+      operating_cash_flow: {kind: duration, unit: USD,
+                            tags: [CashFlowsFromUsedInOperatingActivities,
+                                   CashFlowsFromUsedInOperatingActivitiesContinuingOperations]}
+      capex: {kind: duration, unit: USD,
+              tags: [PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities,
+                     PurchaseOfPropertyPlantAndEquipment]}
+      depreciation: {kind: duration, unit: USD,
+                     tags: [DepreciationAndAmortisationExpense,
+                            DepreciationDepletionAndAmortisationExpense,
+                            AdjustmentsForDepreciationAndAmortisationExpense]}
+      cash: {kind: instant, unit: USD, tags: [CashAndCashEquivalents]}
+      long_term_debt: {kind: instant, unit: USD,
+                       tags: [LongtermBorrowings, NoncurrentPortionOfNoncurrentBorrowings,
+                              NoncurrentBorrowings, NoncurrentPortionOfNoncurrentLoansReceived]}
+      debt_current: {kind: instant, unit: USD,
+                     tags: [CurrentPortionOfLongtermBorrowings,
+                            CurrentBorrowingsAndCurrentPortionOfNoncurrentBorrowings,
+                            ShorttermBorrowings]}
+      # La deuda TOTAL cuando la empresa la etiqueta así (Pan American: Borrowings = 709 a
+      # largo + 5 corriente). Fortuna y Silvercorp usan «préstamos recibidos». Si existe,
+      # manda sobre largo + corriente (transform/sector_health.py).
+      debt_total: {kind: instant, unit: USD, tags: [Borrowings, LoansReceived]}
+      equity: {kind: instant, unit: USD, tags: [Equity]}
+      basic_shares: {kind: average, unit: shares, tags: [WeightedAverageShares]}
 
     # Clasificación de duraciones. `companyfacts` mezcla hechos de 3, 6, 9 y 12 meses bajo
     # el mismo concepto y compartiendo `end`; sin separarlos, un acumulado YTD entraría en
@@ -810,6 +872,20 @@ panel:
         label: Nóminas no agrícolas
         unit: miles
         note: se revisa; el panel guarda la PRIMERA publicación (lo que se sabía ese día)
+      # Sin `favorable`: el petróleo caro presiona la inflación y a la Fed, pero es ingreso
+      # para las petroleras y señal de demanda fuerte. No tiene un sentido "bueno" único.
+      - series_id: DCOILWTICO
+        label: Petróleo WTI
+        unit: USD/barril
+        note: diaria; contexto de inflación, no vota en el semáforo
+      - series_id: DCOILBRENTEU
+        label: Petróleo Brent
+        unit: USD/barril
+        note: la referencia mundial; WTI es la de EE. UU.
+      - series_id: DFII10
+        label: Tipo real 10 años (TIPS)
+        unit: "%"
+        note: rendimiento del bono protegido de inflación; el oro compite con él
 
     # Gráficas. Series de la MISMA unidad en cada una: dos escalas en un mismo eje
     # es la forma más común de mentir con una gráfica.
@@ -822,6 +898,10 @@ panel:
         unit: Puntos porcentuales
         series: [T10Y2Y]
         zero_rule: true        # el cruce por cero es el hecho, no un umbral elegido
+      - title: Petróleo — WTI y Brent
+        unit: USD por barril
+        series: [DCOILWTICO, DCOILBRENTEU]
+        zero_rule: false
 
   # Diario de decisiones (§15.1.10, app/pages/journal.py). Las entradas viven en
   # settings.local.yaml (`journal`); aquí solo cómo se emparejan con las operaciones.

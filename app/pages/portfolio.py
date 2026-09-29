@@ -445,7 +445,9 @@ if not public:
     held = list(valued["ticker"]) if not valued.empty else []
     studied = [str(c["ticker"]) for c in settings.researched_companies if c.get("ticker")]
     factor_etfs = ["SPY", "IWM", "XLK", "XLY", "XLP"]
-    risk_prices = app_data.prices_for(sorted(set(held) | set(studied) | set(factor_etfs)))
+    metal_etfs = ["GLD", "SLV"]      # §15.5 point 14: would they have diversified the account?
+    risk_prices = app_data.prices_for(sorted(set(held) | set(studied) | set(factor_etfs)
+                                             | set(metal_etfs)))
     risk_actions = app_data.corporate_actions()
 
 
@@ -457,7 +459,8 @@ if not public:
                                             ticker, as_of_risk.date().isoformat()))
 
 
-    indices = {t: tr_index(t) for t in sorted(set(held) | set(studied) | set(factor_etfs))}
+    indices = {t: tr_index(t) for t in sorted(set(held) | set(studied) | set(factor_etfs)
+                                              | set(metal_etfs))}
 
     if held and account_total:
         weights = {row["ticker"]: float(row["market_value"]) / account_total
@@ -485,6 +488,20 @@ if not public:
             + (" Correlaciones: " + "; ".join(f"{a}-{b} {number(c)}" for a, b, c in pairs) + "."
                if pairs else "")
         )
+        # Gold and silver against the account as it is today (§15.5 point 14): the weekly
+        # return of today's holdings, at today's weights, over the risk window. A context for
+        # the policy decision, not a recommendation to hold either.
+        invested = {t: w for t, w in weights.items() if t != "CASH" and t in indices}
+        metal_corr = risk.correlation_with_basket(
+            invested, {t: indices[t] for t in [*invested, *metal_etfs]}, metal_etfs,
+            as_of_risk, int(RISK.get("window_days", 365)))
+        if metal_corr:
+            st.caption(
+                "Correlación semanal de un año con tus acciones de hoy (a los pesos de hoy): "
+                + "; ".join(f"{t} {number(c)}" for t, c in metal_corr.items())
+                + ". Cerca de 0 o negativa = se mueve por su cuenta y habría diversificado; "
+                "cerca de 1 = es la misma apuesta. Cómo se portaron el oro y la plata en las "
+                "caídas del mercado: 📈 Mercado, sección 6.")
         categories = {t: (metadata.get(t) or {}).get("thesis_category") for t in weights}
         breaches = risk.limit_breaches(weights, categories, LIMITS.get("max_position"),
                                        LIMITS.get("max_per_thesis_category"))
@@ -498,7 +515,8 @@ if not public:
     fred_now = app_data.fred_observations()
     factors = risk.factor_returns(
         {t: indices[t] for t in factor_etfs},
-        bcb.series(fred_now, "DGS10", as_of_risk), bcb.series(fred_now, "DTWEXBGS", as_of_risk))
+        bcb.series(fred_now, "DGS10", as_of_risk), bcb.series(fred_now, "DTWEXBGS", as_of_risk),
+        bcb.series(fred_now, "DCOILWTICO", as_of_risk))
     factors = factors[factors.index >= as_of_risk - pd.DateOffset(years=int(RISK.get("factor_years", 3)))]
     names = [t for t in dict.fromkeys([*held, *studied]) if not indices.get(t, pd.Series()).empty]
     sens = [x for x in (risk.sensitivity(indices[t], factors, t) for t in names) if x]
@@ -530,9 +548,10 @@ if not public:
              + ". " if shared else "")
             + f"Regresión de los rendimientos semanales de {int(RISK.get('factor_years', 3))} "
             "años sobre el mercado, el tipo a 10 años, el dólar, pequeñas − grandes, tecnología − "
-            "mercado y consumo cíclico − defensivo. Es cómo se movieron **juntas en el pasado**, "
-            "no una predicción. «(ruido)» = no distinguible de cero (|t| < "
-            f"{number(float(RISK.get('t_threshold', 2.0)), decimals=0)}). Con seis factores y "
+            "mercado, consumo cíclico − defensivo y el petróleo (WTI). Es cómo se movieron "
+            "**juntas en el pasado**, no una predicción. «(ruido)» = no distinguible de cero "
+            f"(|t| < {number(float(RISK.get('t_threshold', 2.0)), decimals=0)}). Con siete "
+            "factores y "
             "varias empresas, alguna saldrá fiable por azar: úsalo para hacer preguntas a tu "
             "tesis, no para responderlas."
         )
