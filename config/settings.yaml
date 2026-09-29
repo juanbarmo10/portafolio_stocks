@@ -480,6 +480,20 @@ sources:
   insider_activity:
     years: 3
 
+  # --- Propiedad institucional, 13F (ingest/institutional.py, pedido del usuario) ---------
+  # Las posiciones largas de cada gestor con > 100 M USD, trimestrales, 45 días tarde. Un zip
+  # de ~100 MB por ventana de presentación, reducido a las empresas vigiladas y NO guardado.
+  institutional:
+    years: 3
+    ftd_files: 4                 # ficheros de entregas fallidas para el mapa ticker → CUSIP
+
+  # --- Participación retail (ingest/otc_volume.py, pedido del usuario) ---------------------
+  # Volumen semanal fuera de bolsa y fuera de ATS (sobre todo órdenes minoristas internalizadas
+  # por mayoristas), de FINRA. Mide CUÁNTO opera el retail, NO si compra o vende: la dirección
+  # solo existe en datos de pago.
+  otc_volume:
+    years: 3
+
   # --- Segmentos de negocio (ingest/segments.py, §15.5 punto 15) -------------------------
   # Del XBRL de cada 10-Q/10-K: companyfacts y frames no traen hechos con dimensión. Los
   # ingresos usan los mismos conceptos que los fundamentales; el RESULTADO por segmento es una

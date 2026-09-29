@@ -28,8 +28,10 @@ from ingest.base import Ingester
 from ingest.bcb import BcbIngester
 from ingest.fred import FredIngester
 from ingest.insider_activity import InsiderActivityIngester
+from ingest.institutional import InstitutionalIngester
 from ingest.local_fx import LocalFxIngester
 from ingest.macro_calendar import MacroCalendarIngester
+from ingest.otc_volume import OtcVolumeIngester
 from ingest.peers import PeersIngester
 from ingest.ibkr_flex import (
     IbkrFlexIngester,
@@ -60,6 +62,10 @@ INGESTERS: dict[str, tuple[Callable[[Settings], bool], Callable[[Settings], Inge
     "sec_filings": (SecFilingsIngester.is_available, SecFilingsIngester),
     # Insider purchases and sales of the watched companies, as context (user request).
     "insider_activity": (InsiderActivityIngester.is_available, InsiderActivityIngester),
+    # Institutional holdings (13F) of the watched companies (user request).
+    "institutional": (InstitutionalIngester.is_available, InstitutionalIngester),
+    # Retail participation proxy: FINRA weekly off-exchange volume (user request).
+    "otc_volume": (OtcVolumeIngester.is_available, OtcVolumeIngester),
     # Segment revenue and profit from each filing's XBRL (§15.5 point 15).
     "segments": (SegmentsIngester.is_available, SegmentsIngester),
     "short_interest": (ShortInterestIngester.is_available, ShortInterestIngester),
@@ -86,6 +92,7 @@ TABLE_LOADERS: dict[str, Callable[[Any, list[dict]], int]] = {
     "filings": loader.upsert_filings,
     "events": loader.upsert_events,
     "securities": loader.upsert_securities,
+    "filers": loader.upsert_filers,
     "unmapped_actions": loader.upsert_unmapped_actions,
     "universe_membership": loader.upsert_universe_membership,
     # The account tables take a frame rather than records, so they are adapted here

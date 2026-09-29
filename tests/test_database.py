@@ -120,6 +120,7 @@ def test_every_readable_table_matches_the_loader_column_list():
         "unmapped_actions": loader.UNMAPPED_ACTION_COLUMNS,
         "universe_membership": loader.MEMBERSHIP_COLUMNS,
         "companies": loader.COMPANY_COLUMNS,
+        "filers": loader.FILER_COLUMNS,
         "exit_ladder": loader.EXIT_LADDER_COLUMNS,
         "alerts_log": loader.ALERT_LOG_COLUMNS,
     }

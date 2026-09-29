@@ -207,6 +207,11 @@ def companies() -> pd.DataFrame:
     return _table("companies", db_mtime())
 
 
+def filers() -> pd.DataFrame:
+    """Institutional managers that file Form 13F (CIK ↔ name)."""
+    return _table("filers", db_mtime())
+
+
 def universe_membership() -> pd.DataFrame:
     """S&P 500 membership intervals, for breadth (section 9.5)."""
     return _table("universe_membership", db_mtime())
@@ -271,6 +276,22 @@ def source_last_ingest(source: str, mtime: float) -> str | None:
     finally:
         conn.close()
     return str(row[0])[:10] if row and row[0] else None
+
+
+@st.cache_data(show_spinner=False)
+def daily_volume(ticker: str, mtime: float) -> pd.Series:
+    """Daily share volume of one ticker (``volume_raw``), by date."""
+    if not database_ready():
+        return pd.Series(dtype=float)
+    conn = open_connection(db_path())
+    try:
+        rows = read_observations(conn, series_ids=[f"{ticker}:volume_raw"])
+    finally:
+        conn.close()
+    if rows.empty:
+        return pd.Series(dtype=float)
+    return pd.Series(rows["value"].astype(float).to_numpy(),
+                     index=pd.to_datetime(rows["ts"].astype(str).str[:10])).sort_index()
 
 
 def prices_for(tickers: list[str]) -> pd.DataFrame:

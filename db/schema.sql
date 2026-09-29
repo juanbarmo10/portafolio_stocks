@@ -231,3 +231,10 @@ CREATE TABLE IF NOT EXISTS alerts_log (
     fired_at    TEXT NOT NULL,
     payload     TEXT
 );
+
+-- Institutional managers that file Form 13F (section 15.5, user request 2026-09-29): the CIK
+-- is the filer's own, a different registry from the companies'. Only the name is kept.
+CREATE TABLE IF NOT EXISTS filers (
+    cik         TEXT PRIMARY KEY,
+    name        TEXT
+);

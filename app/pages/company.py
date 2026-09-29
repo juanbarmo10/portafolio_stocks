@@ -51,6 +51,7 @@ from core.config import load_settings
 from transform import bcb
 from transform import filing_signals as fs
 from transform import inflection as infl
+from transform import ownership as own
 from transform import insider_activity as ia
 from transform import per_share
 from transform import fundamentals as fun
@@ -1213,6 +1214,99 @@ if short is not None and short.value is not None:
     )
 elif not public:
     st.caption("Sin interés corto de esta empresa (`python run_ingest.py --only short_interest`).")
+
+# Who owns and who trades it (user request, 2026-09-29): institutions from the 13F data sets
+# and a retail-participation proxy from FINRA. Two charts on purpose — quarterly holdings and
+# weekly volume do not share an axis, and retail has no direction to show.
+inst_obs = app_data.observations("sec_13f", app_data.db_mtime())
+if not inst_obs.empty:
+    basic = observations[observations["series_id"] == f"{cik}:basic_shares:q"] \
+        if not observations.empty else pd.DataFrame()
+    outstanding = (pd.Series(basic["value"].astype(float).to_numpy(),
+                             index=pd.to_datetime(basic["ts"].astype(str).str[:10])).sort_index()
+                   if len(basic) else None)
+    registry_filers = app_data.filers()
+    filer_names = dict(zip(registry_filers["cik"], registry_filers["name"])) \
+        if not registry_filers.empty else {}
+    whales = own.institutional(inst_obs, cik, as_of_iso, outstanding, filer_names)
+    if whales is not None and not whales.quarters.empty:
+        st.markdown("**Institucionales (13F)** · posiciones de los gestores con más de 100 M USD, "
+                    "por trimestre")
+        q = whales.quarters.assign(quarter=pd.to_datetime(whales.quarters["quarter"]))
+        last = q[q["complete"]].iloc[-1] if q["complete"].any() else q.iloc[-1]
+        cols = st.columns(3)
+        cols[0].metric("En manos de fondos", pct(last["share_of_company"], decimals=0)
+                       if pd.notna(last["share_of_company"]) else compact_amount(last["shares"]),
+                       help="Acciones declaradas en 13F sobre las acciones básicas del "
+                            "trimestre. Sin cifras de la SEC (NU), el número de acciones.")
+        cols[1].metric("Fondos con posición", f"{int(last['holders']):,}".replace(",", "."))
+        cols[2].metric("Cambio del trimestre", compact_amount(last["change"]) + " acc."
+                       if pd.notna(last["change"]) else MISSING,
+                       help="Acciones en manos de fondos frente al trimestre anterior: la "
+                            "compra (o venta) neta institucional.")
+        altair_chart(
+            alt.Chart(q.dropna(subset=["change"])).mark_bar().encode(
+                x=alt.X("quarter:T", title=None),
+                y=alt.Y("change:Q", title="Compra (+) o venta (−) neta de fondos, acciones"),
+                color=alt.condition("datum.change >= 0", alt.value("#2a78d6"),
+                                    alt.value("#eb6834")),
+                opacity=alt.condition("datum.complete", alt.value(1.0), alt.value(0.4)),
+                tooltip=[alt.Tooltip("quarter:T", title="Trimestre", format="%Y-%m"),
+                         alt.Tooltip("change:Q", title="Acciones", format=",.0f"),
+                         alt.Tooltip("holders:Q", title="Fondos")],
+            ).properties(height=180),
+            width="stretch", amounts=True,
+        )
+        if not whales.movers.empty:
+            top = whales.movers.sort_values("change")
+            buyers = top.tail(5).iloc[::-1]
+            sellers = top.head(5)
+            left, right = st.columns(2)
+            for column, title, frame in ((left, "Más compraron", buyers),
+                                         (right, "Más vendieron", sellers)):
+                column.markdown(f"*{title} · trimestre al {whales.latest}*")
+                column.dataframe(pd.DataFrame({
+                    "Gestor": frame["name"] + frame["entity_change"].map(
+                        lambda flag: " · ¿cambio de entidad?" if flag else ""),
+                    "Acciones": frame["change"].map(lambda v: compact_amount(v)),
+                    "Ahora": frame["after"].map(lambda v: compact_amount(v) if v else "fuera"),
+                }), hide_index=True, width="stretch")
+        st.caption(
+            " ".join(whales.notes)
+            + " Posiciones largas declaradas 45 días después del cierre de cada trimestre; no "
+              "incluye cortos, derivados ni gestores pequeños. El cambio es **neto**: no dice si "
+              "entraron unos y salieron otros. «¿Cambio de entidad?»: una salida y una entrada "
+              "de tamaño parecido con el mismo nombre suelen ser el mismo gestor presentando "
+              "con otra sociedad (Pershing Square en 2026), no una venta y una compra. En "
+              "empresas con varias clases de acción el porcentaje compara una clase con todas. "
+              "Contexto, no señal: no se ha validado que anticipe nada.")
+
+finra_weekly = app_data.observations("finra_otc", app_data.db_mtime())
+if not finra_weekly.empty:
+    daily = app_data.daily_volume(ticker, app_data.db_mtime())
+    retail = own.retail_participation(finra_weekly, daily, ticker, as_of_iso)
+    if not retail.empty:
+        st.markdown("**Participación retail** · volumen semanal fuera de bolsa y fuera de "
+                    "ATS, sobre el total")
+        altair_chart(
+            alt.Chart(retail.tail(156)).mark_line(color="#8e6bd8").encode(
+                x=alt.X("week:T", title=None),
+                y=alt.Y("otc_share:Q", title="Parte del volumen", axis=alt.Axis(format="%")),
+                tooltip=[alt.Tooltip("week:T", title="Semana"),
+                         alt.Tooltip("otc_share:Q", title="Fuera de bolsa (retail)",
+                                     format=".1%"),
+                         alt.Tooltip("ats_share:Q", title="ATS", format=".1%")],
+            ).properties(height=160),
+            width="stretch",
+        )
+        st.caption(
+            f"Última semana publicada: {retail.iloc[-1]['week']:%Y-%m-%d}, "
+            f"{pct(retail.iloc[-1]['otc_share'], decimals=0)} del volumen. Ese volumen lo "
+            "ejecutan sobre todo mayoristas (Citadel Securities, Virtu, G1…) que reciben las "
+            "órdenes minoristas, así que mide **cuánto opera el retail, no si compra o vende**: "
+            "la dirección solo existe en datos de pago. Un pico suele acompañar a noticias o a "
+            "movimientos grandes del precio. FINRA publica cada semana con 2-4 semanas de "
+            "retraso.")
 
 # --- 5. Value accrual -----------------------------------------------------------------
 

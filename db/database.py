@@ -314,6 +314,7 @@ READABLE_TABLES: dict[str, tuple[list[str], str]] = {
          "sic", "sic_description"],
         "cik",
     ),
+    "filers": (["cik", "name"], "cik"),
     "exit_ladder": (["rule_id", "cik", "kind", "trigger", "action", "created_at"], "rule_id"),
     "alerts_log": (["alert_id", "rule_id", "fired_at", "payload"], "fired_at"),
 }

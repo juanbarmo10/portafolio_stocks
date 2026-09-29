@@ -343,6 +343,15 @@ def upsert_unmapped_actions(conn: sqlite3.Connection, rows: list[dict[str, Any]]
     )
 
 
+FILER_COLUMNS = ["cik", "name"]
+
+
+def upsert_filers(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
+    """Upsert 13F filers (institutional managers): CIK and name, the name mutable."""
+    return _upsert(conn, "filers", ("cik",), FILER_COLUMNS,
+                   _to_records(rows, FILER_COLUMNS), False, "filers")
+
+
 def upsert_securities(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
     """Upsert the security master, keyed by IBKR's permanent ``conid`` (section 9.3).
 
