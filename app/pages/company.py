@@ -173,8 +173,8 @@ left, right = st.columns([1, 1])
 with left:
     ticker = st.selectbox(
         "Empresa", sorted(by_ticker), index=0,
-        # A company under study that is ALSO held says both (found 2026-09-29: DUOL, HIMS
-        # and NU were bought on 09-28 and the selector still read "en estudio").
+        # A company under study that is ALSO held says both (found 2026-09-29: a bought
+        # watchlist company still read "en estudio").
         format_func=lambda t: (f"{t} · en cartera, sin ficha" if t in held_no_card else
                                f"{t} · en estudio · en cartera" if t in under_study
                                and t in held_all else
