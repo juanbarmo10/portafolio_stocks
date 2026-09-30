@@ -62,11 +62,22 @@ class Lab:
         finally:
             conn.close()
 
+    def _key(self) -> str:
+        """Database version + the set of tickers: a company added to the watchlist or a new
+        theme ETF must rebuild the frames even if the database did not change."""
+        if "_key" not in self._memo:
+            import hashlib  # noqa: PLC0415
+            tickers = ",".join(sorted(set(self.intervals()["ticker"])
+                                      | set(self.reference_tickers())))
+            digest = hashlib.sha1(tickers.encode()).hexdigest()[:8]
+            self._memo["_key"] = f"{self._stamp}_{digest}"
+        return self._memo["_key"]
+
     def _disk(self, name: str, build):
-        """``build()`` once per database version, pickled in the cache directory."""
+        """``build()`` once per database version and ticker set, pickled in the cache."""
         if name in self._memo:
             return self._memo[name]
-        path = self.cache_dir / f"{name}_{self._stamp}.pkl"
+        path = self.cache_dir / f"{name}_{self._key()}.pkl"
         if path.exists():
             value = pickle.loads(path.read_bytes())
         else:
@@ -100,11 +111,26 @@ class Lab:
                 c, series_ids=[f"{t}:close_raw" for t in tickers]))
         return self._disk("raw_closes", build)
 
+    def held(self) -> list[str]:
+        """Tickers in the latest IBKR statement (read from the database, never written)."""
+        if "held" not in self._memo:
+            from transform import portfolio  # noqa: PLC0415
+            account = self._query(lambda c: read_observations(c, source="ibkr"))
+            positions = portfolio.latest_positions(account) if not account.empty else None
+            self._memo["held"] = [] if positions is None or positions.empty \
+                else list(positions["ticker"])
+        return self._memo["held"]
+
     def reference_tickers(self) -> list[str]:
-        """Market references (SPY, sectors, metals…) plus the researched companies."""
+        """Market references (SPY, sectors, metals…), the researched companies, what is held,
+        the themes' ETFs and the sector groups: everything the panel stores a price for
+        outside the S&P 500 membership."""
         written = [str(c["ticker"]) for c in self.settings.researched_companies
                    if c.get("ticker")]
-        return list(dict.fromkeys([*self.settings.market_references, *written]))
+        themes = [t.etf for t in self.settings.themes]
+        groups = [t for g in self.settings.sector_groups.values() for t in g]
+        return list(dict.fromkeys([*self.settings.market_references, *written, *self.held(),
+                                   *themes, *groups]))
 
     def calendar(self) -> pd.DatetimeIndex:
         """The benchmark's sessions: the clock every frame is aligned to."""

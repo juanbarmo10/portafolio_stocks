@@ -46,6 +46,12 @@ postgres = [
     "psycopg[binary]>=3.1,<4",
 ]
 # Development tooling.
+# Guía interactiva y laboratorio de reglas (experimentos/guia.py): figuras y celdas #%% de
+# VS Code. Solo para estudiar en local; ni el panel ni la CI lo necesitan.
+guia = [
+    "matplotlib>=3.8",
+    "ipykernel>=6.29",
+]
 dev = [
     "pytest>=8.0,<9",
     "ruff>=0.3,<1",

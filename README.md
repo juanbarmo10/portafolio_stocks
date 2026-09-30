@@ -398,7 +398,11 @@ python run_lab.py aportes brake --param variant=V2_tendencia
 python run_lab.py registro                                 # todo lo probado, con BH global
 ```
 
-Para experimentos en Python, `experimentos/plantilla.py`. El laboratorio aplica solo las
+Para experimentos en Python, `experimentos/plantilla.py`. Y **`experimentos/guia.py`** es una
+guía interactiva: celdas `# %%` de VS Code con explicaciones en markdown, tablas de pandas y
+gráficas de matplotlib para cada concepto del panel (point-in-time, precio crudo y ajustado,
+macro, semáforo, sectores, empresa, cartera, validación estadística…), cada una con una
+función de parámetros sencillos. Requiere `pip install -e ".[guia]"`. El laboratorio aplica solo las
 reglas de la casa:
 - los datos macro se leen por fecha de publicación y los fundamentales por fecha de
   presentación;
