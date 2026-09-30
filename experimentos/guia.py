@@ -951,12 +951,18 @@ por_accion()
 # de un segmento, se nombra y no se empalma.
 
 # %%
-def segmentos(ticker="UBER"):
+def segmentos(ticker=None):
+    """``ticker=None``: la primera de tus empresas (cartera y estudio) con segmentos."""
     from transform import segments
-    c = cik(ticker)
-    vista = segments.assess(obs(source="sec_segments"), c, HOY,
-                            S.source("sec")["concepts"]["revenue"]["tags"],
-                            S.source("segments")["profit_concepts"]) if c else None
+    datos = obs(source="sec_segments")
+    candidatos = [ticker] if ticker else list(dict.fromkeys(MIS_ACCIONES + EN_ESTUDIO))
+    vista = None
+    for ticker in candidatos:
+        c = cik(ticker)
+        vista = segments.assess(datos, c, HOY, S.source("sec")["concepts"]["revenue"]["tags"],
+                                S.source("segments")["profit_concepts"]) if c else None
+        if vista is not None and len(vista.members) > 1:
+            break
     if vista is None:
         print(f"{ticker}: sin segmentos etiquetados")
         return None
@@ -966,7 +972,7 @@ def segmentos(ticker="UBER"):
     return vista.table
 
 
-segmentos("UBER" if "UBER" in MIS_ACCIONES + EN_ESTUDIO else (MIS_ACCIONES or ["MSFT"])[0])
+segmentos()
 
 # %% [markdown]
 # ### 5.8 Salud financiera de un grupo de sector (mineras de plata)
